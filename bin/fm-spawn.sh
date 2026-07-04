@@ -785,11 +785,21 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$T" 'treehouse get'
 
   # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
+  # Compare CANONICALIZED paths: the backend reports the pane's real cwd (e.g. tmux's
+  # #{pane_current_path} resolves symlinks), while PROJ_ABS was built with `pwd` and can
+  # still carry a symlink component (on macOS /tmp -> /private/tmp, /var -> /private/var).
+  # Comparing the raw strings would then read as "already moved" while the pane is still
+  # at the project, setting WT to the project dir and tripping validate_spawn_worktree's
+  # isolation check. Canonicalize both sides so the loop tracks a genuine cwd change.
+  PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL=$PROJ_ABS
   for _ in $(seq 1 60); do
     p=$(spawn_current_path "$T" || true)
-    if [ -n "$p" ] && [ "$p" != "$PROJ_ABS" ]; then
-      WT="$p"
-      break
+    if [ -n "$p" ]; then
+      p_real=$(cd "$p" 2>/dev/null && pwd -P) || p_real=$p
+      if [ "$p_real" != "$PROJ_ABS_REAL" ]; then
+        WT="$p"
+        break
+      fi
     fi
     sleep 1
   done

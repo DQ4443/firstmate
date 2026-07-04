@@ -307,13 +307,22 @@ log_reports_ci_ready() {
 # "<status> <branch> <short-sha> <date> [<pr-url>]" separated by runs of
 # spaces (verified: no quoting, so splitting on the first two whitespace runs
 # is exact) - but branch + coarse status is exactly what this predicate needs:
-# is a run for THIS branch active right now. Echoes the first (most recent)
-# matching row's status word (running/completed/cancelled/failed), or empty
-# when the branch has no run within FM_CREW_STATE_RUNS_LIMIT rows.
-nm_runs_status_for_branch() {  # <branch>
+# is a run for THIS branch active right now. Sets COARSE_STATUS to the first
+# (most recent) matching row's status word (running/completed/cancelled/failed),
+# or empty when the branch has no run within FM_CREW_STATE_RUNS_LIMIT rows.
+# Results come back through globals rather than stdout because the retry loop
+# below also needs NM_RUNS_RESPONDED - whether the bounded `no-mistakes runs`
+# call produced any output at all - and a command-substitution subshell could
+# not report that second fact. `no-mistakes runs` always emits text when the
+# CLI is alive (even with zero runs it prints a "no runs" line), so an empty
+# capture reliably means the call timed out, never a legitimate empty answer.
+nm_runs_status_for_branch() {  # <branch>; sets COARSE_STATUS + NM_RUNS_RESPONDED
   local branch=$1 out row st rest br
+  COARSE_STATUS=""
+  NM_RUNS_RESPONDED=0
   out=$(nm_run runs --limit "$FM_CREW_STATE_RUNS_LIMIT")
   [ -n "$out" ] || return 0
+  NM_RUNS_RESPONDED=1
   while IFS= read -r row; do
     row=$(trim "$row")
     [ -n "$row" ] || continue
@@ -322,7 +331,7 @@ nm_runs_status_for_branch() {  # <branch>
     rest=$(trim "$rest")
     br=${rest%% *}
     if [ "$br" = "$branch" ]; then
-      printf '%s' "$st"
+      COARSE_STATUS=$st
       return 0
     fi
   done <<< "$out"
@@ -340,28 +349,68 @@ HAVE_RUN=0
 # run-step block below skips the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
 COARSE_STATUS=""
+NM_RUNS_RESPONDED=0
+# Bounded retry/backoff around the run-attribution lookup. During an actively
+# running pipeline the bounded no-mistakes calls can lose a race - time out to
+# empty (the CLI is busy serving the run) - and leave HAVE_RUN=0. The caller
+# would then fall through to the possibly-stale status log, which defeats the
+# watcher's provably-working absorption and surfaces a validating crew as
+# stale every poll (per-minute false stale wakes during long validations).
+# Re-attempt a few times with a short backoff before accepting a
+# non-authoritative verdict. Only an unresponsive attempt is retried, and an
+# empty result from EITHER bounded call - `axi status` or the coarse
+# `no-mistakes runs` list - is that timeout/race signature, because both
+# commands emit non-empty text whenever the CLI is alive (`runs` prints a "no
+# runs" line even with zero runs). An attempt is authoritative (no retry) only
+# when every call that left HAVE_RUN=0 actually answered: `axi status`
+# reported another branch's run AND the coarse runs list answered with no row
+# for this branch. That definitive "no run for this branch" breaks the loop
+# without retrying, because retrying cannot change an authoritative answer and
+# would only add hot-path latency for the steady-state implementing crew
+# (branch created, validation not yet started).
+# This is the upstream replacement for the local state/.crew-state-retry.sh
+# (FM_CREW_STATE_BIN) production mitigation, which wrapped this whole helper
+# with the same retry-until-run-step/pane semantics.
+# With FM_CREW_STATE_RETRIES=0 the loop runs exactly once, byte-identical to the
+# original single-attempt behavior (used by the test suite to stay fast).
+CREW_STATE_RETRIES=${FM_CREW_STATE_RETRIES:-2}
+case "$CREW_STATE_RETRIES" in ''|*[!0-9]*) CREW_STATE_RETRIES=2 ;; esac
+CREW_STATE_RETRY_DELAY=${FM_CREW_STATE_RETRY_DELAY:-2}
+case "$CREW_STATE_RETRY_DELAY" in ''|*[!0-9]*) CREW_STATE_RETRY_DELAY=2 ;; esac
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
-  RUN_OUT=$(nm_run axi status)
-  if [ -n "$RUN_OUT" ]; then
-    run_branch=$(strip_quotes "$(nm_field branch)")
-    if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
-      HAVE_RUN=1
-    else
-      # The active-or-most-recent run is for another branch (the CLI is alive
-      # and answered; only the attribution missed) - try the coarse fallback.
-      # Deliberately nested inside `[ -n "$RUN_OUT" ]`: an empty/timed-out
-      # primary call means the CLI itself did not respond, so retrying it
-      # immediately with a second bounded call would just double the wait
-      # for no better answer.
-      COARSE_STATUS=$(nm_runs_status_for_branch "$CREW_BRANCH")
-      if [ -n "$COARSE_STATUS" ]; then
+  attempt=0
+  while : ; do
+    cli_responded=0
+    RUN_OUT=$(nm_run axi status)
+    if [ -n "$RUN_OUT" ]; then
+      cli_responded=1
+      run_branch=$(strip_quotes "$(nm_field branch)")
+      if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
         HAVE_RUN=1
-        RUN_SOURCE=coarse
+      else
+        # The active-or-most-recent run is for another branch (the CLI is alive
+        # and answered; only the attribution missed) - try the coarse fallback.
+        # Deliberately nested inside `[ -n "$RUN_OUT" ]`: an empty/timed-out
+        # primary call means the CLI itself did not respond within this attempt,
+        # so the coarse re-query would just double the wait; the retry loop below
+        # is what gives the CLI another chance after a backoff instead.
+        nm_runs_status_for_branch "$CREW_BRANCH"
+        if [ -n "$COARSE_STATUS" ]; then
+          HAVE_RUN=1
+          RUN_SOURCE=coarse
+        elif [ "$NM_RUNS_RESPONDED" = 0 ]; then
+          cli_responded=0
+        fi
       fi
     fi
-  fi
+    [ "$HAVE_RUN" = 1 ] && break
+    [ "$cli_responded" = 0 ] || break
+    [ "$attempt" -lt "$CREW_STATE_RETRIES" ] || break
+    attempt=$((attempt + 1))
+    [ "$CREW_STATE_RETRY_DELAY" -gt 0 ] && sleep "$CREW_STATE_RETRY_DELAY"
+  done
 fi
 
 # --- run-step authoritative path -------------------------------------------

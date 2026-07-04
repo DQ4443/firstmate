@@ -94,10 +94,14 @@ SH
 # --- deterministic git identity and fixtures --------------------------------
 
 # fm_git_identity [name] [email]: export a fixed author/committer identity so
-# fixture commits never depend on the host git config.
+# fixture commits never depend on the host git config. Also neutralizes the
+# host's core.excludesFile: a global ignore that matches fixture files (e.g. a
+# ~/.gitignore_global ignoring `.gitignore` itself) would silently drop them
+# from fixture commits and break check-ignore-based guards under test.
 fm_git_identity() {
   export GIT_AUTHOR_NAME=${1:-fmtest} GIT_AUTHOR_EMAIL=${2:-fmtest@example.invalid}
   export GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_COMMITTER_EMAIL=$GIT_AUTHOR_EMAIL
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0=/dev/null
 }
 
 # fm_git_init_commit <dir>: create a git repo at <dir> with a README and one
