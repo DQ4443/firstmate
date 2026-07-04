@@ -790,15 +790,18 @@ EOF
 # possibly-stale status log (which defeated the watcher's provably-working
 # absorption and caused per-minute false stale wakes). A stateful fake returns
 # empty on the first call, then this branch's run.
-race_recovery_fakebin() {  # <case-dir> <empty-until>
-  local d=$1 empty_until=$2 fb="$1/fakebin"
+race_recovery_fakebin() {  # <case-dir> <empty-until> [<runs-empty-until>]
+  local d=$1 empty_until=$2 runs_empty_until=${3:-0} fb="$1/fakebin"
   mkdir -p "$fb"
   : > "$d/calln"
+  : > "$d/runs-calln"
   cat > "$fb/no-mistakes" <<SH
 #!/usr/bin/env bash
 set -u
 calln="$d/calln"
 empty_until=$empty_until
+runs_calln="$d/runs-calln"
+runs_empty_until=$runs_empty_until
 SH
   cat >> "$fb/no-mistakes" <<'SH'
 case "${1:-}" in
@@ -808,7 +811,10 @@ case "${1:-}" in
       [ "$n" -le "$empty_until" ] && exit 0   # race lost on this attempt: empty
       printf '%s\n' "${FM_FAKE_AXI_STATUS:-}"
     fi ;;
-  runs) printf '%s\n' "${FM_FAKE_RUNS_LIST:-}" ;;
+  runs)
+    n=$(cat "$runs_calln" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$runs_calln"
+    [ "$n" -le "$runs_empty_until" ] && exit 0   # coarse race lost: empty
+    printf '%s\n' "${FM_FAKE_RUNS_LIST:-}" ;;
 esac
 exit 0
 SH
@@ -849,13 +855,48 @@ test_retry_recovers_raced_run_lookup() {
   pass "bounded retry recovers a run lookup that lost the race against an active pipeline"
 }
 
-# Retry-scope regression: only the empty/timed-out `axi status` signature is
-# retried. When the CLI answers with another branch's run and the authoritative
-# runs list has no row for this branch, that is a definitive "no run for this
-# branch" - the steady state of every implementing ship crew - so the lookup
-# must make exactly ONE `axi status` call, never burning retries and backoff
-# sleeps on an answer that cannot change. The same call-counting fake then pins
-# the counterfactual: an empty first attempt still retries and recovers.
+# The same race can hit the COARSE call instead: `axi status` answers with
+# another branch's run (the CLI is alive), but the bounded `no-mistakes runs`
+# list itself times out to empty on this attempt. Empty runs output is the
+# timeout signature - the real command always prints text when the CLI is
+# alive, even with zero runs - so the attempt must count as unresponsive and
+# retry, never be mistaken for an authoritative "no run for this branch".
+# Otherwise a validating crew whose active run is not the repo's most recent
+# one (concurrent multi-crew validations, the motivating busy-CLI scenario)
+# falls through to the possibly-stale log and false-surfaces.
+test_retry_recovers_raced_coarse_runs_lookup() {
+  reset_fakes
+  local d out; d=$(new_case retry-recovers-coarse)
+  make_repo_on_branch "$d/wt" fm/feat-coarse
+  race_recovery_fakebin "$d" 0 1
+  fm_write_meta "$d/state/feat-coarse.meta" "window=fm:fm-feat-coarse" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_running fm/other-crew)"
+  FM_FAKE_RUNS_LIST="  running    fm/feat-coarse bbbbbbb  2026-07-02 22:05"
+  FM_FAKE_BUSY=0
+  # With retries on, the second attempt's runs list answers and attributes this
+  # branch's own run: working / run-step (via the coarse fallback).
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=2 FM_CREW_STATE_RETRY_DELAY=0 "$CREW_STATE" feat-coarse)
+  assert_contains "$out" "state: working" "retry recovered the raced coarse runs lookup (working)"
+  assert_contains "$out" "source: run-step" "coarse-recovered run -> run-step source"
+
+  # With retries OFF, the same first-runs-call-empty race is NOT recovered,
+  # pinning the retry as the load-bearing fix on this path too.
+  race_recovery_fakebin "$d" 0 1
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=0 "$CREW_STATE" feat-coarse)
+  assert_not_contains "$out" "source: run-step" "without retry the raced coarse lookup is not recovered"
+  pass "bounded retry covers a coarse runs-list call that lost the race"
+}
+
+# Retry-scope regression: only the empty/timed-out signature (from either
+# bounded call) is retried. When the CLI answers with another branch's run AND
+# the authoritative runs list answers with rows but none for this branch, that
+# is a definitive "no run for this branch" - the steady state of every
+# implementing ship crew - so the lookup must make exactly ONE `axi status`
+# call, never burning retries and backoff sleeps on an answer that cannot
+# change. The same call-counting fake then pins the counterfactual: an empty
+# first attempt still retries and recovers.
 test_authoritative_no_run_answer_not_retried() {
   reset_fakes
   local d out calls; d=$(new_case no-retry-authoritative)
@@ -917,6 +958,7 @@ test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_not_provably_working_when_stopped
 test_retry_recovers_raced_run_lookup
+test_retry_recovers_raced_coarse_runs_lookup
 test_authoritative_no_run_answer_not_retried
 test_usage_error
 
