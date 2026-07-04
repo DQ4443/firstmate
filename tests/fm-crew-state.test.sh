@@ -849,6 +849,38 @@ test_retry_recovers_raced_run_lookup() {
   pass "bounded retry recovers a run lookup that lost the race against an active pipeline"
 }
 
+# Retry-scope regression: only the empty/timed-out `axi status` signature is
+# retried. When the CLI answers with another branch's run and the authoritative
+# runs list has no row for this branch, that is a definitive "no run for this
+# branch" - the steady state of every implementing ship crew - so the lookup
+# must make exactly ONE `axi status` call, never burning retries and backoff
+# sleeps on an answer that cannot change. The same call-counting fake then pins
+# the counterfactual: an empty first attempt still retries and recovers.
+test_authoritative_no_run_answer_not_retried() {
+  reset_fakes
+  local d out calls; d=$(new_case no-retry-authoritative)
+  make_repo_on_branch "$d/wt" fm/feat-norun
+  race_recovery_fakebin "$d" 0
+  fm_write_meta "$d/state/feat-norun.meta" "window=fm:fm-feat-norun" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_running fm/other-crew)"
+  FM_FAKE_RUNS_LIST="  running    fm/other-crew aaaaaaa  2026-07-02 22:10"
+  FM_FAKE_BUSY=0
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=2 FM_CREW_STATE_RETRY_DELAY=0 "$CREW_STATE" feat-norun)
+  assert_not_contains "$out" "source: run-step" "another branch's run is not attributed to this crew"
+  calls=$(cat "$d/calln" 2>/dev/null || echo 0)
+  [ "$calls" -eq 1 ] || fail "authoritative no-run answer must not be retried (got $calls axi status calls)"
+
+  race_recovery_fakebin "$d" 1
+  FM_FAKE_AXI_STATUS="$(run_running fm/feat-norun)"
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=2 FM_CREW_STATE_RETRY_DELAY=0 "$CREW_STATE" feat-norun)
+  assert_contains "$out" "source: run-step" "empty/timed-out attempt is still retried and recovered"
+  calls=$(cat "$d/calln" 2>/dev/null || echo 0)
+  [ "$calls" -eq 2 ] || fail "empty attempt should retry once then recover (got $calls axi status calls)"
+  pass "authoritative no-run answer breaks without retrying; empty attempts still retry"
+}
+
 # Usage error (no id) is the one non-zero exit.
 test_usage_error() {
   reset_fakes
@@ -885,6 +917,7 @@ test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_not_provably_working_when_stopped
 test_retry_recovers_raced_run_lookup
+test_authoritative_no_run_answer_not_retried
 test_usage_error
 
 echo "all fm-crew-state tests passed"

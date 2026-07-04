@@ -342,15 +342,22 @@ RUN_SOURCE=full
 COARSE_STATUS=""
 # Bounded retry/backoff around the run-attribution lookup. During an actively
 # running pipeline the bounded `no-mistakes axi status` call can lose a race -
-# time out to empty (the CLI is busy serving the run), or return another crew's
-# run before this branch's on a shared multi-crew repo - and leave HAVE_RUN=0.
+# time out to empty (the CLI is busy serving the run) - and leave HAVE_RUN=0.
 # The caller would then fall through to the possibly-stale status log, which
 # defeats the watcher's provably-working absorption and surfaces a validating
 # crew as stale every poll (per-minute false stale wakes during long
 # validations). Re-attempt a few times with a short backoff before accepting a
-# non-authoritative verdict. This is the upstream replacement for the local
-# state/.crew-state-retry.sh (FM_CREW_STATE_BIN) production mitigation, which
-# wrapped this whole helper with the same retry-until-run-step/pane semantics.
+# non-authoritative verdict. Only an empty/unresponsive `axi status` attempt is
+# retried - that timeout-to-empty signature IS the race this loop exists to
+# cover. When the CLI answered (non-empty output) but attribution still failed,
+# it reported another branch's run and the authoritative coarse runs-list
+# lookup found no run for this branch: that is a definitive "no run for this
+# branch", so the loop breaks without retrying, because retrying cannot change
+# an authoritative answer and would only add hot-path latency for the
+# steady-state implementing crew (branch created, validation not yet started).
+# This is the upstream replacement for the local state/.crew-state-retry.sh
+# (FM_CREW_STATE_BIN) production mitigation, which wrapped this whole helper
+# with the same retry-until-run-step/pane semantics.
 # With FM_CREW_STATE_RETRIES=0 the loop runs exactly once, byte-identical to the
 # original single-attempt behavior (used by the test suite to stay fast).
 CREW_STATE_RETRIES=${FM_CREW_STATE_RETRIES:-2}
@@ -362,8 +369,10 @@ case "$CREW_STATE_RETRY_DELAY" in ''|*[!0-9]*) CREW_STATE_RETRY_DELAY=2 ;; esac
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
   attempt=0
   while : ; do
+    cli_responded=0
     RUN_OUT=$(nm_run axi status)
     if [ -n "$RUN_OUT" ]; then
+      cli_responded=1
       run_branch=$(strip_quotes "$(nm_field branch)")
       if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
         HAVE_RUN=1
@@ -382,6 +391,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
       fi
     fi
     [ "$HAVE_RUN" = 1 ] && break
+    [ "$cli_responded" = 0 ] || break
     [ "$attempt" -lt "$CREW_STATE_RETRIES" ] || break
     attempt=$((attempt + 1))
     [ "$CREW_STATE_RETRY_DELAY" -gt 0 ] && sleep "$CREW_STATE_RETRY_DELAY"
