@@ -340,28 +340,52 @@ HAVE_RUN=0
 # run-step block below skips the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
 COARSE_STATUS=""
+# Bounded retry/backoff around the run-attribution lookup. During an actively
+# running pipeline the bounded `no-mistakes axi status` call can lose a race -
+# time out to empty (the CLI is busy serving the run), or return another crew's
+# run before this branch's on a shared multi-crew repo - and leave HAVE_RUN=0.
+# The caller would then fall through to the possibly-stale status log, which
+# defeats the watcher's provably-working absorption and surfaces a validating
+# crew as stale every poll (per-minute false stale wakes during long
+# validations). Re-attempt a few times with a short backoff before accepting a
+# non-authoritative verdict. This is the upstream replacement for the local
+# state/.crew-state-retry.sh (FM_CREW_STATE_BIN) production mitigation, which
+# wrapped this whole helper with the same retry-until-run-step/pane semantics.
+# With FM_CREW_STATE_RETRIES=0 the loop runs exactly once, byte-identical to the
+# original single-attempt behavior (used by the test suite to stay fast).
+CREW_STATE_RETRIES=${FM_CREW_STATE_RETRIES:-2}
+case "$CREW_STATE_RETRIES" in ''|*[!0-9]*) CREW_STATE_RETRIES=2 ;; esac
+CREW_STATE_RETRY_DELAY=${FM_CREW_STATE_RETRY_DELAY:-2}
+case "$CREW_STATE_RETRY_DELAY" in ''|*[!0-9]*) CREW_STATE_RETRY_DELAY=2 ;; esac
 # Scouts and secondmates never drive a no-mistakes validation of their own
 # worktree, so skip the lookup for them and read state from pane/log directly.
 if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
-  RUN_OUT=$(nm_run axi status)
-  if [ -n "$RUN_OUT" ]; then
-    run_branch=$(strip_quotes "$(nm_field branch)")
-    if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
-      HAVE_RUN=1
-    else
-      # The active-or-most-recent run is for another branch (the CLI is alive
-      # and answered; only the attribution missed) - try the coarse fallback.
-      # Deliberately nested inside `[ -n "$RUN_OUT" ]`: an empty/timed-out
-      # primary call means the CLI itself did not respond, so retrying it
-      # immediately with a second bounded call would just double the wait
-      # for no better answer.
-      COARSE_STATUS=$(nm_runs_status_for_branch "$CREW_BRANCH")
-      if [ -n "$COARSE_STATUS" ]; then
+  attempt=0
+  while : ; do
+    RUN_OUT=$(nm_run axi status)
+    if [ -n "$RUN_OUT" ]; then
+      run_branch=$(strip_quotes "$(nm_field branch)")
+      if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
         HAVE_RUN=1
-        RUN_SOURCE=coarse
+      else
+        # The active-or-most-recent run is for another branch (the CLI is alive
+        # and answered; only the attribution missed) - try the coarse fallback.
+        # Deliberately nested inside `[ -n "$RUN_OUT" ]`: an empty/timed-out
+        # primary call means the CLI itself did not respond within this attempt,
+        # so the coarse re-query would just double the wait; the retry loop below
+        # is what gives the CLI another chance after a backoff instead.
+        COARSE_STATUS=$(nm_runs_status_for_branch "$CREW_BRANCH")
+        if [ -n "$COARSE_STATUS" ]; then
+          HAVE_RUN=1
+          RUN_SOURCE=coarse
+        fi
       fi
     fi
-  fi
+    [ "$HAVE_RUN" = 1 ] && break
+    [ "$attempt" -lt "$CREW_STATE_RETRIES" ] || break
+    attempt=$((attempt + 1))
+    [ "$CREW_STATE_RETRY_DELAY" -gt 0 ] && sleep "$CREW_STATE_RETRY_DELAY"
+  done
 fi
 
 # --- run-step authoritative path -------------------------------------------

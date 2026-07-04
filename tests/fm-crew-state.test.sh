@@ -36,6 +36,14 @@ CREW_STATE="$ROOT/bin/fm-crew-state.sh"
 TMP_ROOT=$(fm_test_tmproot fm-crew-state)
 fm_git_identity fmtest fmtest@example.invalid
 
+# The helper now retries the bounded run-attribution lookup with a backoff before
+# accepting a non-authoritative verdict (the fix for the race that surfaced
+# validating crews as stale every poll). These hermetic fakes are deterministic,
+# so a retry never changes the outcome - it would only add real sleeps. Pin the
+# backoff to 0 so the suite stays fast; the dedicated retry cases below set their
+# own FM_CREW_STATE_RETRIES to exercise the loop explicitly.
+export FM_CREW_STATE_RETRY_DELAY=0
+
 # A real git repo checked out on <branch>, so the helper's branch attribution
 # (git symbolic-ref) resolves like it would for a live crew worktree.
 make_repo_on_branch() {  # <dir> <branch>
@@ -672,15 +680,21 @@ SH
   toolbin=$(make_no_timeout_toolbin "$d")
   fm_write_meta "$d/state/feat-timeout.meta" "window=fm:fm-feat-timeout" "worktree=$d/wt" "kind=ship"
   FM_FAKE_BUSY=1
+  # A hanging no-mistakes: the perl bound must cap EACH attempt at NM_TIMEOUT, and
+  # the run-attribution retry (2 extra attempts, no backoff here) must still fire on
+  # the timed-out-to-empty path - that empty result IS the race the retry exists to
+  # cover. So the CLI is called 1 + FM_CREW_STATE_RETRIES times, each perl-bounded,
+  # and the total stays bounded (never the unbounded hang).
   start=$SECONDS
-  out=$(FM_FAKE_NM_CALLS="$calls_file" PATH="$d/fakebin:$toolbin" FM_STATE_OVERRIDE="$d/state" FM_CREW_STATE_NM_TIMEOUT=1 "$CREW_STATE" feat-timeout)
+  out=$(FM_FAKE_NM_CALLS="$calls_file" PATH="$d/fakebin:$toolbin" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_NM_TIMEOUT=1 FM_CREW_STATE_RETRIES=2 FM_CREW_STATE_RETRY_DELAY=0 "$CREW_STATE" feat-timeout)
   elapsed=$((SECONDS - start))
   assert_contains "$out" "state: working" "timed-out no-mistakes falls back to pane"
   assert_contains "$out" "source: pane" "timed-out no-mistakes -> pane source"
-  [ "$elapsed" -lt 5 ] || fail "perl timeout did not bound no-mistakes calls (elapsed ${elapsed}s)"
+  [ "$elapsed" -lt 8 ] || fail "perl timeout did not bound no-mistakes calls (elapsed ${elapsed}s)"
   calls=$(awk 'END { print NR + 0 }' "$calls_file" 2>/dev/null || echo 0)
-  [ "$calls" -eq 1 ] || fail "empty no-mistakes status triggered extra lookups ($calls calls)"
-  pass "no timeout command uses perl bound"
+  [ "$calls" -eq 3 ] || fail "retry should re-attempt the timed-out lookup 1+2 times (got $calls calls)"
+  pass "no timeout command uses perl bound; retry re-attempts the timed-out lookup within the bound"
 }
 
 # (i) kind=scout skips the run lookup entirely (its deliverable is a report).
@@ -769,6 +783,72 @@ EOF
   pass "crew_is_provably_working still surfaces a genuinely stopped crew (safety property preserved)"
 }
 
+# Bug-5 regression: the bounded run-attribution lookup can lose a race against an
+# actively-running pipeline (the CLI is busy and `axi status` times out to empty).
+# The retry/backoff must re-attempt and recover this crew's own run-step, so a
+# validating crew reads `working / run-step` instead of falling through to the
+# possibly-stale status log (which defeated the watcher's provably-working
+# absorption and caused per-minute false stale wakes). A stateful fake returns
+# empty on the first call, then this branch's run.
+race_recovery_fakebin() {  # <case-dir> <empty-until>
+  local d=$1 empty_until=$2 fb="$1/fakebin"
+  mkdir -p "$fb"
+  : > "$d/calln"
+  cat > "$fb/no-mistakes" <<SH
+#!/usr/bin/env bash
+set -u
+calln="$d/calln"
+empty_until=$empty_until
+SH
+  cat >> "$fb/no-mistakes" <<'SH'
+case "${1:-}" in
+  axi)
+    if [ "${2:-}" = status ] && [ "${3:-}" != --run ]; then
+      n=$(cat "$calln" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$calln"
+      [ "$n" -le "$empty_until" ] && exit 0   # race lost on this attempt: empty
+      printf '%s\n' "${FM_FAKE_AXI_STATUS:-}"
+    fi ;;
+  runs) printf '%s\n' "${FM_FAKE_RUNS_LIST:-}" ;;
+esac
+exit 0
+SH
+  cat > "$fb/tmux" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-}" in
+  display-message) printf '%%1\n' ;;
+  capture-pane)
+    if [ "${FM_FAKE_BUSY:-0}" = 1 ]; then printf 'work\nesc to interrupt\n'; else printf 'quiet\n> \n'; fi ;;
+esac
+exit 0
+SH
+  chmod +x "$fb/no-mistakes" "$fb/tmux"
+}
+
+test_retry_recovers_raced_run_lookup() {
+  reset_fakes
+  local d out; d=$(new_case retry-recovers)
+  make_repo_on_branch "$d/wt" fm/feat-race
+  race_recovery_fakebin "$d" 1
+  fm_write_meta "$d/state/feat-race.meta" "window=fm:fm-feat-race" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_running fm/feat-race)"
+  FM_FAKE_BUSY=0
+  # With retries on, the second attempt attributes the run: working / run-step.
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=2 FM_CREW_STATE_RETRY_DELAY=0 "$CREW_STATE" feat-race)
+  assert_contains "$out" "state: working" "retry recovered the raced run lookup (working)"
+  assert_contains "$out" "source: run-step" "retry recovered the authoritative run-step source"
+
+  # With retries OFF, the same first-call-empty race is NOT recovered: the single
+  # attempt sees empty and falls through off the run-step path. This pins the retry
+  # as the load-bearing fix, not incidental behavior.
+  : > "$d/calln"
+  out=$(PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" \
+    FM_CREW_STATE_RETRIES=0 "$CREW_STATE" feat-race)
+  assert_not_contains "$out" "source: run-step" "without retry the raced lookup is not recovered"
+  pass "bounded retry recovers a run lookup that lost the race against an active pipeline"
+}
+
 # Usage error (no id) is the one non-zero exit.
 test_usage_error() {
   reset_fakes
@@ -804,6 +884,7 @@ test_torn_down_worktree
 test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_not_provably_working_when_stopped
+test_retry_recovers_raced_run_lookup
 test_usage_error
 
 echo "all fm-crew-state tests passed"

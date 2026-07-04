@@ -60,6 +60,56 @@ if fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" 2>/dev/null; then
 fi
 pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a duplicate"
 
+# --- new-window target form (bug 3) ------------------------------------------
+# A bare `-t <session>` target resolves to the session's CURRENT window, so tmux
+# inserts next-up-from-current; on tmux >= 3.7 with `renumber-windows on` that can
+# land on an occupied index and fail "index in use". The adapter must target
+# "<session>:" so tmux picks the next free index unambiguously (this also replaces
+# the external PATH shim that used to rewrite bare session targets).
+#
+# Guard 1 (build-independent): capture the new-window invocation and assert the
+# trailing-colon session target, never the bare session name. A `tmux` function
+# shadows the PATH shim just for these calls (an `if`, not a `case`, and defined
+# at top level - bash 3.2 cannot parse a function containing `case` inside $(...)),
+# then it is unset so the rest of the suite uses the real socketed tmux again.
+CAP_LOG="$SHIM_DIR/newwindow.args"
+: > "$CAP_LOG"
+# shellcheck disable=SC2329  # invoked indirectly by fm_backend_tmux_create_task
+tmux() {
+  if [ "${1:-}" = new-window ]; then shift; printf '%s\n' "$*" >> "$CAP_LOG"; return 0; fi
+  return 0   # list-windows etc: empty output -> the duplicate check finds nothing
+}
+fm_backend_tmux_create_task "capture-ses" "fm-cap" "/tmp"
+unset -f tmux
+newwin_args=$(cat "$CAP_LOG")
+case "$newwin_args" in
+  *"-t capture-ses: "*) : ;;
+  *"-t capture-ses "*) fail "create_task used a BARE session target (bug 3): $newwin_args" ;;
+  *) fail "create_task new-window args were not as expected: $newwin_args" ;;
+esac
+pass "fm_backend_tmux_create_task targets '<session>:' (next free index), not the bare session"
+
+# Guard 2 (real tmux behavioral): with renumber-windows on and a non-last active
+# window, create_task must still succeed and the window must appear.
+RENUM_SES="renum"
+tmux new-session -d -s "$RENUM_SES" -x 200 -y 50 || fail "real tmux: new-session (renum) failed"
+tmux set-option -t "$RENUM_SES" renumber-windows on
+tmux set-option -t "$RENUM_SES" base-index 0
+fm_backend_tmux_create_task "$RENUM_SES" "fm-r1" "$HOME" || fail "create_task fm-r1 failed under renumber-windows"
+fm_backend_tmux_create_task "$RENUM_SES" "fm-r2" "$HOME" || fail "create_task fm-r2 failed under renumber-windows"
+fm_backend_tmux_create_task "$RENUM_SES" "fm-r3" "$HOME" || fail "create_task fm-r3 failed under renumber-windows"
+# Select a MIDDLE (non-last) window active, so a bare `-t <session>` would target
+# an occupied index; create_task must still succeed via the trailing-colon form.
+tmux select-window -t "$RENUM_SES:1" 2>/dev/null || tmux select-window -t "$RENUM_SES"
+fm_backend_tmux_create_task "$RENUM_SES" "fm-r4" "$HOME" \
+  || fail "create_task fm-r4 failed with a non-last active window under renumber-windows (bug 3)"
+for w in fm-r1 fm-r2 fm-r3 fm-r4; do
+  tmux list-windows -t "$RENUM_SES" -F '#{window_name}' | grep -qx "$w" \
+    || fail "window $w not visible after create_task under renumber-windows"
+done
+tmux kill-session -t "$RENUM_SES" 2>/dev/null || true
+pass "real tmux: create_task succeeds under renumber-windows with a non-last active window"
+
 # --- send text + Enter -------------------------------------------------------
 
 tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ '" Enter
