@@ -43,16 +43,28 @@ PIDFILE="$STATE/.poll.pid"
 
 mkdir -p "$STATE"
 
-# Home-scoped singleton: if a live poller already owns this home, exit quietly
-# so a manual run cannot double up on the launchd instance.
+# Home-scoped singleton with PID-reuse safety: the pidfile records the poller's
+# pid on line 1 and its process identity (start time + command, from
+# fm_pid_identity) on line 2. A live pid whose identity still matches the record
+# is a genuine second poller, so exit quietly and let it own the home. A pid that
+# is dead OR has been recycled by an unrelated process (identity mismatch) is
+# treated as stale, so this instance takes over. Without the identity check a
+# bare kill -0 on a reused pid would read as "already running" and, under the
+# plist's KeepAlive + 10s throttle, wedge the poller in a silent respawn loop
+# that never actually polls the board. Mirrors the watcher lock's identity check.
 if [ -f "$PIDFILE" ]; then
-  other=$(cat "$PIDFILE" 2>/dev/null || true)
-  if fm_pid_alive "$other" && [ "$other" != "${BASHPID:-$$}" ]; then
-    echo "fm-poll: already running (pid $other) for $FM_HOME" >&2
-    exit 0
+  other=$(sed -n '1p' "$PIDFILE" 2>/dev/null || true)
+  other_id=$(sed -n '2,$p' "$PIDFILE" 2>/dev/null || true)
+  if [ -n "$other" ] && [ "$other" != "${BASHPID:-$$}" ] && fm_pid_alive "$other"; then
+    cur_id=$(fm_pid_identity "$other" 2>/dev/null || true)
+    if [ -n "$other_id" ] && [ "$cur_id" = "$other_id" ]; then
+      echo "fm-poll: already running (pid $other) for $FM_HOME" >&2
+      exit 0
+    fi
   fi
 fi
-printf '%s\n' "${BASHPID:-$$}" > "$PIDFILE"
+SELF=${BASHPID:-$$}
+{ printf '%s\n' "$SELF"; fm_pid_identity "$SELF" 2>/dev/null || true; } > "$PIDFILE"
 trap 'rm -f "$PIDFILE" 2>/dev/null || true' EXIT INT TERM
 
 run_check() {  # <path> - run one check with a hard timeout, never let it hang
@@ -72,8 +84,24 @@ run_check() {  # <path> - run one check with a hard timeout, never let it hang
 
 # Synthetic startup event: proves check output -> fm_wake_append -> durable
 # queue -> fm-wake-drain works, so a silent poller after a launchd restart is a
-# real failure, not a "nothing happened" ambiguity.
-fm_wake_append check "poller-start" "check: poller-start: synthetic startup wake $(date '+%Y-%m-%dT%H:%M:%S%z')" || true
+# real failure, not a "nothing happened" ambiguity. Rate-limited to at most once
+# per FM_POLLER_STARTUP_WAKE_MIN_INTERVAL seconds (default 300) so a launchd
+# crash-respawn loop (KeepAlive + 10s throttle) cannot flood the durable wake
+# queue and repeatedly wake the session; a genuine restart still emits it.
+STARTUP_MARK="$STATE/.poller-startup-wake"
+WAKE_MIN=${FM_POLLER_STARTUP_WAKE_MIN_INTERVAL:-300}
+emit_startup_wake=1
+if [ -f "$STARTUP_MARK" ]; then
+  now=$(date +%s)
+  last=$(date -r "$STARTUP_MARK" +%s 2>/dev/null || echo 0)
+  if [ "$((now - last))" -lt "$WAKE_MIN" ]; then
+    emit_startup_wake=0
+  fi
+fi
+if [ "$emit_startup_wake" = 1 ]; then
+  touch "$STARTUP_MARK"
+  fm_wake_append check "poller-start" "check: poller-start: synthetic startup wake $(date '+%Y-%m-%dT%H:%M:%S%z')" || true
+fi
 
 while :; do
   touch "$BEAT"
