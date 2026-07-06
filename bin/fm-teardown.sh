@@ -59,28 +59,47 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 ID=$1
 FORCE=${2:-}
 
-META="$STATE/$ID.meta"
-[ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
-WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
-T=$(grep '^window=' "$META" | cut -d= -f2-)
-PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
-BACKEND=$(fm_backend_of_meta "$META")
-if [ "$BACKEND" = orca ]; then
-  T_ORCA=$(grep '^terminal=' "$META" | tail -1 | cut -d= -f2- || true)
-  [ -n "$T_ORCA" ] && T=$T_ORCA
+# --worktree <path> [--force]: dispose a worktree that has no task meta - a
+# workflow worktree, which never goes through fm-spawn and so has no
+# state/<id>.meta. This is the sanctioned disposal AGENTS.md sections 4 and 6
+# name for a changed workflow worktree. It runs the same landed check as a task
+# teardown (keyed on the worktree path instead of a meta record) and removes the
+# worktree only on a pass, or with --force. Parsed here; executed after the
+# landed-check helper definitions below, and it skips the meta-required setup a
+# task teardown does.
+WORKTREE_MODE=
+WORKTREE_ARG=
+if [ "$ID" = --worktree ]; then
+  WORKTREE_MODE=1
+  WORKTREE_ARG=${2:-}
+  FORCE=${3:-}
+  [ -n "$WORKTREE_ARG" ] || { echo "error: --worktree requires a path" >&2; exit 1; }
 fi
-HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
-PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
-# tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
-# (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
-TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
-ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
-ORCA_PATH_MATCH_VERIFIED=0
 
-KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
-[ -n "$KIND" ] || KIND=ship
-MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
-[ -n "$MODE" ] || MODE=no-mistakes
+if [ -z "$WORKTREE_MODE" ]; then
+  META="$STATE/$ID.meta"
+  [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
+  WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
+  T=$(grep '^window=' "$META" | cut -d= -f2-)
+  PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
+  BACKEND=$(fm_backend_of_meta "$META")
+  if [ "$BACKEND" = orca ]; then
+    T_ORCA=$(grep '^terminal=' "$META" | tail -1 | cut -d= -f2- || true)
+    [ -n "$T_ORCA" ] && T=$T_ORCA
+  fi
+  HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
+  PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+  # tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
+  # (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
+  TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
+  ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
+  ORCA_PATH_MATCH_VERIFIED=0
+
+  KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
+  [ -n "$KIND" ] || KIND=ship
+  MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
+  [ -n "$MODE" ] || MODE=no-mistakes
+fi
 
 default_branch() {
   local ref branch
@@ -123,7 +142,7 @@ require_orca_terminal() {
   printf '%s\n' "$terminal"
 }
 
-if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
+if [ -z "$WORKTREE_MODE" ] && [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   ORCA_WORKTREE_ID=$(require_orca_worktree_id "$META") || exit 1
   T_ORCA=$(meta_value "$META" terminal)
   [ -z "$T_ORCA" ] || T=$T_ORCA
@@ -270,6 +289,50 @@ work_is_landed() {
   pr_is_merged "$branch" && return 0
   content_in_default
 }
+
+# --worktree mode: now that the landed-check helpers are defined, dispose the
+# named worktree. Refuses dirty or unlanded work exactly like a task teardown
+# (its refusal is final; --force is the explicit discard path). Removes only a
+# linked worktree, never a main checkout, so it can never touch David's primary
+# tree.
+if [ -n "$WORKTREE_MODE" ]; then
+  if [ ! -d "$WORKTREE_ARG" ]; then
+    echo "error: worktree path does not exist: $WORKTREE_ARG" >&2
+    exit 1
+  fi
+  WT=$(cd "$WORKTREE_ARG" && pwd -P)
+  if ! git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "error: not a git worktree: $WT" >&2
+    exit 1
+  fi
+  # The main worktree is always the first entry of `git worktree list`. Refuse if
+  # the target IS that main checkout, so teardown removes only linked worktrees.
+  main_wt=$(git -C "$WT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
+  [ -n "$main_wt" ] && main_wt=$(cd "$main_wt" 2>/dev/null && pwd -P)
+  if [ -z "$main_wt" ] || [ "$WT" = "$main_wt" ]; then
+    echo "REFUSED: $WT is a main checkout, not a linked worktree; teardown removes only linked worktrees" >&2
+    exit 1
+  fi
+  PROJ=$WT
+  PR_URL=""
+  if [ "$FORCE" != --force ] && [ -n "$(git -C "$WT" status --porcelain 2>/dev/null)" ]; then
+    echo "REFUSED: $WT has uncommitted changes; commit or land them, or pass --force to discard" >&2
+    exit 1
+  fi
+  branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ "$FORCE" != --force ] && ! work_is_landed "$branch"; then
+    echo "REFUSED: work in $WT (branch ${branch:-detached}) has not landed - not reachable from any remote, not contained in a merged PR head, and not present in the default branch. Land it, or pass --force to discard." >&2
+    exit 1
+  fi
+  if [ "$FORCE" = --force ]; then
+    git -C "$main_wt" worktree remove --force "$WT"
+  else
+    git -C "$main_wt" worktree remove "$WT"
+  fi
+  git -C "$main_wt" worktree prune >/dev/null 2>&1 || true
+  echo "removed worktree $WT"
+  exit 0
+fi
 
 backlog_refresh_reminder() {
   local pr done_cmd report_path
