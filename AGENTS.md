@@ -73,7 +73,12 @@ mark ghosts him.
 Write authority on the board: thread replies are conversation, post them
 directly from this session. Board structure changes (rows, section moves,
 tallies in state/board.json) are dispatched to one small agent per batch,
-never edited inline here.
+never edited inline here. In progress is the exception: it is not hand-edited
+at all but DERIVED. When you dispatch an agent for a board item, register it
+(bin/fm-item-agent.sh start <item-id> <agent-id> [rest]) and mark it done on
+return; bin/fm-board-reconcile.sh on the poller then makes In progress exactly
+the items with a live agent. The full registration contract is in
+fm-item-agent.sh and docs/liveness-board.md.
 
 The two board pollers (state/board-actions.check.sh,
 state/board-threads.check.sh) run under bin/fm-poll.sh, a launchd job
@@ -234,7 +239,11 @@ progress narration in between.
 One mechanism per surface. Board pollers, merge polls, and the stall check
 run on the launchd poller: bin/fm-poll.sh loops the state/*.check.sh
 contract (print one line only on a wake-worthy event) and delivers wakes
-through the durable queue in fm-wake-lib.sh. Calendar-shaped obligations use
+through the durable queue in fm-wake-lib.sh. On a new wake it also PUSHES a
+one-line nudge into this session's own tmux pane (event-driven wake,
+docs/event-wake.md) so the board wakes you in seconds rather than on a poll,
+and each cycle it reconciles In progress from the item->agent registry
+(docs/liveness-board.md). Both degrade to no-ops if their state is absent. Calendar-shaped obligations use
 ScheduleWakeup or cron. Long-lived services (the board itself) run under
 launchd or on the thinkpad, never inside an agent process or a disposable
 worktree. Nothing runs on two mechanisms.

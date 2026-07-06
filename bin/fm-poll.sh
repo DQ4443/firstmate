@@ -35,11 +35,86 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-inject-lib.sh
+. "$SCRIPT_DIR/fm-inject-lib.sh"
 
 INTERVAL=${FM_POLL_INTERVAL:-${FM_CHECK_INTERVAL:-15}}  # seconds between sweeps
 TIMEOUT=${FM_CHECK_TIMEOUT:-30}                          # seconds per *.check.sh
 BEAT="$STATE/.last-poller-beat"
 PIDFILE="$STATE/.poll.pid"
+
+# Event-driven wake: after each sweep, if the durable queue holds undelivered
+# wakes the session has not yet drained, push a one-line nudge into firstmate's
+# own pane so it wakes in seconds instead of on its next self-scheduled poll
+# (bin/fm-inject-lib.sh). FM_WAKE_INJECT=0 disables the push entirely, leaving
+# the pre-existing produce-only behavior (the queue plus the session's own
+# drain) untouched.
+INJECT_SEQ_FILE="$STATE/.wake-inject-seq"
+NOPANE_MARK="$STATE/.wake-inject-nopane"
+INJECT_DEBOUNCE=${FM_WAKE_INJECT_DEBOUNCE:-8}   # seconds; coalesce a burst
+case "$INJECT_DEBOUNCE" in ''|*[!0-9]*) INJECT_DEBOUNCE=8 ;; esac
+
+# maybe_inject_wake: push a nudge iff there are undelivered wakes NEWER than the
+# last nudge and the debounce window has elapsed. The queue's monotonic seq
+# counter (state/.wake-queue.seq) is the "newest wake" marker; INJECT_SEQ_FILE
+# records the seq we last nudged about. A burst that lands within one sweep
+# advances the seq once and injects once; a queue we have already nudged (same
+# seq, session simply slow to drain) is not re-nudged, so the session is never
+# spammed. A missing pane is logged once per outage, not every cycle.
+maybe_inject_wake() {
+  [ "${FM_WAKE_INJECT:-1}" = 1 ] || return 0
+  [ -s "$FM_WAKE_QUEUE" ] || return 0
+  local cur last age rc now
+  cur=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || echo 0)
+  case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+  last=$(cat "$INJECT_SEQ_FILE" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ "$cur" -gt "$last" ] || return 0
+  if [ -f "$INJECT_SEQ_FILE" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$INJECT_SEQ_FILE" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_DEBOUNCE" ] || return 0
+  fi
+  fm_inject_wake
+  rc=$?
+  case "$rc" in
+    0)
+      printf '%s\n' "$cur" > "$INJECT_SEQ_FILE"
+      rm -f "$NOPANE_MARK" 2>/dev/null || true
+      echo "fm-poll: pushed board wake to pane $FM_INJECT_PANE (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
+      ;;
+    1)
+      if [ ! -f "$NOPANE_MARK" ]; then
+        touch "$NOPANE_MARK" 2>/dev/null || true
+        echo "fm-poll: no firstmate pane to push to; degraded to queue + session poll (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+      fi
+      ;;
+    *)
+      [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: wake push deferred/unconfirmed rc=$rc (seq $cur)" >&2
+      ;;
+  esac
+  return 0
+}
+
+# Liveness-derived board: rewrite state/board.json each cycle so In progress =
+# exactly the items with a live agent (bin/fm-board-reconcile.sh). It is a fast
+# no-op until firstmate adopts the registry (state/item-agents.json) and whenever
+# nothing changed, so running it every cycle is cheap. Guarded by a per-cycle
+# timeout so a wedged board lock can never stall the poller, and by
+# FM_BOARD_RECONCILE=0 to disable entirely. Deterministic and side-effect-scoped
+# to board.json; it never touches the wake queue.
+maybe_reconcile_board() {
+  [ "${FM_BOARD_RECONCILE:-1}" = 1 ] || return 0
+  local rec="$SCRIPT_DIR/fm-board-reconcile.sh"
+  [ -f "$rec" ] || return 0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$TIMEOUT" bash "$rec" >/dev/null 2>&1 || true
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$TIMEOUT" bash "$rec" >/dev/null 2>&1 || true
+  else
+    bash "$rec" >/dev/null 2>&1 || true
+  fi
+}
 
 mkdir -p "$STATE"
 
@@ -111,5 +186,7 @@ while :; do
     [ -n "$out" ] || continue
     fm_wake_append check "$c" "check: $c: $out" || true
   done
+  maybe_inject_wake
+  maybe_reconcile_board
   sleep "$INTERVAL"
 done
