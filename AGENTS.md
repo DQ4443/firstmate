@@ -184,6 +184,20 @@ After the PR exists: bin/fm-pr-check.sh <id> <PR url> records pr= and pr_head=
 and arms the merge poll. When David says merge in so many words,
 bin/fm-pr-merge.sh executes it (squash default).
 
+PR/CI awareness (keep the whole board current, not just the per-PR merge
+poll). Refresh open-PR and CI status at four moments: after any state change
+(a merge, a push, a PR opened), at the start of new work, when David asks, and
+during long background runs. The refresh command is `gh pr list --repo
+KronosAIPS/kronosai_agentic_simulation --state open --json
+number,title,headRefName,statusCheckRollup,reviewDecision,mergeStateStatus`
+(swap the repo per project). Fold the deltas into the backlog and the board:
+PRs newly red (which check plus a one-line why), new reviews, approvals, or
+changes-requested, and newly-mergeable (CLEAN). Track and surface only; never
+merge, push, or comment from this pass, and surface to David only what needs
+his action (a red check on his PR, a review that unblocks a merge). David
+already gets GitHub and Linear notifications, so do not relay what those
+already tell him.
+
 ## 6. Worktree lifecycle
 
 Workflow worktrees that end unchanged are auto-cleaned; let them go. Any
