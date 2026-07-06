@@ -15,17 +15,22 @@ work, you are in the wrong paradigm.
 ## 1. Prime rules
 
 1. Never merge without David's explicit word. One standing exception: the
-   kronos-mvp-tracker meeting-notes sync flow has end-to-end merge
-   authorization. Nothing else does. yolo is off on every project.
-2. Never write to David's working trees. projects/<name> entries are symlinks
-   into ~/dev/work, his own checkouts; they are often dirty or on feature
-   branches, which is expected and never something to fix. STUCK lines from
-   fleet sync are reported, not repaired. Sanctioned write paths into project
-   clones: the fast-forward paths inside fm-fleet-sync.sh and fm-pr-merge.sh,
-   nothing else. Agent worktrees under <repo>/.claude/worktrees/ and
-   ~/.treehouse/ are not David's trees; that is where agents write, and the
-   PreToolUse hook enforces exactly that boundary for every agent in this
-   session.
+   kronos-mvp-tracker meeting-notes sync flow, once David okays that run's
+   proposed change list, carries it end to end including the merge (the
+   tracker-sync skill's standing authorization). Nothing else may merge
+   unprompted. yolo is off on every project.
+2. Never write to David's working trees. His own checkouts live under
+   ~/dev/work; projects/<name> are firstmate's own clones of the fleet repos
+   (real directories under projects/, not symlinks into ~/dev/work). Both are
+   often dirty or on feature branches, which is expected and never something to
+   fix. STUCK lines from fleet sync are reported, not repaired. Sanctioned
+   write paths into project clones: the fast-forward paths inside
+   fm-fleet-sync.sh and fm-pr-merge.sh, nothing else. Agent worktrees under
+   <repo>/.claude/worktrees/ and ~/.treehouse/ are not David's trees; that is
+   where agents write. The PreToolUse write fence (bin/fm-write-fence.sh),
+   wired at the poller cutover, is best-effort structural enforcement of that
+   boundary (defense-in-depth behind isolation, fails open on unreadable
+   input), not the sole guarantee.
 3. Every agent that writes code gets its own git worktree:
    isolation:'worktree' for workflow agents, a treehouse worktree for a
    standalone Agent subagent. No exceptions, including one-line changes.
@@ -117,9 +122,11 @@ Model and effort: cheap models at low effort for mechanical stages (mapping,
 mechanical edits, formatting, log reading); high effort where judgment
 concentrates (verify, red team, synthesis, design).
 
-Budgets: every run gets an explicit token budget from the per-tier defaults
-in data/budgets.md, which are derived from the journal and state/usage.json
-and re-derived when usage shifts. On budget exhaustion, auto-resume once at
+Budgets: every run gets an explicit token budget. The per-tier defaults live
+in data/budgets.md (built at the cutover from the journal and
+state/usage.json, and re-derived when usage shifts; until that file exists,
+size the budget from state/usage.json and the journal directly). On budget
+exhaustion, auto-resume once at
 the same budget; on a second exhaustion, stop and ask, with a note in the
 board thread if David is waiting. There is no fixed agent-count cap; the
 token budget and the overlap rule (section 4) are the binding constraints.
@@ -132,10 +139,13 @@ current) and schedules its own resume via ScheduleWakeup at window reset
 instead of waiting for a human to notice.
 
 Permissions: workflow agents inherit this session's permission settings. The
-PreToolUse hook is the write fence: writes allowed under
-~/dev/work/*/.claude/worktrees/** and ~/.treehouse/**, blocked everywhere
-else in ~/dev/work and projects/. An agent launched without isolation hits
-the fence, not David's checkout.
+PreToolUse write fence (bin/fm-write-fence.sh, wired at the poller cutover)
+allows writes only inside isolated agent worktrees (the .claude/worktrees/
+trees under ~/dev/work and under projects/, and anything under ~/.treehouse),
+and blocks every other write under ~/dev/work and under projects/. An agent
+launched without isolation hits the fence, not David's checkout. It fails open
+on unreadable input, so it is defense-in-depth behind isolation, not the sole
+guarantee.
 
 ## 4. Workflow rules
 
@@ -156,9 +166,10 @@ the fence, not David's checkout.
 - Launch any run expected to outlast a few minutes as tracked background
   work (TaskCreate), so this session keeps draining board wakes between
   phase returns instead of ghosting David's thread messages.
-- Stall detection: state/workflow-runs.check.sh on the poller compares each
-  in-flight run's journal mtime against its phase budget (default 15
-  minutes) and prints one line on staleness. On a stall wake, read the
+- Stall detection (built at the cutover): state/workflow-runs.check.sh on the
+  poller will compare each in-flight run's journal mtime against its phase
+  budget (default 15 minutes) and print one line on staleness; until it
+  exists, track in-flight runs from the backlog. On a stall wake, read the
   journal and restart the stalled agent from the script with its accumulated
   context.
 - Name agents you may need to steer; steer with SendMessage.

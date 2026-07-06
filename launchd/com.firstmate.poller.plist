@@ -26,6 +26,18 @@
   and only then disarm bin/fm-watch.sh. KeepAlive + ThrottleInterval mean a
   kill -9 of the poller is restarted by launchd within the throttle window;
   verify that too.
+
+  Same cutover, wire the PreToolUse write fence (bin/fm-write-fence.sh). It is
+  deliberately NOT in tracked .claude/settings.json (this is a shared-template
+  repo; a fresh clone must not silently broaden every user's fence). Add it to
+  the home's local .claude/settings.local.json as a PreToolUse hook on
+  Edit|Write|NotebookEdit, and drop the retired .claude/block-html-edits.sh
+  reference at the same time:
+    "PreToolUse": [ { "matcher": "Edit|Write|NotebookEdit",
+      "hooks": [ { "type": "command",
+        "command": "\"$CLAUDE_PROJECT_DIR\"/bin/fm-write-fence.sh" } ] } ]
+  Then confirm a write into a projects/ clone or ~/dev/work checkout is blocked
+  and a write into an isolated worktree is allowed (AGENTS.md prime rule 2).
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
