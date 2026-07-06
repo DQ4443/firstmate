@@ -87,7 +87,7 @@ LOCK_WAIT="${FM_BOARD_LOCK_WAIT:-10}"
 VERBOSE=0
 [ "${1:-}" = "--verbose" ] && VERBOSE=1
 
-note() { [ "$VERBOSE" -eq 1 ] && echo "fm-board-reconcile: $1" || true; }
+note() { if [ "$VERBOSE" -eq 1 ]; then echo "fm-board-reconcile: $1"; fi; }
 
 command -v jq >/dev/null 2>&1 || { echo "fm-board-reconcile: jq required" >&2; exit 1; }
 case "$TTL" in ''|*[!0-9]*) TTL=1800 ;; esac

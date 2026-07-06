@@ -69,8 +69,8 @@ pass "envget parses recorded keys and returns empty for absent keys"
 # pid-ancestry: self is under self; a bogus ancestor is not.
 mypid=$$
 fm_inject_pid_under "$mypid" "$mypid" || fail "pid_under: a pid is under itself"
-fm_inject_pid_under "$mypid" 999999 && fail "pid_under: unrelated ancestor matched" || true
-fm_inject_pid_under abc "$mypid" && fail "pid_under: non-numeric child accepted" || true
+if fm_inject_pid_under "$mypid" 999999; then fail "pid_under: unrelated ancestor matched"; fi
+if fm_inject_pid_under abc "$mypid"; then fail "pid_under: non-numeric child accepted"; fi
 pass "pid_under walks ancestry and rejects non-numeric / unrelated pids"
 
 # No pane recorded and nothing discoverable: graceful non-zero, nothing typed.

@@ -104,7 +104,7 @@ fm_inject_discover() {  # sets FM_INJECT_PANE/FM_TMUX_BIN/FM_TMUX_SOCKET on succ
   uid=$(id -u 2>/dev/null || echo "")
   for b in "${FM_INJECT_TMUX_BIN_HINT:-}" "$(command -v tmux 2>/dev/null || true)" \
            /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do
-    [ -n "$b" ] && [ -x "$b" ] || continue
+    if [ -z "$b" ] || [ ! -x "$b" ]; then continue; fi
     for s in "${FM_INJECT_SOCKET_HINT:-}" "" "/tmp/tmux-$uid/default" "/private/tmp/tmux-$uid/default"; do
       fm_inject_run "$b" "$s" list-panes -a -F '#{pane_id} #{pane_pid}' >/dev/null 2>&1 || continue
       while IFS= read -r line; do
