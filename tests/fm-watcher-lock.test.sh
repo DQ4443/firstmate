@@ -96,19 +96,19 @@ test_live_stale_watch_lock_is_actionable() {
 test_guard_warnings() {
   # The guard's two operator-visible states, with resilient substrings instead of
   # four copy-coupled tests:
-  #   (1) watcher DOWN + queued wakes: a prominent no-watcher banner leads (alarm
-  #       title, in-flight count, beacon age, fix command), the queued-wakes
-  #       warning follows it, and the guidance is re-arm-after-drain (never the
-  #       old conflicting "restart NOW first").
+  #   (1) supervision OFF (no poller or watcher beacon) + queued wakes: a prominent
+  #       no-supervision banner leads (alarm title, in-flight count, beacon age, fix
+  #       command), the queued-wakes warning follows it, and the guidance is
+  #       restore-after-drain (never the old conflicting "restart NOW first").
   #   (2) a fresh watcher and an empty queue: total silence.
   local dir state err first banner_line queue_line
   dir=$(make_case guard)
   state="$dir/state"
   err="$dir/guard.err"
 
-  # (1) watcher down (no beacon) + two in-flight tasks + a queued wake.
+  # (1) supervision off (no beacon at all) + two in-flight tasks + a queued wake.
   # FM_ROOT_OVERRIDE points the worktree-tangle check at a non-git dir so it stays
-  # inert here; this case is about the watcher-down banner, not the tangle guard.
+  # inert here; this case is about the no-supervision banner, not the tangle guard.
   printf 'project=x\n' > "$state/task.meta"
   printf 'project=y\n' > "$state/task2.meta"
   append_wake "$state" heartbeat heartbeat heartbeat || fail "guard heartbeat append failed"
@@ -118,14 +118,14 @@ test_guard_warnings() {
     '●'*) ;;
     *) fail "no-watcher banner is not the first thing the guard prints (got '$first')" ;;
   esac
-  grep -F 'WATCHER DOWN - SUPERVISION IS OFF' "$err" >/dev/null || fail "guard banner missing the alarm title"
+  grep -F 'SUPERVISION IS OFF - NO LIVE POLLER OR WATCHER' "$err" >/dev/null || fail "guard banner missing the alarm title"
   grep -F '2 task(s) in flight' "$err" >/dev/null || fail "guard banner missing the in-flight count"
   grep -F 'last beat: never' "$err" >/dev/null || fail "guard banner missing the beacon age"
   grep -F 'bin/fm-watch-arm.sh' "$err" >/dev/null || fail "guard banner missing the fix command"
   grep -F 'queued wakes pending - drain them' "$err" >/dev/null || fail "guard did not warn about pending queue"
-  grep -F 'After draining queued wakes, re-arm the watcher' "$err" >/dev/null || fail "guard did not order re-arm after drain"
+  grep -F 'After draining queued wakes, restore supervision' "$err" >/dev/null || fail "guard did not order supervision restore after drain"
   ! grep -F 'Restart it NOW, before anything else' "$err" >/dev/null || fail "guard still gave conflicting restart-first instruction"
-  banner_line=$(grep -n 'WATCHER DOWN' "$err" | head -1 | cut -d: -f1)
+  banner_line=$(grep -n 'SUPERVISION IS OFF' "$err" | head -1 | cut -d: -f1)
   queue_line=$(grep -n 'queued wakes pending - drain them' "$err" | head -1 | cut -d: -f1)
   [ "$banner_line" -lt "$queue_line" ] || fail "queued-wakes warning printed before the no-watcher banner"
 

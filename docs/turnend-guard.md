@@ -2,6 +2,14 @@
 
 A structural backstop for the "no turn ends blind" discipline (AGENTS.md section 8), scoped to the firstmate PRIMARY session on the `claude` harness only.
 
+## Supervisors: poller primary, watcher escape hatch
+
+Under the workflow paradigm (2026-07-05) the live supervisor is the launchd poller `bin/fm-poll.sh` (job `com.firstmate.poller`, liveness beacon `state/.last-poller-beat`, plus a home-scoped singleton pid guard in `state/.poll.pid`).
+It replaced the old push-based watcher `bin/fm-watch.sh` (liveness beacon `state/.last-watcher-beat`, lock `state/.watch.lock`), which is retired for new dispatch and kept only as a documented escape hatch (AGENTS.md section 12).
+Every supervision-health check in this guard treats the two as equivalent and additive: a genuinely alive poller OR a genuinely alive watcher counts as supervised.
+So with the poller up, the guard stays silent; it fires only when NEITHER supervisor is live and work is in flight.
+This is what stops the false "TURN WOULD END BLIND" alarm the poller cutover would otherwise trip on every turn, without weakening the real blind-turn protection.
+
 ## The gap this closes
 
 `bin/fm-guard.sh` is pull-based: it warns whenever some other supervision script (`fm-peek`, `fm-send`, `fm-spawn`, `fm-teardown`, `fm-pr-check`, `fm-wake-drain`, ...) happens to run, and prints nothing otherwise.
@@ -50,14 +58,16 @@ result: "BANANA"
 
 ## Detection predicate
 
-`bin/fm-supervision-lib.sh` factors the exact "in-flight work exists, but no watcher has a fresh beacon" computation out of `bin/fm-guard.sh` into a shared function, `fm_supervision_unhealthy <state-dir> [grace-seconds]`.
-That remains the right predicate for the pull-based guard, where a brief gap after a wake fires should stay silent inside the grace window.
-It also exposes `fm_supervision_status` for callers that need the individual fields (in-flight count, beacon freshness/age, queued-wake pending) rather than just the boolean.
+`bin/fm-supervision-lib.sh` factors the exact "in-flight work exists, but no supervisor has a fresh beacon" computation out of `bin/fm-guard.sh` into a shared function, `fm_supervision_unhealthy <state-dir> [grace-seconds]`.
+"Supervised" means EITHER the poller beacon (`state/.last-poller-beat`) or the watcher beacon (`state/.last-watcher-beat`) is within the grace window, so a live poller alone keeps the predicate healthy.
+That remains the right predicate for the pull-based guard, where a brief gap after a cycle should stay silent inside the grace window.
+`fm_supervision_status` exposes the individual fields for callers that need them rather than just the boolean: in-flight count, `FM_SUP_WATCHER_FRESH`, `FM_SUP_POLLER_FRESH`, the combined `FM_SUP_SUPERVISED`, a `FM_SUP_BEACON_DESC` that names the freshest beacon (`poller 4s ago` / `watcher 12s ago` / `never`), and queued-wake pending.
 
 `bin/fm-turnend-guard.sh` deliberately uses a sharper end-of-turn predicate.
-It first uses `fm_supervision_status` to count in-flight tasks, then requires `fm_watcher_healthy <state-dir> <watch-path> [grace-seconds] [home]` from `bin/fm-wake-lib.sh`.
-That shared live-watcher check is the same one used by `bin/fm-watch-arm.sh`: the recorded `state/.watch.lock/pid` must name a live process, the lock's recorded home/path/pid-identity must match the current live pid, and `state/.last-watcher-beat` must still be within `FM_GUARD_GRACE`.
-This means a just-exited watcher with a fresh leftover beacon still blocks the Stop hook immediately, while a live but wedged watcher with an ancient beacon also blocks.
+It first uses `fm_supervision_status` to count in-flight tasks, then accepts the turn if EITHER `fm_poller_healthy <state-dir> [grace-seconds]` or `fm_watcher_healthy <state-dir> <watch-path> [grace-seconds] [home]` from `bin/fm-wake-lib.sh` reports a genuinely live supervisor.
+`fm_poller_healthy` mirrors the watcher check against the poller's own liveness record: the pid on line 1 of `state/.poll.pid` must name a live process, the process identity on line 2 (start time + command) must still match that live pid (so a recycled/reused pid fails, exactly as the poller's singleton guard treats it), and `state/.last-poller-beat` must be within `FM_GUARD_GRACE`.
+`fm_watcher_healthy` is the same check `bin/fm-watch-arm.sh` uses: the recorded `state/.watch.lock/pid` must name a live process, the lock's recorded home/path/pid-identity must match the current live pid, and `state/.last-watcher-beat` must still be within `FM_GUARD_GRACE`.
+Both are real liveness checks, not file-existence checks: a dead poller (or watcher) that left a fresh beacon behind still blocks the Stop hook, as does a live but wedged supervisor with an ancient beacon.
 
 ## Scoping to the PRIMARY only
 
@@ -65,12 +75,12 @@ This means a just-exited watcher with a fresh leftover beacon still blocks the S
 `bin/fm-turnend-guard.sh` must therefore be inert everywhere except the actual primary, and does so at runtime with three checks, all fast (well under a second):
 
 1. **Not a secondmate home.** `bin/fm-home-seed.sh` writes a `.fm-secondmate-home` marker into every secondmate home's root regardless of how it was acquired. Its presence is checked first and is sufficient by itself to exclude secondmate homes.
-2. **Not a linked worktree.** `bin/fm-spawn.sh` only ever hands crewmate/scout tasks a genuine linked `git worktree` (it aborts the spawn otherwise - see the worktree-tangle guard in `bin/fm-tangle-lib.sh` and its tests). A linked worktree's `git rev-parse --git-dir` differs from `--git-common-dir` (the former lives under the main repo's `.git/worktrees/<name>`); only a plain, non-worktree checkout has the two equal. This is a structural fact about how `fm-spawn.sh` provisions task worktrees, not a general property of "not being the primary": `bin/fm-brief.sh`'s own generated isolation assertion deliberately does not treat this comparison as authoritative proof for a crewmate verifying itself, precisely because a *secondmate* home acquired via `git clone` (the `ensure_home` path in `bin/fm-home-seed.sh` for an explicit, not-yet-existing home path) also has the two dirs equal. That is exactly why check 1 above is evaluated first and independently - it is what actually rules out that case here.
+2. **Not a linked worktree.** `bin/fm-spawn.sh` only ever hands crewmate/scout tasks a genuine linked `git worktree` (it aborts the spawn otherwise - see the worktree-tangle guard in `bin/fm-tangle-lib.sh` and its tests). A linked worktree's `git rev-parse --git-dir` differs from `--git-common-dir` (the former lives under the main repo's `.git/worktrees/<name>`); only a plain, non-worktree checkout has the two equal. This is a structural fact about how `fm-spawn.sh` provisions task worktrees, not a general property of "not being the primary": `bin/fm-brief.sh`'s own generated isolation assertion deliberately does not treat this comparison as authoritative proof for a crewmate verifying itself, precisely because a _secondmate_ home acquired via `git clone` (the `ensure_home` path in `bin/fm-home-seed.sh` for an explicit, not-yet-existing home path) also has the two dirs equal. That is exactly why check 1 above is evaluated first and independently - it is what actually rules out that case here.
 3. **Looks like a firstmate session.** `AGENTS.md` and `bin/` exist at the resolved root, and the effective state dir exists after the same `FM_STATE_OVERRIDE` / `FM_HOME` / repo-root fallback used by the other firstmate scripts - cheap defense in depth against the settings file somehow loading somewhere unrelated.
 
 Both `.claude/settings.json` (tracked, this hook) and a task's own `.claude/settings.local.json` (untracked, the per-task `touch` turn-end signal `bin/fm-spawn.sh` installs) can be present simultaneously in the same crewmate task worktree; Claude Code merges the `Stop` hook arrays from both. That is fine: this hook's scoping check makes it a no-op there regardless.
 
-This design is deliberately different from the per-task `.claude/settings.local.json` crewmate hook, and does not worsen the class of problem in GitHub issue #234 (stale Stop-hook entries accumulating in a pooled worktree's `.claude/settings.local.json` across task reuse): that issue is about a dynamically-*written*, untracked, per-task file that can accumulate stale entries across pooled-worktree reuse. `.claude/settings.json` here is a single static TRACKED file - every `git checkout` resets it to the same committed content, so there is nothing to accumulate.
+This design is deliberately different from the per-task `.claude/settings.local.json` crewmate hook, and does not worsen the class of problem in GitHub issue #234 (stale Stop-hook entries accumulating in a pooled worktree's `.claude/settings.local.json` across task reuse): that issue is about a dynamically-_written_, untracked, per-task file that can accumulate stale entries across pooled-worktree reuse. `.claude/settings.json` here is a single static TRACKED file - every `git checkout` resets it to the same committed content, so there is nothing to accumulate.
 
 ## Installation path
 
