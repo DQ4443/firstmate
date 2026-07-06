@@ -25,6 +25,15 @@
 # The registration contract firstmate follows lives in fm-item-agent.sh and
 # docs/liveness-board.md.
 #
+# CROSS-REPO CONTRACT (message-live): thread message files are written by
+# board-v2 (lib/store.ts, a separate repo): data/board-threads/<item-id>/
+# <epoch-ms>[-N].md, whose FIRST line is a single-line JSON object carrying
+# .author. Message-live parses exactly that. If the format ever drifts, the
+# scan counts each newest thread file whose first line does not parse to an
+# object with a string .author and surfaces the count once per outage via
+# state/.thread-author-parse-fail (cleared on a clean cycle), instead of
+# silently reading every item as not-david and demoting unanswered-David rows.
+#
 # THE TRANSFORM (idempotent):
 #   - Promote into In progress every row (from any section) whose item is live.
 #   - Demote out of In progress every row whose item is NOT live, into its rest
@@ -64,6 +73,7 @@ AGENTS="$STATE/item-agents.json"
 CHECKS="$STATE/board-checkins.json"
 THREADS="${FM_BOARD_THREADS_DIR:-$FM_HOME/data/board-threads}"
 LOCK="$STATE/.board.json.lock"
+AUTHOR_FAIL_MARK="$STATE/.thread-author-parse-fail"
 TTL="${FM_AGENT_LIVE_TTL:-1800}"
 DEFAULT_REST="${FM_RECONCILE_DEFAULT_REST:-your_word}"
 
@@ -82,13 +92,9 @@ if [ ! -f "$AGENTS" ]; then
   exit 0
 fi
 
-# Board must be readable and an object; otherwise leave it untouched.
+# Board must be readable; otherwise leave it untouched.
 if [ ! -f "$BOARD" ]; then
   note "board $BOARD absent; nothing to reconcile"
-  exit 0
-fi
-if ! jq -e 'type == "object"' "$BOARD" >/dev/null 2>&1; then
-  echo "fm-board-reconcile: $BOARD is missing/unparseable; leaving it untouched" >&2
   exit 0
 fi
 
@@ -105,6 +111,25 @@ if [ -f "$CHECKS" ] && jq -e 'type == "object"' "$CHECKS" >/dev/null 2>&1; then
 fi
 
 now=$(date +%s)
+
+# Acquire the board lock BEFORE reading the board at all, and read it exactly
+# once: the same snapshot enumerates the message-live candidate ids AND feeds
+# the transform, and the live sets are computed under the lock too. A prior
+# version computed liveness from a pre-lock read and transformed a fresh
+# under-lock read, so a row added or a thread answered between the two reads
+# could be mis-sectioned for a cycle (and an even earlier version kept only the
+# final mv under the lock - the board-toctou race). The trap releases the lock
+# on every exit path (no-change, error, success).
+LOCK_HELD=0
+fm_lock_acquire_wait "$LOCK"
+LOCK_HELD=1
+trap 'if [ "$LOCK_HELD" = 1 ]; then fm_lock_release "$LOCK"; LOCK_HELD=0; fi' EXIT
+
+board_json=$(cat "$BOARD" 2>/dev/null || true)
+if ! printf '%s' "$board_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  echo "fm-board-reconcile: $BOARD is missing/unparseable; leaving it untouched" >&2
+  exit 0
+fi
 
 # --- stage 1: compute the live-id set and the id -> rest map ------------------
 live_json=$(jq -n \
@@ -132,36 +157,47 @@ rest_json=$(jq -n --argjson agents "$(cat "$AGENTS")" '
 # firstmate reply becomes the newest file and clears it, so the item then demotes
 # to Your word). This is the same signal board-v2's auto-flip-on-send uses, so the
 # reconcile agrees with the board instead of fighting it.
-message_live_json=$(
-  ids=$(jq -r '[(.your_word // []), (.in_progress // []),
-                [ (.holding // [])[].rows[]? ], (.landed // [])]
-               | add | map(.id) | .[]' "$BOARD" 2>/dev/null)
-  printf '['
-  first=1
-  while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    tdir="$THREADS/$id"
-    [ -d "$tdir" ] || continue
-    # Newest thread file = highest epoch-ms filename prefix (store.ts naming).
-    newest=$(
-      for f in "$tdir"/*.md; do
-        [ -e "$f" ] || continue
-        base=$(basename "$f" .md)
-        printf '%s\t%s\n' "${base%%-*}" "$f"
-      done | sort -n -k1,1 | tail -1 | cut -f2
-    )
-    [ -n "$newest" ] || continue
-    author=$(head -1 "$newest" 2>/dev/null | jq -r '.author // empty' 2>/dev/null)
-    if [ "$author" = david ]; then
-      [ "$first" = 1 ] || printf ','
-      printf '%s' "$id" | jq -R .
-      first=0
-    fi
-  done <<EOF
+ids=$(printf '%s\n' "$board_json" | jq -r '[(.your_word // []), (.in_progress // []),
+              [ (.holding // [])[].rows[]? ], (.landed // [])]
+             | add | map(.id) | .[]' 2>/dev/null)
+message_live_json='[]'
+author_parse_fails=0
+while IFS= read -r id; do
+  [ -n "$id" ] || continue
+  tdir="$THREADS/$id"
+  [ -d "$tdir" ] || continue
+  # Newest thread file = highest epoch-ms filename prefix (store.ts naming).
+  newest=$(
+    for f in "$tdir"/*.md; do
+      [ -e "$f" ] || continue
+      base=$(basename "$f" .md)
+      printf '%s\t%s\n' "${base%%-*}" "$f"
+    done | sort -n -k1,1 | tail -1 | cut -f2
+  )
+  [ -n "$newest" ] || continue
+  # The first line must parse to a JSON object with a string .author (the
+  # cross-repo contract in the header). Anything else is contract drift, not
+  # not-david: count it so it gets surfaced instead of silently demoting.
+  author=$(head -1 "$newest" 2>/dev/null \
+    | jq -r 'select(type == "object") | .author | select(type == "string")' 2>/dev/null) || author=""
+  if [ -z "$author" ]; then
+    author_parse_fails=$((author_parse_fails + 1))
+    continue
+  fi
+  if [ "$author" = david ]; then
+    message_live_json=$(printf '%s' "$message_live_json" | jq --arg id "$id" '. + [$id]')
+  fi
+done <<EOF
 $ids
 EOF
-  printf ']'
-)
+if [ "$author_parse_fails" -gt 0 ]; then
+  if [ ! -f "$AUTHOR_FAIL_MARK" ]; then
+    touch "$AUTHOR_FAIL_MARK" 2>/dev/null || true
+    echo "fm-board-reconcile: $author_parse_fails newest thread file(s) lack a parseable JSON .author first line; message-live is blind to them (board-v2 store.ts contract drift?)" >&2
+  fi
+else
+  rm -f "$AUTHOR_FAIL_MARK" 2>/dev/null || true
+fi
 # Union the two live sources into one set the transform treats as live.
 live_json=$(jq -n --argjson a "$live_json" --argjson b "${message_live_json:-[]}" \
   '($a + $b) | unique') || { echo "fm-board-reconcile: live-set union failed" >&2; exit 1; }
@@ -209,33 +245,14 @@ TRANSFORM='
   | .holding = $hg_keep
 '
 
-# Acquire the board lock BEFORE reading the board for the transform, so the whole
-# read -> transform -> compare -> write is atomic against any other writer that
-# takes the same lock. A prior version read and compared the board OUTSIDE the
-# lock and only put the final mv inside it, so a concurrent board edit landing
-# between the read and the write was silently overwritten with content derived
-# from the stale read (the board-toctou race). The trap releases the lock on
-# every exit path, changed or not.
-LOCK_HELD=0
-fm_lock_acquire_wait "$LOCK"
-LOCK_HELD=1
-trap 'if [ "$LOCK_HELD" = 1 ]; then fm_lock_release "$LOCK"; LOCK_HELD=0; fi' EXIT
-
-# Re-validate the board under the lock; a board that became unparseable is left
-# untouched rather than clobbered.
-if ! jq -e 'type == "object"' "$BOARD" >/dev/null 2>&1; then
-  echo "fm-board-reconcile: $BOARD unparseable under lock; leaving it untouched" >&2
-  exit 0
-fi
-
-new_board=$(jq \
+new_board=$(printf '%s' "$board_json" | jq \
   --argjson live "$live_json" \
   --argjson R "$rest_json" \
   --arg D "$DEFAULT_REST" \
-  "$TRANSFORM" "$BOARD") || { echo "fm-board-reconcile: board transform failed" >&2; exit 1; }
+  "$TRANSFORM") || { echo "fm-board-reconcile: board transform failed" >&2; exit 1; }
 
 # Idempotence / no-churn: only write when the canonical form actually changed.
-if [ "$(jq -S . "$BOARD")" = "$(printf '%s' "$new_board" | jq -S .)" ]; then
+if [ "$(printf '%s' "$board_json" | jq -S .)" = "$(printf '%s' "$new_board" | jq -S .)" ]; then
   note "no change"
   exit 0
 fi

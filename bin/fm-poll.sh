@@ -51,11 +51,27 @@ PIDFILE="$STATE/.poll.pid"
 # drain) untouched.
 INJECT_SEQ_FILE="$STATE/.wake-inject-seq"
 NOPANE_MARK="$STATE/.wake-inject-nopane"
+TIMEOUT_MARK="$STATE/.wake-inject-timeout"
 RECONCILE_FAIL_MARK="$STATE/.reconcile-fail"
 INJECT_DEBOUNCE=${FM_WAKE_INJECT_DEBOUNCE:-8}   # seconds; coalesce a burst
 case "$INJECT_DEBOUNCE" in ''|*[!0-9]*) INJECT_DEBOUNCE=8 ;; esac
 INJECT_TIMEOUT=${FM_WAKE_INJECT_TIMEOUT:-20}    # seconds; wall-clock cap on a push
 case "$INJECT_TIMEOUT" in ''|*[!0-9]*) INJECT_TIMEOUT=20 ;; esac
+INJECT_TIMEOUT_BACKOFF=${FM_WAKE_INJECT_TIMEOUT_BACKOFF:-300}  # seconds between push attempts after a watchdog kill
+case "$INJECT_TIMEOUT_BACKOFF" in ''|*[!0-9]*) INJECT_TIMEOUT_BACKOFF=300 ;; esac
+
+# Print every live descendant of <pid>, depth-first. The watchdog snapshots this
+# BEFORE terminating the worker: once the worker subshell dies its children are
+# reparented, so a post-mortem pkill -P would miss the very process that hangs -
+# the tmux client blocked on a wedged server, usually a grandchild via command
+# substitution. Without the sweep each timed-out push leaks one hung client.
+descendant_pids() {
+  local kid
+  for kid in $(pgrep -P "$1" 2>/dev/null); do
+    printf '%s\n' "$kid"
+    descendant_pids "$kid"
+  done
+}
 
 # maybe_inject_wake: push a nudge iff there are undelivered wakes NEWER than the
 # last nudge and the debounce window has elapsed. The queue's monotonic seq
@@ -78,6 +94,15 @@ maybe_inject_wake() {
     age=$(( now - $(fm_path_mtime "$INJECT_SEQ_FILE" 2>/dev/null || echo 0) ))
     [ "$age" -ge "$INJECT_DEBOUNCE" ] || return 0
   fi
+  # Timeout backoff: a push the watchdog had to kill (rc 99, wedged tmux server)
+  # is not retried every cycle - each attempt costs one hung client until the
+  # server recovers. Hold off until the backoff window elapses; the marker is
+  # cleared on the next confirmed delivery.
+  if [ -f "$TIMEOUT_MARK" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$TIMEOUT_MARK" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_TIMEOUT_BACKOFF" ] || return 0
+  fi
   # Guard the injection with a wall clock. fm_inject_wake makes repeated tmux
   # client calls (which can hang on a wedged server), sleeps/retries in the submit,
   # and walks process trees in discovery; run inline and unguarded, one hang would
@@ -89,10 +114,24 @@ maybe_inject_wake() {
   rm -f "$resfile" 2>/dev/null || true
   ( fm_inject_wake; printf '%s\t%s' "$?" "${FM_INJECT_PANE:-}" > "$resfile" ) &
   worker=$!
-  ( sleep "$INJECT_TIMEOUT"; kill -TERM "$worker" 2>/dev/null; sleep 1; kill -KILL "$worker" 2>/dev/null ) &
+  ( sleep "$INJECT_TIMEOUT"
+    desc=$(descendant_pids "$worker")
+    kill -TERM "$worker" 2>/dev/null
+    sleep 1
+    pkill -P "$worker" 2>/dev/null || true
+    kill -KILL "$worker" 2>/dev/null
+    printf '%s\n' "$desc" | while IFS= read -r d; do
+      [ -n "$d" ] && kill -KILL "$d" 2>/dev/null
+    done ) &
   watchdog=$!
   wait "$worker" 2>/dev/null
-  kill -TERM "$watchdog" 2>/dev/null || true
+  # No result file means the watchdog is mid-kill: let it finish sweeping the
+  # worker's descendants (bounded by its own sleeps) instead of TERMing it
+  # between its TERM and the descendant KILLs, which would re-leak the hung
+  # client. With a result the worker finished on its own, so stop the watchdog.
+  if [ -f "$resfile" ]; then
+    kill -TERM "$watchdog" 2>/dev/null || true
+  fi
   wait "$watchdog" 2>/dev/null
   if [ -f "$resfile" ]; then
     res=$(cat "$resfile" 2>/dev/null || true)
@@ -107,7 +146,7 @@ maybe_inject_wake() {
   case "$rc" in
     0)
       printf '%s\n' "$cur" > "$INJECT_SEQ_FILE"
-      rm -f "$NOPANE_MARK" 2>/dev/null || true
+      rm -f "$NOPANE_MARK" "$TIMEOUT_MARK" 2>/dev/null || true
       echo "fm-poll: pushed board wake to pane $pane (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
       ;;
     1)
@@ -115,6 +154,12 @@ maybe_inject_wake() {
         touch "$NOPANE_MARK" 2>/dev/null || true
         echo "fm-poll: no firstmate pane to push to; degraded to queue + session poll (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
       fi
+      ;;
+    99)
+      if [ ! -f "$TIMEOUT_MARK" ]; then
+        echo "fm-poll: wake push killed at ${INJECT_TIMEOUT}s (wedged tmux server?); backing off ${INJECT_TIMEOUT_BACKOFF}s between attempts (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+      fi
+      touch "$TIMEOUT_MARK" 2>/dev/null || true
       ;;
     *)
       [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: wake push deferred/unconfirmed rc=$rc (seq $cur)" >&2
@@ -138,6 +183,9 @@ maybe_reconcile_board() {
   # a corrupt item-agents.json, which exits 1 on purpose - is not invisible while
   # the board silently stops self-correcting. Surface it once per outage with the
   # same marker pattern as the missing pane, and clear the marker on recovery.
+  # A warning on stderr with rc 0 (e.g. thread-file contract drift blinding the
+  # message-live scan) counts as a failing cycle too; the reconcile only emits it
+  # once per outage, so the marker clears on its next silent cycle.
   if command -v timeout >/dev/null 2>&1; then
     err=$(timeout "$TIMEOUT" bash "$rec" 2>&1 >/dev/null); rc=$?
   elif command -v gtimeout >/dev/null 2>&1; then
@@ -145,7 +193,7 @@ maybe_reconcile_board() {
   else
     err=$(bash "$rec" 2>&1 >/dev/null); rc=$?
   fi
-  if [ "$rc" -ne 0 ]; then
+  if [ "$rc" -ne 0 ] || [ -n "$err" ]; then
     if [ ! -f "$RECONCILE_FAIL_MARK" ]; then
       touch "$RECONCILE_FAIL_MARK" 2>/dev/null || true
       echo "fm-poll: board reconcile failing (rc=$rc): $(printf '%s' "$err" | head -1) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2

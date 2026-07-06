@@ -40,7 +40,7 @@
 # shellcheck disable=SC2016
 #
 # Usage:
-#   fm-item-agent.sh start  <item-id> <agent-id> [rest-section]
+#   fm-item-agent.sh start  <item-id> <agent-id> [rest-section: your_word|landed]
 #   fm-item-agent.sh beat   <item-id>
 #   fm-item-agent.sh done   <item-id>
 #   fm-item-agent.sh remove <item-id>
@@ -122,6 +122,10 @@ case "$cmd" in
     id=${2:-}; agent=${3:-}; rest=${4:-your_word}
     valid_id "$id" || die "invalid item id: '${id:-}'"
     [ -n "$agent" ] || die "start requires an agent id"
+    case "$rest" in
+      your_word|landed) ;;
+      *) die "invalid rest-section: '$rest' (must be your_word or landed)" ;;
+    esac
     prog='.items[$id] = ((.items[$id] // {}) + {agent:$agent, since:(.items[$id].since // $now), beat:$now, done:false, rest:$rest})'
     write_transform "$prog" --arg id "$id" --arg agent "$agent" --arg rest "$rest" --argjson now "$now"
     echo "registered: $id -> agent $agent (rest=$rest)"

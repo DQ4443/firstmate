@@ -27,7 +27,8 @@ Owned by `bin/fm-item-agent.sh`, state in `state/item-agents.json`:
 - **On dispatch of an agent for a board item:** `bin/fm-item-agent.sh start <item-id> <agent-id> [rest-section]`.
   `rest-section` is where the item belongs once the agent is gone: `your_word` (default, waiting on David) or `landed`.
   It is recorded now so the reconcile can demote deterministically later.
-  `holding` is never an auto-rest target - dependency-blocking is a human judgment - and an unknown rest value falls back to `your_word`.
+  `holding` is never an auto-rest target - dependency-blocking is a human judgment.
+  `start` rejects any value other than `your_word` or `landed` at registration, and the reconcile still falls back to `your_word` for an unknown recorded value (older records).
 - **While a long agent runs:** it stays live past the staleness TTL through check-ins.
   The workflow orchestration already stamps `state/board-checkins.json` at every phase boundary (`bin/fm-board-checkin.sh`, AGENTS.md section 4), which the reconcile reads as a heartbeat, so no extra call is usually needed.
   `bin/fm-item-agent.sh beat <item-id>` exists for agents that do not check in.
