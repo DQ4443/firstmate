@@ -186,12 +186,24 @@ while IFS= read -r id; do
   tdir="$THREADS/$id"
   [ -d "$tdir" ] || continue
   # Newest thread file = highest epoch-ms filename prefix (store.ts naming).
+  # store.ts names files <epoch-ms>[-<n>].md, where the -<n> suffix is appended
+  # on a same-millisecond filename collision (store.ts:150) and so marks the
+  # LATER write: a firstmate reply landing in the same ms as a david message
+  # becomes 1000-1.md against the david 1000.md. Sort by the numeric ms prefix,
+  # then the numeric collision suffix (a bare base = suffix 0), so
+  # 1000.md < 1000-1.md < 1000-2.md and the truly-newest file wins the tie.
   newest=$(
     for f in "$tdir"/*.md; do
       [ -e "$f" ] || continue
       base=$(basename "$f" .md)
-      printf '%s\t%s\n' "${base%%-*}" "$f"
-    done | sort -n -k1,1 | tail -1 | cut -f2
+      # ms = digits before the first dash; suf = the collision number after it
+      # (0 when there is no dash). No `case` here: bash 3.2 (macOS /usr/bin/env
+      # bash) mis-parses a case statement inside $(...) command substitution.
+      ms="${base%%-*}"
+      suf="${base#*-}"
+      if [ "$suf" = "$base" ]; then suf=0; fi
+      printf '%s\t%s\t%s\n' "$ms" "$suf" "$f"
+    done | sort -k1,1n -k2,2n | tail -1 | cut -f3
   )
   [ -n "$newest" ] || continue
   # The first line must parse to a JSON object with a string .author (the

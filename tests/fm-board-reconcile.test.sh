@@ -178,4 +178,25 @@ jq -e '.your_word | map(.id) | index("answered")' "$d/board.json" >/dev/null \
   || fail "message-live: the answered item should rest in your_word"
 pass "message-live: in_progress = registry-live UNION items whose newest thread message is david-authored"
 
+# --- same-ms collision: the -N-suffixed file (written later) wins the tie ----
+# store.ts appends -N on a same-millisecond filename collision, so a firstmate
+# reply arriving in the same ms as a david message becomes 1000-1.md. That
+# suffixed file is the NEWER write and must be treated as newest, demoting the
+# item to Your word (regression guard for the F1 sort tie-break).
+new_case
+seed_board "$d"
+threads="$d/threads"
+mkdir -p "$threads/collide"
+# Same millisecond: david 1000.md, firstmate 1000-1.md (the later, suffixed write).
+printf '{"author":"david","ts":"t"}\nq\n'       > "$threads/collide/1000.md"
+printf '{"author":"firstmate","ts":"t"}\nans\n' > "$threads/collide/1000-1.md"
+jq '.your_word += [{"id":"collide","stamp":"do","rid":"CO","what":"same-ms reply"}]' "$d/board.json" > "$d/b2" && mv "$d/b2" "$d/board.json"
+printf '{"items":{}}\n' > "$d/item-agents.json"
+FM_BOARD_THREADS_DIR="$threads" FM_STATE_OVERRIDE="$d" "$REC" >/dev/null 2>&1 || fail "collision: reconcile errored"
+jq -e '.in_progress | map(.id) | index("collide") | not' "$d/board.json" >/dev/null \
+  || fail "collision: firstmate reply 1000-1.md (same ms, written later) must count as newest, not the david 1000.md"
+jq -e '.your_word | map(.id) | index("collide")' "$d/board.json" >/dev/null \
+  || fail "collision: the same-ms-answered item should demote to your_word"
+pass "same-ms collision: the -N-suffixed later write wins the newest-file tie-break"
+
 echo "all fm-board-reconcile tests passed"
