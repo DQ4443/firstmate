@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch.
+# Secondmates are dropped outright. Kept functional on disk and deleted only in
+# the cleanup PR after the Opus 4.8 transition settles. See AGENTS.md section 12
+# and docs/scripts.md.
 # fm-marker-lib.sh - the from-firstmate request marker.
 #
 # When the MAIN firstmate relays a work request to one of its SECONDMATES,

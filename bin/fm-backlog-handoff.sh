@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch.
+# Secondmates are dropped outright. Kept functional on disk and deleted only in
+# the cleanup PR after the Opus 4.8 transition settles. See AGENTS.md section 12
+# and docs/scripts.md.
 # Hand already-identified, in-scope backlog items off from the main firstmate
 # backlog to a secondmate's own home backlog. Use this when a secondmate is
 # created (or whenever an existing queued item should become its domain's work)

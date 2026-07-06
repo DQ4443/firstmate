@@ -1,4 +1,8 @@
 # shellcheck shell=bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch. The
+# broadened PreToolUse write fence (bin/fm-write-fence.sh) is the isolation
+# boundary now. Kept functional on disk and deleted only in the cleanup PR after
+# the Opus 4.8 transition settles. See AGENTS.md section 12 and docs/scripts.md.
 # Shared worktree-tangle guard for the firstmate-on-itself case.
 # Usage: . bin/fm-tangle-lib.sh
 #

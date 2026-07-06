@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch.
+# Promotion is a workflow decision now, not a meta flip. Kept functional on disk
+# and deleted only in the cleanup PR after the Opus 4.8 transition settles. See
+# AGENTS.md section 12 and docs/scripts.md.
 # Promote a scout task to a ship task in place: the crewmate keeps its window,
 # worktree, and loaded context; only the contract changes. Flips kind= to ship in
 # state/<task-id>.meta so fm-teardown.sh applies the full ship-task teardown protection
