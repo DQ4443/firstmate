@@ -36,20 +36,25 @@ Owned by `bin/fm-item-agent.sh`, state in `state/item-agents.json`:
 
 ## How liveness is determined
 
-An item is live iff its record is not `done` and its freshness is within `FM_AGENT_LIVE_TTL` (default 1800s).
-Freshness is the newest of the record's `since`/`beat` and the item's stamp in `state/board-checkins.json`.
+In progress means the ball is with firstmate, which is either of two signals; an item is live iff EITHER holds.
 
-The consequences:
+**Agent-live.** Its record is not `done` and its freshness is within `FM_AGENT_LIVE_TTL` (default 1800s).
+Freshness is the newest of the record's `since`/`beat` and the item's stamp in `state/board-checkins.json`.
 
 - A healthy long run stays live via its phase-boundary check-ins.
 - A crashed or forgotten agent ages out of In progress on its own after the TTL, so a false spinner cannot persist indefinitely even if firstmate never marks it done.
 - An explicit `done` demotes immediately.
 
+**Message-live.** The newest message file in the item's thread (`data/board-threads/<id>/`) is authored by `david` - a fresh unanswered David message (AGENTS.md section 2).
+This is derived straight from the thread with no bookkeeping: when firstmate replies, its reply becomes the newest file and the item drops out of message-live, demoting to Your word.
+It is the same signal board-v2's auto-flip-on-send uses, so the reconcile agrees with the board's own flip instead of fighting it.
+So an item David just messaged appears in In progress with no register call, and returns to Your word the moment firstmate answers - the exact "ball with firstmate vs ball with David" semantics, derived, not hand-maintained.
+
 ## The reconcile transform (idempotent)
 
 `bin/fm-board-reconcile.sh`, run each poller cycle:
 
-- Promote into In progress every row (from any section) whose item is live.
+- Promote into In progress every row (from any section) whose item is live (agent-live OR message-live).
 - Demote out of In progress every row whose item is not live, into its rest section, converting a row into a landed item when landing.
 - Leave `your_word` / `holding` / `landed` rows otherwise untouched, only removing a row that got promoted so no item appears twice; a holding group emptied by a promotion is dropped.
 - A live item that has no row anywhere cannot be shown - the reconcile moves rows, it does not invent them.
@@ -68,13 +73,17 @@ It writes only when the canonical board actually changed, so the cycle is a chea
 
 ## Cutover (human step, after merge)
 
-1. Adopt the registry the first time firstmate dispatches an agent for a board item: `bin/fm-item-agent.sh start <item-id> <agent-id> [rest]`.
-   Until the file exists the reconcile is inert, so there is no big-bang board rewrite at cutover.
-2. The poller runs the reconcile automatically each cycle once the new `bin/fm-poll.sh` is live (`FM_BOARD_RECONCILE=0` disables it).
-3. Verify: register a live item and confirm it appears in In progress within a cycle; mark it `done` and confirm it demotes to its rest section on the next cycle.
-4. From here on, firstmate stops hand-editing In progress; it maintains the registry and lets the board derive.
-   `your_word` / `holding` / `landed` structural edits are still made the usual way (dispatched board-edit agents), and must go through the same board lock to serialize with the reconcile.
+The reconcile is inert only until the FIRST `fm-item-agent.sh start` creates `state/item-agents.json`.
+From that moment it is authoritative, and on the next cycle every In-progress row that is neither agent-live nor message-live is demoted.
+So adoption is not a single `start` - it is registering the current reality in one batch, or the first `start` would demote all the other in-flight work.
+
+1. Adoption batch: for EVERY item currently in In progress that represents live agent work, run `bin/fm-item-agent.sh start <item-id> <agent-id> [rest]` once, before or together with the first registration.
+   Items that are in In progress only because of an unanswered David message need no registration - the message-live signal keeps them automatically.
+2. The poller then runs the reconcile each cycle once the new `bin/fm-poll.sh` is live (`FM_BOARD_RECONCILE=0` disables it).
+3. Verify: register a live item and confirm it appears in In progress within a cycle; mark it `done` and confirm it demotes to its rest section; post a David-authored thread message on a Your-word item and confirm it flips to In progress, then a firstmate reply returns it to Your word.
+4. From here on, firstmate stops hand-editing In progress; it maintains the registry and lets the board derive from the registry plus the thread-author signal.
+   `your_word` / `holding` / `landed` structural edits are still made the usual way (dispatched board-edit agents), and must go through the same board lock (`state/.board.json.lock`) to serialize with the reconcile.
 
 ## Tests
 
-- `tests/fm-board-reconcile.test.sh` - adoption no-op, live/promote/demote/land movement, TTL staleness vs check-in keep-alive, idempotence, both fail-safes, and the end-to-end `fm-item-agent.sh start`/`done` -> reconcile path.
+- `tests/fm-board-reconcile.test.sh` - adoption no-op, live/promote/demote/land movement, message-live (david-last-thread) union, TTL staleness vs check-in keep-alive, idempotence, both fail-safes, and the end-to-end `fm-item-agent.sh start`/`done` -> reconcile path.

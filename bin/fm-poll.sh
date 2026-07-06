@@ -51,8 +51,11 @@ PIDFILE="$STATE/.poll.pid"
 # drain) untouched.
 INJECT_SEQ_FILE="$STATE/.wake-inject-seq"
 NOPANE_MARK="$STATE/.wake-inject-nopane"
+RECONCILE_FAIL_MARK="$STATE/.reconcile-fail"
 INJECT_DEBOUNCE=${FM_WAKE_INJECT_DEBOUNCE:-8}   # seconds; coalesce a burst
 case "$INJECT_DEBOUNCE" in ''|*[!0-9]*) INJECT_DEBOUNCE=8 ;; esac
+INJECT_TIMEOUT=${FM_WAKE_INJECT_TIMEOUT:-20}    # seconds; wall-clock cap on a push
+case "$INJECT_TIMEOUT" in ''|*[!0-9]*) INJECT_TIMEOUT=20 ;; esac
 
 # maybe_inject_wake: push a nudge iff there are undelivered wakes NEWER than the
 # last nudge and the debounce window has elapsed. The queue's monotonic seq
@@ -75,13 +78,37 @@ maybe_inject_wake() {
     age=$(( now - $(fm_path_mtime "$INJECT_SEQ_FILE" 2>/dev/null || echo 0) ))
     [ "$age" -ge "$INJECT_DEBOUNCE" ] || return 0
   fi
-  fm_inject_wake
-  rc=$?
+  # Guard the injection with a wall clock. fm_inject_wake makes repeated tmux
+  # client calls (which can hang on a wedged server), sleeps/retries in the submit,
+  # and walks process trees in discovery; run inline and unguarded, one hang would
+  # stall the whole poller - no checks, no wakes, no reconcile. A subshell writes
+  # "<rc>\t<pane>" to a result file; a watchdog kills it past INJECT_TIMEOUT. It is
+  # safe to kill: it never mutates the queue, and the seq marker only advances on a
+  # confirmed delivery below. A kill (no result file) reads as rc 99 = not delivered.
+  local resfile="$STATE/.wake-inject.result.$$" pane res worker watchdog
+  rm -f "$resfile" 2>/dev/null || true
+  ( fm_inject_wake; printf '%s\t%s' "$?" "${FM_INJECT_PANE:-}" > "$resfile" ) &
+  worker=$!
+  ( sleep "$INJECT_TIMEOUT"; kill -TERM "$worker" 2>/dev/null; sleep 1; kill -KILL "$worker" 2>/dev/null ) &
+  watchdog=$!
+  wait "$worker" 2>/dev/null
+  kill -TERM "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null
+  if [ -f "$resfile" ]; then
+    res=$(cat "$resfile" 2>/dev/null || true)
+    rc=${res%%$'\t'*}
+    pane=${res#*$'\t'}
+    case "$rc" in ''|*[!0-9]*) rc=99 ;; esac
+  else
+    rc=99
+    pane=""
+  fi
+  rm -f "$resfile" 2>/dev/null || true
   case "$rc" in
     0)
       printf '%s\n' "$cur" > "$INJECT_SEQ_FILE"
       rm -f "$NOPANE_MARK" 2>/dev/null || true
-      echo "fm-poll: pushed board wake to pane $FM_INJECT_PANE (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
+      echo "fm-poll: pushed board wake to pane $pane (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
       ;;
     1)
       if [ ! -f "$NOPANE_MARK" ]; then
@@ -105,14 +132,26 @@ maybe_inject_wake() {
 # to board.json; it never touches the wake queue.
 maybe_reconcile_board() {
   [ "${FM_BOARD_RECONCILE:-1}" = 1 ] || return 0
-  local rec="$SCRIPT_DIR/fm-board-reconcile.sh"
+  local rec="$SCRIPT_DIR/fm-board-reconcile.sh" err rc
   [ -f "$rec" ] || return 0
+  # Capture stderr (stdout stays silent by design) so a PERSISTENT failure - e.g.
+  # a corrupt item-agents.json, which exits 1 on purpose - is not invisible while
+  # the board silently stops self-correcting. Surface it once per outage with the
+  # same marker pattern as the missing pane, and clear the marker on recovery.
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$TIMEOUT" bash "$rec" >/dev/null 2>&1 || true
+    err=$(timeout "$TIMEOUT" bash "$rec" 2>&1 >/dev/null); rc=$?
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$TIMEOUT" bash "$rec" >/dev/null 2>&1 || true
+    err=$(gtimeout "$TIMEOUT" bash "$rec" 2>&1 >/dev/null); rc=$?
   else
-    bash "$rec" >/dev/null 2>&1 || true
+    err=$(bash "$rec" 2>&1 >/dev/null); rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    if [ ! -f "$RECONCILE_FAIL_MARK" ]; then
+      touch "$RECONCILE_FAIL_MARK" 2>/dev/null || true
+      echo "fm-poll: board reconcile failing (rc=$rc): $(printf '%s' "$err" | head -1) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+    fi
+  else
+    rm -f "$RECONCILE_FAIL_MARK" 2>/dev/null || true
   fi
 }
 

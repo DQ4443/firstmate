@@ -7,14 +7,23 @@
 # hand editing - killing the false-spinner problem where finished work sat in In
 # progress because moving it out was a manual step that got forgotten.
 #
-# LIVENESS: an item is live iff its state/item-agents.json record is not `done`
-# and its freshness is within FM_AGENT_LIVE_TTL (default 1800s). Freshness is the
-# newest of the record's `since`/`beat` and the item's stamp in
-# state/board-checkins.json (which the workflow orchestration already bumps at
-# every phase boundary, AGENTS.md section 4). So a healthy long run stays live via
-# its check-ins; a crashed or forgotten agent ages out of In progress on its own;
-# and an explicit `fm-item-agent.sh done` demotes immediately. The registration
-# contract firstmate follows lives in fm-item-agent.sh and docs/liveness-board.md.
+# LIVENESS: In progress means "the ball is with firstmate", which is either of
+# two signals, and an item is live iff EITHER holds:
+#   1. Agent-live: its state/item-agents.json record is not `done` and its
+#      freshness is within FM_AGENT_LIVE_TTL (default 1800s). Freshness is the
+#      newest of the record's `since`/`beat` and the item's stamp in
+#      state/board-checkins.json (which the workflow orchestration bumps at every
+#      phase boundary, AGENTS.md section 4). So a healthy long run stays live via
+#      its check-ins; a crashed or forgotten agent ages out of In progress on its
+#      own; an explicit `fm-item-agent.sh done` demotes immediately.
+#   2. Message-live: the NEWEST message file in the item's thread is authored by
+#      david - a fresh unanswered David message (AGENTS.md section 2). This is
+#      derived from the thread itself with no hand bookkeeping; a firstmate reply
+#      becomes the newest file and clears it, demoting the item to Your word. It
+#      is the same signal board-v2's auto-flip-on-send uses, so reconcile agrees
+#      with the board rather than fighting it.
+# The registration contract firstmate follows lives in fm-item-agent.sh and
+# docs/liveness-board.md.
 #
 # THE TRANSFORM (idempotent):
 #   - Promote into In progress every row (from any section) whose item is live.
@@ -53,6 +62,7 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 BOARD="${FM_BOARD_DATA:-$STATE/board.json}"
 AGENTS="$STATE/item-agents.json"
 CHECKS="$STATE/board-checkins.json"
+THREADS="${FM_BOARD_THREADS_DIR:-$FM_HOME/data/board-threads}"
 LOCK="$STATE/.board.json.lock"
 TTL="${FM_AGENT_LIVE_TTL:-1800}"
 DEFAULT_REST="${FM_RECONCILE_DEFAULT_REST:-your_word}"
@@ -114,6 +124,48 @@ rest_json=$(jq -n --argjson agents "$(cat "$AGENTS")" '
   | map({key: .key, value: (.value.rest // "your_word")}) | from_entries
 ') || { echo "fm-board-reconcile: rest-map computation failed" >&2; exit 1; }
 
+# --- message-live: items whose ball is with firstmate because David spoke last -
+# The board's meaning of In progress is "the ball is with firstmate", which is a
+# live agent OR a fresh unanswered David message (AGENTS.md section 2). The second
+# half is derived here, with no hand bookkeeping, from the real signal: an item is
+# message-live iff the NEWEST message file in its thread is authored by david (a
+# firstmate reply becomes the newest file and clears it, so the item then demotes
+# to Your word). This is the same signal board-v2's auto-flip-on-send uses, so the
+# reconcile agrees with the board instead of fighting it.
+message_live_json=$(
+  ids=$(jq -r '[(.your_word // []), (.in_progress // []),
+                [ (.holding // [])[].rows[]? ], (.landed // [])]
+               | add | map(.id) | .[]' "$BOARD" 2>/dev/null)
+  printf '['
+  first=1
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    tdir="$THREADS/$id"
+    [ -d "$tdir" ] || continue
+    # Newest thread file = highest epoch-ms filename prefix (store.ts naming).
+    newest=$(
+      for f in "$tdir"/*.md; do
+        [ -e "$f" ] || continue
+        base=$(basename "$f" .md)
+        printf '%s\t%s\n' "${base%%-*}" "$f"
+      done | sort -n -k1,1 | tail -1 | cut -f2
+    )
+    [ -n "$newest" ] || continue
+    author=$(head -1 "$newest" 2>/dev/null | jq -r '.author // empty' 2>/dev/null)
+    if [ "$author" = david ]; then
+      [ "$first" = 1 ] || printf ','
+      printf '%s' "$id" | jq -R .
+      first=0
+    fi
+  done <<EOF
+$ids
+EOF
+  printf ']'
+)
+# Union the two live sources into one set the transform treats as live.
+live_json=$(jq -n --argjson a "$live_json" --argjson b "${message_live_json:-[]}" \
+  '($a + $b) | unique') || { echo "fm-board-reconcile: live-set union failed" >&2; exit 1; }
+
 # --- stage 2: transform the board -------------------------------------------
 # shellcheck disable=SC2016  # the jq program references jq variables, not shell.
 TRANSFORM='
@@ -151,11 +203,30 @@ TRANSFORM='
   | ($ld | map(select((.id) as $i | ($ipids | index($i)) | not))) as $ld_keep
   | ($hg | map(.rows |= map(select((.id) as $i | ($ipids | index($i)) | not)))
         | map(select((.rows | length) > 0))) as $hg_keep
-  | .in_progress = $new_ip
+  | .in_progress = ($new_ip | dedup_by_id)
   | .your_word = (($yw_keep + $dem_yw) | dedup_by_id)
   | .landed = (($ld_keep + ($dem_landed | map(row_to_landed))) | dedup_by_id)
   | .holding = $hg_keep
 '
+
+# Acquire the board lock BEFORE reading the board for the transform, so the whole
+# read -> transform -> compare -> write is atomic against any other writer that
+# takes the same lock. A prior version read and compared the board OUTSIDE the
+# lock and only put the final mv inside it, so a concurrent board edit landing
+# between the read and the write was silently overwritten with content derived
+# from the stale read (the board-toctou race). The trap releases the lock on
+# every exit path, changed or not.
+LOCK_HELD=0
+fm_lock_acquire_wait "$LOCK"
+LOCK_HELD=1
+trap 'if [ "$LOCK_HELD" = 1 ]; then fm_lock_release "$LOCK"; LOCK_HELD=0; fi' EXIT
+
+# Re-validate the board under the lock; a board that became unparseable is left
+# untouched rather than clobbered.
+if ! jq -e 'type == "object"' "$BOARD" >/dev/null 2>&1; then
+  echo "fm-board-reconcile: $BOARD unparseable under lock; leaving it untouched" >&2
+  exit 0
+fi
 
 new_board=$(jq \
   --argjson live "$live_json" \
@@ -168,23 +239,17 @@ if [ "$(jq -S . "$BOARD")" = "$(printf '%s' "$new_board" | jq -S .)" ]; then
   note "no change"
   exit 0
 fi
-
-# Atomic write under the board lock (serializes with any other board writer that
-# takes the same lock). temp + rename so a concurrent board read never sees a
-# half-written file.
 if ! printf '%s' "$new_board" | jq -e 'type == "object"' >/dev/null 2>&1; then
   echo "fm-board-reconcile: refused to write a non-object result" >&2
   exit 1
 fi
-fm_lock_acquire_wait "$LOCK"
+# temp + rename so a concurrent board read never sees a half-written file.
 tmp="$STATE/.board.json.reconcile.$$"
 if printf '%s\n' "$new_board" > "$tmp"; then
   mv "$tmp" "$BOARD"
-  fm_lock_release "$LOCK"
   note "board reconciled: in_progress now $(printf '%s' "$new_board" | jq '.in_progress | length') live item(s)"
   exit 0
 fi
 rm -f "$tmp" 2>/dev/null || true
-fm_lock_release "$LOCK"
 echo "fm-board-reconcile: failed to write temp file" >&2
 exit 1

@@ -63,7 +63,9 @@ Section semantics are whose turn it is: In progress = waiting on you (every
 dispatched order lives here while you work it); Your word = waiting on David
 (approvals, merges, plan reviews); Holding = dependency-blocked only, never a
 parking spot for waiting-on-David items. A fresh unanswered David message in
-any thread flips that item to In progress until you respond. One item, one
+any thread flips that item to In progress until you respond (realized by the
+reconcile from the thread's last-author signal, see the write-authority note
+below). One item, one
 row: state changes live inside the single row, never as a second row, and only
 a truly finished workstream moves to Landed. Call it the "MVP tracker", never
 the bare "tracker". When answering board-thread messages, scan every thread
@@ -74,10 +76,13 @@ Write authority on the board: thread replies are conversation, post them
 directly from this session. Board structure changes (rows, section moves,
 tallies in state/board.json) are dispatched to one small agent per batch,
 never edited inline here. In progress is the exception: it is not hand-edited
-at all but DERIVED. When you dispatch an agent for a board item, register it
-(bin/fm-item-agent.sh start <item-id> <agent-id> [rest]) and mark it done on
-return; bin/fm-board-reconcile.sh on the poller then makes In progress exactly
-the items with a live agent. The full registration contract is in
+at all but DERIVED by bin/fm-board-reconcile.sh on the poller. An item is In
+progress iff the ball is with firstmate, from either signal: a live agent OR a
+fresh unanswered David message. The agent half you record: when you dispatch an
+agent for a board item, register it (bin/fm-item-agent.sh start <item-id>
+<agent-id> [rest]) and mark it done on return. The message half is derived with
+no bookkeeping from the thread's newest-message author, so a David message flips
+the item in and your reply flips it back out on its own. The full contract is in
 fm-item-agent.sh and docs/liveness-board.md.
 
 The two board pollers (state/board-actions.check.sh,

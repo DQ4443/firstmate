@@ -54,6 +54,16 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 FILE="$STATE/item-agents.json"
+REG_LOCK="$STATE/.item-agents.json.lock"
+CHECKS_FILE="$STATE/board-checkins.json"
+
+# fm_lock_acquire_wait/fm_lock_release serialize the read-modify-write below so
+# concurrent invocations (an agent's beat/done racing firstmate's start for
+# another item) cannot last-writer-wins away an update - a dropped `done` would
+# leave an item falsely In progress for up to the TTL, the exact false-spinner
+# bug this feature exists to kill.
+# shellcheck source=bin/fm-wake-lib.sh
+. "$SCRIPT_DIR/fm-wake-lib.sh"
 
 # Item ids are board row ids: the same strict slug the board server enforces
 # (board-v2 lib/store.ts ID_RE), so a typo cannot register a ghost item.
@@ -88,12 +98,17 @@ write_transform() {
   local prog=$1
   shift
   local cur tmp
-  cur=$(load)
+  fm_lock_acquire_wait "$REG_LOCK"
+  # load() dies on a corrupt file; inside $() that exits only the subshell, so the
+  # `||` still fires and releases the lock before propagating the failure.
+  cur=$(load) || { fm_lock_release "$REG_LOCK"; exit 2; }
   tmp="$STATE/.item-agents.json.tmp.$$"
   if printf '%s' "$cur" | jq "$@" "$prog" > "$tmp"; then
     mv "$tmp" "$FILE"
+    fm_lock_release "$REG_LOCK"
   else
     rm -f "$tmp" 2>/dev/null || true
+    fm_lock_release "$REG_LOCK"
     die "jq transform failed"
   fi
 }
@@ -142,8 +157,15 @@ case "$cmd" in
   prune)
     ttl=${2:-${FM_AGENT_LIVE_TTL:-1800}}
     case "$ttl" in ''|*[!0-9]*) die "prune ttl must be integer seconds" ;; esac
-    prog='.items |= with_entries(select(((.value.done // false) | not) and ($now - ([.value.since // 0, .value.beat // 0] | max) < $ttl)))'
-    write_transform "$prog" --argjson now "$now" --argjson ttl "$ttl"
+    # Match the reconcile's freshness definition exactly: include the item's
+    # board-checkins.json stamp, so a long run kept alive purely by phase-boundary
+    # check-ins is not pruned (and thereby wrongly demoted) despite active work.
+    checks_json='{}'
+    if [ -f "$CHECKS_FILE" ] && jq -e 'type == "object"' "$CHECKS_FILE" >/dev/null 2>&1; then
+      checks_json=$(cat "$CHECKS_FILE")
+    fi
+    prog='.items |= with_entries(select(((.value.done // false) | not) and ($now - ([.value.since // 0, .value.beat // 0, ($checks[.key] // 0)] | max) < $ttl)))'
+    write_transform "$prog" --argjson now "$now" --argjson ttl "$ttl" --argjson checks "$checks_json"
     echo "pruned done/stale records (ttl=${ttl}s)"
     ;;
   -h|--help|help)

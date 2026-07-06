@@ -150,4 +150,32 @@ jq -e '.your_word | map(.id) | index("live1")' "$d/board.json" >/dev/null \
   || fail "integration: live1 should rest in your_word after done"
 pass "fm-item-agent.sh start/done drives in_progress through the reconcile end to end"
 
+# --- message-live: In progress = registry-live UNION david-last-thread ------
+new_case
+seed_board "$d"
+threads="$d/threads"
+mkdir -p "$threads/msgitem" "$threads/answered" "$threads/live1"
+# aa is a Your-word item; give it a fresh david-authored last message -> promote.
+mkdir -p "$threads/aa"
+printf '{"author":"david","ts":"t"}\nhey\n' > "$threads/aa/1000.md"
+# An item David messaged then firstmate answered (firstmate authored latest) stays put.
+printf '{"author":"david","ts":"t"}\nq\n'      > "$threads/answered/1000.md"
+printf '{"author":"firstmate","ts":"t"}\nans\n' > "$threads/answered/2000.md"
+# Board gets those two extra rows in your_word.
+jq '.your_word += [{"id":"answered","stamp":"do","rid":"AN","what":"replied"}]' "$d/board.json" > "$d/b2" && mv "$d/b2" "$d/board.json"
+# live1 registered live too (union with the message signal).
+now=$(date +%s)
+printf '{"items":{"live1":{"agent":"a","since":%s,"beat":%s,"done":false,"rest":"your_word"}}}\n' "$now" "$now" > "$d/item-agents.json"
+FM_BOARD_THREADS_DIR="$threads" FM_STATE_OVERRIDE="$d" "$REC" >/dev/null 2>&1 || fail "message-live: reconcile errored"
+# aa (david-last) and live1 (registered) are in_progress; answered (firstmate-last) is not.
+jq -e '.in_progress | map(.id) | index("aa")' "$d/board.json" >/dev/null \
+  || fail "message-live: a Your-word item with a fresh david message should promote to in_progress"
+jq -e '.in_progress | map(.id) | index("live1")' "$d/board.json" >/dev/null \
+  || fail "message-live: a registered live item should be in_progress (union)"
+jq -e '.in_progress | map(.id) | index("answered") | not' "$d/board.json" >/dev/null \
+  || fail "message-live: a firstmate-answered item must NOT be in_progress"
+jq -e '.your_word | map(.id) | index("answered")' "$d/board.json" >/dev/null \
+  || fail "message-live: the answered item should rest in your_word"
+pass "message-live: in_progress = registry-live UNION items whose newest thread message is david-authored"
+
 echo "all fm-board-reconcile tests passed"
