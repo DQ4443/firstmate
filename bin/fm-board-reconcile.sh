@@ -55,6 +55,12 @@
 #   - The write is atomic (temp + rename) under a lock (state/.board.json.lock),
 #     and is skipped entirely when the result equals the current board, so the
 #     poller cycle is a cheap no-op whenever nothing changed.
+#   - The lock wait is BOUNDED (FM_BOARD_LOCK_WAIT, default 10s): a live but
+#     stuck lock holder cannot be stolen (the steal path is dead-pid only), so
+#     past the deadline the cycle is skipped with one stderr line and exit 0,
+#     leaving the board unchanged for the next poller cycle to retry. Stock
+#     macOS has no coreutils timeout for the poller to wrap this script in, so
+#     the reconcile must be inherently unable to block forever.
 #
 # Usage: fm-board-reconcile.sh          reconcile once; silent unless it changed
 #        fm-board-reconcile.sh --verbose  also print a one-line summary
@@ -76,6 +82,7 @@ LOCK="$STATE/.board.json.lock"
 AUTHOR_FAIL_MARK="$STATE/.thread-author-parse-fail"
 TTL="${FM_AGENT_LIVE_TTL:-1800}"
 DEFAULT_REST="${FM_RECONCILE_DEFAULT_REST:-your_word}"
+LOCK_WAIT="${FM_BOARD_LOCK_WAIT:-10}"
 
 VERBOSE=0
 [ "${1:-}" = "--verbose" ] && VERBOSE=1
@@ -84,6 +91,7 @@ note() { [ "$VERBOSE" -eq 1 ] && echo "fm-board-reconcile: $1" || true; }
 
 command -v jq >/dev/null 2>&1 || { echo "fm-board-reconcile: jq required" >&2; exit 1; }
 case "$TTL" in ''|*[!0-9]*) TTL=1800 ;; esac
+case "$LOCK_WAIT" in ''|*[!0-9]*) LOCK_WAIT=10 ;; esac
 
 # Adoption switch: no registry means the liveness-derived board is not adopted
 # yet; leave the board exactly as it is.
@@ -118,10 +126,21 @@ now=$(date +%s)
 # version computed liveness from a pre-lock read and transformed a fresh
 # under-lock read, so a row added or a thread answered between the two reads
 # could be mis-sectioned for a cycle (and an even earlier version kept only the
-# final mv under the lock - the board-toctou race). The trap releases the lock
-# on every exit path (no-change, error, success).
+# final mv under the lock - the board-toctou race). The wait is bounded: a live
+# but stuck holder cannot be stolen (fm_lock_try_acquire steals dead pids only),
+# so past LOCK_WAIT seconds this cycle is skipped with one stderr line, exit 0,
+# and the board untouched; the next poller cycle retries. The trap releases the
+# lock on every exit path (no-change, error, success) and is armed only once
+# the lock is actually held.
 LOCK_HELD=0
-fm_lock_acquire_wait "$LOCK"
+lock_deadline=$(( $(date +%s) + LOCK_WAIT ))
+until fm_lock_try_acquire "$LOCK"; do
+  if [ "$(date +%s)" -ge "$lock_deadline" ]; then
+    echo "fm-board-reconcile: board lock $LOCK still held by live pid ${FM_LOCK_HELD_PID:-unknown} after ${LOCK_WAIT}s; skipping this cycle" >&2
+    exit 0
+  fi
+  sleep 0.1
+done
 LOCK_HELD=1
 trap 'if [ "$LOCK_HELD" = 1 ]; then fm_lock_release "$LOCK"; LOCK_HELD=0; fi' EXIT
 
