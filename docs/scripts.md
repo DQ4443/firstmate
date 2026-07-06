@@ -39,11 +39,11 @@ The stall detector `state/workflow-runs.check.sh` (journal mtime vs phase budget
 | `fm-teardown.sh`         | Return a clean, landed ship worktree (a new `--worktree <path>` mode runs the landed check and removes the worktree, failing closed on unlanded state); the crewmate/secondmate teardown path stays for the escape hatch                                                                                                                                                                       |
 | `fm-lock.sh`             | Per-home firstmate session lock; recovery evicts a dead-pid holder                                                                                                                                                                                                                                                                                                                             |
 | `fm-wake-drain.sh`       | Atomically drain queued wakes before handling supervision work                                                                                                                                                                                                                                                                                                                                 |
-| `fm-wake-lib.sh`         | Shared durable wake queue, portable lock helpers, and liveness helpers sourced by the poller, drain, and recovery                                                                                                                                                                                                                                                                              |
+| `fm-wake-lib.sh`         | Shared durable wake queue, portable lock helpers, and supervisor liveness checks (`fm_poller_healthy`, `fm_watcher_healthy`) sourced by the poller, drain, recovery, and the turn-end guard                                                                                                                                                                                                    |
 | `fm-ff-lib.sh`           | Shared guarded fast-forward helper for `/updatefirstmate` origin pulls and fleet-sync paths                                                                                                                                                                                                                                                                                                    |
 | `fm-tasks-axi-lib.sh`    | Shared backlog-backend selector and `tasks-axi` compatibility probe sourced by bootstrap and teardown                                                                                                                                                                                                                                                                                          |
-| `fm-turnend-guard.sh`    | Claude Code Stop hook, primary-scoped only, wired in tracked `.claude/settings.json` (docs/turnend-guard.md). A watcher-era backstop, re-evaluated at the poller cutover                                                                                                                                                                                                                       |
-| `fm-supervision-lib.sh`  | Shared grace-based liveness status/predicate sourced by the turn-end guard                                                                                                                                                                                                                                                                                                                     |
+| `fm-turnend-guard.sh`    | Claude Code Stop hook, primary-scoped only, wired in tracked `.claude/settings.json` (docs/turnend-guard.md). Accepts either a genuinely live launchd poller or the escape-hatch watcher as supervision                                                                                                                                                                                        |
+| `fm-supervision-lib.sh`  | Shared grace-based supervision status/predicate (a fresh poller or watcher beacon counts as supervised) sourced by `fm-guard.sh` and the turn-end guard                                                                                                                                                                                                                                        |
 
 ## Escape hatch (deprecated for new dispatch, functional on disk)
 
@@ -73,18 +73,18 @@ The tmux-crewmate stack (non-Claude harness dispatch, or an agent that must outl
 
 ## Retired (superseded; `DEPRECATED` header, removed in the cleanup PR)
 
-| Script                     | Description                                                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `fm-guard.sh`              | Watcher-liveness and worktree-tangle guard; launchd KeepAlive plus the poller's synthetic startup wake replace it |
-| `fm-tangle-lib.sh`         | Shared worktree-tangle guard; the broadened `fm-write-fence.sh` is the isolation boundary now                     |
-| `fm-brief.sh`              | Scaffold a crewmate/scout/secondmate brief; brief content is workflow prompt text now                             |
-| `fm-promote.sh`            | Promote a scout task in place; promotion is a workflow decision now                                               |
-| `fm-supervise-daemon.sh`   | Presence-gated afk sub-supervisor; budgets, TaskCreate, the poller, and ScheduleWakeup cover it                   |
-| `fm-home-seed.sh`          | Provision/route persistent secondmate homes; secondmates dropped                                                  |
-| `fm-backlog-handoff.sh`    | Hand in-scope backlog items to a secondmate home; secondmates dropped                                             |
-| `fm-config-push.sh`        | Config-only push of inheritable config to secondmate homes; secondmates dropped                                   |
-| `fm-config-inherit-lib.sh` | Primary->secondmate inheritable-config propagation; secondmates dropped                                           |
-| `fm-marker-lib.sh`         | From-firstmate request marker for secondmate routing; secondmates dropped                                         |
+| Script                     | Description                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fm-guard.sh`              | Supervision-liveness (poller or watcher beacon) and worktree-tangle guard; launchd KeepAlive plus the poller's synthetic startup wake replace it |
+| `fm-tangle-lib.sh`         | Shared worktree-tangle guard; the broadened `fm-write-fence.sh` is the isolation boundary now                                                    |
+| `fm-brief.sh`              | Scaffold a crewmate/scout/secondmate brief; brief content is workflow prompt text now                                                            |
+| `fm-promote.sh`            | Promote a scout task in place; promotion is a workflow decision now                                                                              |
+| `fm-supervise-daemon.sh`   | Presence-gated afk sub-supervisor; budgets, TaskCreate, the poller, and ScheduleWakeup cover it                                                  |
+| `fm-home-seed.sh`          | Provision/route persistent secondmate homes; secondmates dropped                                                                                 |
+| `fm-backlog-handoff.sh`    | Hand in-scope backlog items to a secondmate home; secondmates dropped                                                                            |
+| `fm-config-push.sh`        | Config-only push of inheritable config to secondmate homes; secondmates dropped                                                                  |
+| `fm-config-inherit-lib.sh` | Primary->secondmate inheritable-config propagation; secondmates dropped                                                                          |
+| `fm-marker-lib.sh`         | From-firstmate request marker for secondmate routing; secondmates dropped                                                                        |
 
 ## Inert (X mode, off until opted in)
 

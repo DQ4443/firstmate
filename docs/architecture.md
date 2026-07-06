@@ -15,7 +15,7 @@ No-verb wakes, such as `working:` notes and bare turn-ended signals, are benign 
 Fresh stale panes use the same current-state read before trusting the status log, so an active run or busy pane outranks an old captain-relevant status-log line left behind before validation.
 No-change heartbeats are also benign.
 Absorbed wakes advance their suppression markers, log to `state/.watch-triage.log`, and keep the watcher blocking without a queue record or LLM turn.
-After each drain, `fm-wake-drain.sh` runs the same liveness guard as the supervision scripts, so a lapsed watcher chain surfaces even on a turn that only drains and handles queued wakes.
+After each drain, `fm-wake-drain.sh` runs the same liveness guard as the supervision scripts, so a supervision lapse (no fresh poller or watcher beacon) surfaces even on a turn that only drains and handles queued wakes.
 Routine watcher polling, re-arm no-ops, elapsed waiting time, and absorbed benign wakes stay silent; an idle crew costs you nothing.
 Crew status files are append-only wake-event logs, not current-state fields.
 `bin/fm-crew-state.sh <id>` is the cheap current-state read for an actionable heartbeat review: it attributes the matching no-mistakes run, active or terminal, to the crew's own branch and keeps that run-step authoritative even if the pane has closed.
@@ -25,10 +25,10 @@ Optional X mode rides the same check path: the locked session-start bootstrap st
 
 Routine re-arms go through `bin/fm-watch-arm.sh`, which forks the watcher as a tracked child, verifies it is genuinely alive with a fresh liveness beacon, and prints exactly one honest status line (`started` / `healthy` / `FAILED`, the last exiting non-zero) - never a false `already running` off a dying process.
 Its `--restart` mode signals only the watcher recorded in the current home's `state/.watch.lock`, so restarting one home cannot kill sibling secondmate watchers.
-A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled, or if tasks are in flight and that watcher stops running or queued wakes are waiting to be drained.
-The drain script calls that guard after emptying the queue, which avoids repeating the queued-wakes warning for records it just consumed while still warning on stale watcher liveness.
-It leads with prominent bordered banners for the tangle and no-watcher cases so they cannot be skimmed past.
-On the `claude` harness, a tracked project Stop hook (`bin/fm-turnend-guard.sh`) gives the primary session a push-based backstop: when work is in flight and no identity-matched watcher lock with a fresh beacon is live, Claude Code receives the hook's exit-2 reason and must continue the turn before it can stop.
+A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled, or if tasks are in flight with no fresh supervisor beacon (neither the launchd poller `bin/fm-poll.sh` nor that watcher) or queued wakes are waiting to be drained.
+The drain script calls that guard after emptying the queue, which avoids repeating the queued-wakes warning for records it just consumed while still warning on stale supervision liveness.
+It leads with prominent bordered banners for the tangle and no-supervision cases so they cannot be skimmed past.
+On the `claude` harness, a tracked project Stop hook (`bin/fm-turnend-guard.sh`) gives the primary session a push-based backstop: when work is in flight and no genuinely live supervisor covers the home - neither an identity-matched poller pid with a fresh poller beacon nor an identity-matched watcher lock with a fresh watcher beacon - Claude Code receives the hook's exit-2 reason and must continue the turn before it can stop.
 The hook is scoped out of secondmate homes and crewmate/scout worktrees, allows Claude's own `stop_hook_active` retry, and is documented in [turnend-guard.md](turnend-guard.md).
 
 A presence-gated sub-supervisor (`bin/fm-supervise-daemon.sh`) extends this for walk-away supervision: the `/afk` skill activates it, after which the watcher reverts to daemon-managed one-shot mode and the daemon self-handles routine wakes in bash.
