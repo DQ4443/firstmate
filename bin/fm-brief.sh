@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch. Brief
+# content is now workflow prompt text authored inline. Kept functional on disk
+# and deleted only in the cleanup PR after the Opus 4.8 transition settles. See
+# AGENTS.md section 12 and docs/scripts.md.
 # Scaffold a crewmate brief or persistent secondmate charter at
 # data/<task-id>/brief.md under the active firstmate home.
 # For ordinary tasks, the standard Setup/Rules/Definition-of-done contract is

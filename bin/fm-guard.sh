@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch. The
+# launchd KeepAlive on com.firstmate.poller plus the poller's synthetic startup
+# wake replace the watcher-liveness guard. Kept functional on disk and deleted
+# only in the cleanup PR after the Opus 4.8 transition settles. See AGENTS.md
+# section 12 and docs/scripts.md.
 # Watcher liveness and worktree-tangle guard, called by supervision scripts, by
 # fm-wake-drain.sh after it empties queued wakes, and by fm-session-start.sh in
 # read-only advisory mode when another session holds the fleet lock.

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch. Budgets,
+# TaskCreate-tracked background runs, the launchd poller, and ScheduleWakeup
+# cover the away-mode role. Kept functional on disk and deleted only in the
+# cleanup PR after the Opus 4.8 transition settles. See AGENTS.md section 12 and
+# docs/scripts.md.
 # fm-supervise-daemon.sh — presence-gated sub-supervisor (closes #27's P2).
 #
 # Wraps bin/fm-watch.sh: runs it as a child, classifies each wake reason, and

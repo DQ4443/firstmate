@@ -1,4 +1,8 @@
 # shellcheck shell=bash
+# DEPRECATED (workflow paradigm, 2026-07-05): retired for new dispatch.
+# Secondmates are dropped outright. Kept functional on disk and deleted only in
+# the cleanup PR after the Opus 4.8 transition settles. See AGENTS.md section 12
+# and docs/scripts.md.
 # Inheritable-config propagation: the PRIMARY firstmate pushes a declared,
 # extensible set of LOCAL (gitignored) config items down into each secondmate
 # home's config/, so a secondmate's OWN crewmates inherit the primary's settings
