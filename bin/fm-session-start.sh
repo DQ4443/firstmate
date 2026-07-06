@@ -170,6 +170,25 @@ else
   fi
 fi
 
+# --- 3b. session pane registration ---------------------------------------
+# Record this session's tmux pane so the launchd poller can PUSH board wakes
+# into it in seconds instead of the session polling on a timer (event-driven
+# wake, bin/fm-session-register.sh + bin/fm-inject-lib.sh). Only the session
+# that actually holds the lock records the pane, so a read-only second session
+# never overwrites the real session's target. Best-effort: outside tmux this is
+# a reported no-op and the durable wake queue still carries every event.
+subsection "SESSION PANE"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'skipped (read-only session) - the session holding the lock owns the recorded pane.\n'
+else
+  REG_OUT=$("$SCRIPT_DIR/fm-session-register.sh" 2>&1)
+  if [ -n "$REG_OUT" ]; then
+    printf '%s\n' "$REG_OUT"
+  else
+    printf '(no output)\n'
+  fi
+fi
+
 # --- 4. context digest -----------------------------------------------------
 section "CONTEXT"
 print_file_or_absent "$DATA/projects.md" "data/projects.md"

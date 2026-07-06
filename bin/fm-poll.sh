@@ -35,11 +35,203 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-inject-lib.sh
+. "$SCRIPT_DIR/fm-inject-lib.sh"
 
 INTERVAL=${FM_POLL_INTERVAL:-${FM_CHECK_INTERVAL:-15}}  # seconds between sweeps
 TIMEOUT=${FM_CHECK_TIMEOUT:-30}                          # seconds per *.check.sh
 BEAT="$STATE/.last-poller-beat"
 PIDFILE="$STATE/.poll.pid"
+
+# Event-driven wake: after each sweep, if the durable queue holds undelivered
+# wakes the session has not yet drained, push a one-line nudge into firstmate's
+# own pane so it wakes in seconds instead of on its next self-scheduled poll
+# (bin/fm-inject-lib.sh). FM_WAKE_INJECT=0 disables the push entirely, leaving
+# the pre-existing produce-only behavior (the queue plus the session's own
+# drain) untouched.
+INJECT_SEQ_FILE="$STATE/.wake-inject-seq"
+NOPANE_MARK="$STATE/.wake-inject-nopane"
+TIMEOUT_MARK="$STATE/.wake-inject-timeout"
+RECONCILE_FAIL_MARK="$STATE/.reconcile-fail"
+INJECT_DEBOUNCE=${FM_WAKE_INJECT_DEBOUNCE:-8}   # seconds; coalesce a burst
+case "$INJECT_DEBOUNCE" in ''|*[!0-9]*) INJECT_DEBOUNCE=8 ;; esac
+INJECT_TIMEOUT=${FM_WAKE_INJECT_TIMEOUT:-20}    # seconds; wall-clock cap on a push
+case "$INJECT_TIMEOUT" in ''|*[!0-9]*) INJECT_TIMEOUT=20 ;; esac
+INJECT_TIMEOUT_BACKOFF=${FM_WAKE_INJECT_TIMEOUT_BACKOFF:-300}  # seconds between push attempts after a watchdog kill
+case "$INJECT_TIMEOUT_BACKOFF" in ''|*[!0-9]*) INJECT_TIMEOUT_BACKOFF=300 ;; esac
+INJECT_PANE_FILE="$STATE/.wake-inject.pane.$$"
+
+# Print every live descendant of <pid>, depth-first. The watchdog snapshots this
+# BEFORE terminating the worker: once the worker subshell dies its children are
+# reparented, so a post-mortem pkill -P would miss the very process that hangs -
+# the tmux client blocked on a wedged server, usually a grandchild via command
+# substitution. Without the sweep each timed-out push leaks one hung client.
+descendant_pids() {
+  local kid
+  for kid in $(pgrep -P "$1" 2>/dev/null); do
+    printf '%s\n' "$kid"
+    descendant_pids "$kid"
+  done
+}
+
+# run_with_timeout <seconds> <command...> - run <command> under a bash-native
+# wall-clock watchdog and return its exit status, or 99 when the watchdog had
+# to kill it. Stock macOS has no coreutils timeout/gtimeout and the launchd
+# plist sets no PATH, so anything the poller loop runs inline must be bounded
+# without them: a worker subshell records the command's rc to a result file
+# while a watchdog snapshots the worker's descendants (descendant_pids above),
+# TERMs the worker, then KILLs the worker and every snapshotted descendant. A
+# kill (no result file) reads as rc 99. The command's stdout/stderr pass
+# through to the caller. Shared by maybe_inject_wake and maybe_reconcile_board.
+run_with_timeout() {
+  local secs=$1; shift
+  local resfile="$STATE/.run-with-timeout.rc.$$" worker watchdog rc
+  rm -f "$resfile" 2>/dev/null || true
+  ( "$@"; printf '%s' "$?" > "$resfile" ) &
+  worker=$!
+  # The watchdog is detached from the caller's stdout/stderr: when the caller
+  # captures run_with_timeout in $(...), an inherited pipe fd would live on in
+  # the watchdog's orphaned sleep after an early TERM and block the command
+  # substitution for the full timeout even though the worker already finished.
+  ( sleep "$secs"
+    desc=$(descendant_pids "$worker")
+    kill -TERM "$worker" 2>/dev/null
+    sleep 1
+    pkill -P "$worker" 2>/dev/null || true
+    kill -KILL "$worker" 2>/dev/null
+    printf '%s\n' "$desc" | while IFS= read -r d; do
+      [ -n "$d" ] && kill -KILL "$d" 2>/dev/null
+    done ) >/dev/null 2>&1 &
+  watchdog=$!
+  wait "$worker" 2>/dev/null
+  # No result file means the watchdog is mid-kill: let it finish sweeping the
+  # worker's descendants (bounded by its own sleeps) instead of TERMing it
+  # between its TERM and the descendant KILLs, which would re-leak the hung
+  # child. With a result the worker finished on its own, so stop the watchdog.
+  if [ -f "$resfile" ]; then
+    kill -TERM "$watchdog" 2>/dev/null || true
+  fi
+  wait "$watchdog" 2>/dev/null
+  if [ -f "$resfile" ]; then
+    rc=$(cat "$resfile" 2>/dev/null || echo 99)
+    case "$rc" in ''|*[!0-9]*) rc=99 ;; esac
+  else
+    rc=99
+  fi
+  rm -f "$resfile" 2>/dev/null || true
+  return "$rc"
+}
+
+# Worker for the guarded wake push: fm_inject_wake runs inside run_with_timeout's
+# subshell, so its FM_INJECT_PANE result would be lost with its environment;
+# stash it in a side file for the caller's log line.
+inject_push_worker() {
+  fm_inject_wake
+  local rc=$?
+  printf '%s' "${FM_INJECT_PANE:-}" > "$INJECT_PANE_FILE" 2>/dev/null || true
+  return "$rc"
+}
+
+# maybe_inject_wake: push a nudge iff there are undelivered wakes NEWER than the
+# last nudge and the debounce window has elapsed. The queue's monotonic seq
+# counter (state/.wake-queue.seq) is the "newest wake" marker; INJECT_SEQ_FILE
+# records the seq we last nudged about. A burst that lands within one sweep
+# advances the seq once and injects once; a queue we have already nudged (same
+# seq, session simply slow to drain) is not re-nudged, so the session is never
+# spammed. A missing pane is logged once per outage, not every cycle.
+maybe_inject_wake() {
+  [ "${FM_WAKE_INJECT:-1}" = 1 ] || return 0
+  [ -s "$FM_WAKE_QUEUE" ] || return 0
+  local cur last age rc now
+  cur=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || echo 0)
+  case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+  last=$(cat "$INJECT_SEQ_FILE" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ "$cur" -gt "$last" ] || return 0
+  if [ -f "$INJECT_SEQ_FILE" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$INJECT_SEQ_FILE" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_DEBOUNCE" ] || return 0
+  fi
+  # Timeout backoff: a push the watchdog had to kill (rc 99, wedged tmux server)
+  # is not retried every cycle - each attempt costs one hung client until the
+  # server recovers. Hold off until the backoff window elapses; the marker is
+  # cleared on the next confirmed delivery.
+  if [ -f "$TIMEOUT_MARK" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$TIMEOUT_MARK" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_TIMEOUT_BACKOFF" ] || return 0
+  fi
+  # Guard the injection with run_with_timeout. fm_inject_wake makes repeated tmux
+  # client calls (which can hang on a wedged server), sleeps/retries in the submit,
+  # and walks process trees in discovery; run inline and unguarded, one hang would
+  # stall the whole poller - no checks, no wakes, no reconcile. It is safe to
+  # kill: it never mutates the queue, and the seq marker only advances on a
+  # confirmed delivery below. rc 99 (watchdog kill) = not delivered. The pane id
+  # travels through a side file because the worker runs in a subshell.
+  local pane
+  rm -f "$INJECT_PANE_FILE" 2>/dev/null || true
+  run_with_timeout "$INJECT_TIMEOUT" inject_push_worker
+  rc=$?
+  pane=$(cat "$INJECT_PANE_FILE" 2>/dev/null || true)
+  rm -f "$INJECT_PANE_FILE" 2>/dev/null || true
+  case "$rc" in
+    0)
+      printf '%s\n' "$cur" > "$INJECT_SEQ_FILE"
+      rm -f "$NOPANE_MARK" "$TIMEOUT_MARK" 2>/dev/null || true
+      echo "fm-poll: pushed board wake to pane $pane (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
+      ;;
+    1)
+      if [ ! -f "$NOPANE_MARK" ]; then
+        touch "$NOPANE_MARK" 2>/dev/null || true
+        echo "fm-poll: no firstmate pane to push to; degraded to queue + session poll (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+      fi
+      ;;
+    99)
+      if [ ! -f "$TIMEOUT_MARK" ]; then
+        echo "fm-poll: wake push killed at ${INJECT_TIMEOUT}s (wedged tmux server?); backing off ${INJECT_TIMEOUT_BACKOFF}s between attempts (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+      fi
+      touch "$TIMEOUT_MARK" 2>/dev/null || true
+      ;;
+    *)
+      [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: wake push deferred/unconfirmed rc=$rc (seq $cur)" >&2
+      ;;
+  esac
+  return 0
+}
+
+# Liveness-derived board: rewrite state/board.json each cycle so In progress =
+# exactly the items with a live agent (bin/fm-board-reconcile.sh). It is a fast
+# no-op until firstmate adopts the registry (state/item-agents.json) and whenever
+# nothing changed, so running it every cycle is cheap. Guarded by a per-cycle
+# timeout so a wedged board lock can never stall the poller, and by
+# FM_BOARD_RECONCILE=0 to disable entirely. Deterministic and side-effect-scoped
+# to board.json; it never touches the wake queue.
+maybe_reconcile_board() {
+  [ "${FM_BOARD_RECONCILE:-1}" = 1 ] || return 0
+  local rec="$SCRIPT_DIR/fm-board-reconcile.sh" err rc
+  [ -f "$rec" ] || return 0
+  # Capture stderr (stdout stays silent by design) so a PERSISTENT failure - e.g.
+  # a corrupt item-agents.json, which exits 1 on purpose - is not invisible while
+  # the board silently stops self-correcting. Surface it once per outage with the
+  # same marker pattern as the missing pane, and clear the marker on recovery.
+  # A warning on stderr with rc 0 (e.g. thread-file contract drift blinding the
+  # message-live scan, or the reconcile skipping a cycle on its bounded board-lock
+  # wait) counts as a failing cycle too; the reconcile only emits it once per
+  # outage, so the marker clears on its next silent cycle. run_with_timeout is
+  # the belt to the reconcile's own braces (its board-lock wait is bounded by
+  # FM_BOARD_LOCK_WAIT): neither depends on a coreutils timeout binary, which
+  # stock macOS does not have.
+  err=$(run_with_timeout "$TIMEOUT" bash "$rec" 2>&1 >/dev/null); rc=$?
+  if [ "$rc" -ne 0 ] || [ -n "$err" ]; then
+    if [ ! -f "$RECONCILE_FAIL_MARK" ]; then
+      touch "$RECONCILE_FAIL_MARK" 2>/dev/null || true
+      echo "fm-poll: board reconcile failing (rc=$rc): $(printf '%s' "$err" | head -1) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+    fi
+  else
+    rm -f "$RECONCILE_FAIL_MARK" 2>/dev/null || true
+  fi
+}
 
 mkdir -p "$STATE"
 
@@ -111,5 +303,7 @@ while :; do
     [ -n "$out" ] || continue
     fm_wake_append check "$c" "check: $c: $out" || true
   done
+  maybe_inject_wake
+  maybe_reconcile_board
   sleep "$INTERVAL"
 done
