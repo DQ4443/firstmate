@@ -15,14 +15,17 @@ batched digest rather than per-wake injections.
 ## What it does
 
 1. **Set the durable away-mode flag:**
+
    ```sh
    date '+%s' > state/.afk
    ```
+
    This file survives a firstmate restart: recovery re-enters afk if the
    flag is present.
 
 2. **Ensure the sub-supervisor daemon is running.** Check the pid file; start
    the daemon only if it is dead or absent:
+
    ```sh
    if [ -f state/.supervise-daemon.pid ] && kill -0 "$(cat state/.supervise-daemon.pid)" 2>/dev/null; then
      : # daemon already alive - it picks up the flag on its next cycle
@@ -30,6 +33,7 @@ batched digest rather than per-wake injections.
      nohup bin/fm-supervise-daemon.sh >/dev/null 2>&1 &
    fi
    ```
+
    The daemon is **presence-gated**: it injects escalations only while
    `state/.afk` exists, and stays quiet otherwise.
 
@@ -83,7 +87,7 @@ injection (shared with `fm-send.sh` via `bin/fm-tmux-lib.sh`):
 - **`pane_input_pending`** - the cursor line holds real unsubmitted text (a
   human's half-typed line, or a previous injection whose Enter was swallowed).
   The detector **strips the harness's composer box borders first**, so an idle
-  *bordered* composer (claude draws `│ > … │`) is correctly read as empty, not
+  _bordered_ composer (claude draws `│ > … │`) is correctly read as empty, not
   pending. Without this, every idle claude pane looked like pending input and
   the daemon deferred 100% of escalations (incident afk-invx-i5).
   `FM_COMPOSER_IDLE_RE` still overrides empty-composer matching after border
