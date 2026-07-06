@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.firstmate.poller - launchd LaunchAgent for the workflow-paradigm board /
+  merge / stall poller (bin/fm-poll.sh).
+
+  DO NOT LOAD THIS PLIST YET.
+
+  Loading it is the human-verified poller cutover step, run once, after the
+  paradigm PR merges and only when David has confirmed the synthetic startup
+  wake and one real board thread + action both arrive through the durable wake
+  queue. Loading it now would run a second board poller alongside the still-live
+  escape-hatch watcher (bin/fm-watch.sh) and double-deliver every board event.
+  The old watcher carries the pollers until this cutover; it is never left
+  disarmed before this is loaded.
+
+  Before loading, replace the two placeholders below with real absolute paths
+  (launchd does not expand ~ or environment variables in these fields):
+    __FM_ROOT__  ->  the absolute firstmate repo path, e.g. /Users/dq4443/dev/personal/firstmate
+    __FM_HOME__  ->  the operational home (usually the same as __FM_ROOT__)
+
+  Then, as the human cutover step (do not let a session run this):
+    cp launchd/com.firstmate.poller.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.firstmate.poller.plist
+    launchctl list com.firstmate.poller          # confirm it is loaded
+  Then confirm the synthetic startup wake drains, run the one-time board test,
+  and only then disarm bin/fm-watch.sh. KeepAlive + ThrottleInterval mean a
+  kill -9 of the poller is restarted by launchd within the throttle window;
+  verify that too.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.poller</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__FM_ROOT__/bin/fm-poll.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FM_HOME</key>
+    <string>__FM_HOME__</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__FM_ROOT__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__FM_HOME__/state/poller.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__FM_HOME__/state/poller.log</string>
+</dict>
+</plist>
