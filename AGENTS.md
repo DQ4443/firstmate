@@ -85,19 +85,27 @@ reconcile from the thread's last-author signal, see the write-authority note
 below). One item, one
 row: state changes live inside the single row, never as a second row, and only
 a truly finished workstream moves to Landed. Call it the "MVP tracker", never
-the bare "tracker". When answering board-thread messages, scan every thread
-with an unanswered David message before advancing the seen marker; a premature
-mark ghosts him.
+the bare "tracker".
 
-Row anatomy: a row's description is what item it touches plus brief initial
-context, and stays mostly static. Status and updates are thread messages posted
-from firstmate, newest at the top, never stuffed back into the description.
+Read the threads every turn. Before any other work each turn, scan every board
+thread for an unanswered David message and drain it: a David message in a thread
+is exactly a chat message, same priority, answered in-thread, never ignored.
+Scan them all before advancing the seen marker; a premature mark ghosts him. Not
+reading the threads is the root failure that makes David repeat himself.
+
+Row anatomy: a row's description is the task being done, phrased as the task
+itself (e.g. "Wire the admin dashboard KPIs to the live backend API", not "the
+admin dashboard"), naming the item, surface, or repo it touches plus brief
+initial context. It stays static. All status and progress lives in thread
+messages posted from firstmate, newest at the top, never stuffed into the
+description or a status field.
 Every row's thread carries at least one firstmate message; a thread with none
-is an incomplete row. Your word rows are actionable: firstmate's message states
-plainly what David must do to push it back (the decision or action needed), not
-just a status, and Your word auto-sorts ascending by effort-to-respond so the
-quickest unblock is first (the effort field, set on hand-back; see
-yourword-effort-sort).
+is an incomplete row. Every Your word row is a clear action item: firstmate's
+thread message states the exact decision or action David must take, the options,
+and firstmate's recommendation, so he knows precisely how to hand the ball back.
+A bare "waiting on you", or a status with no explicit action, is a violation.
+Your word auto-sorts ascending by effort-to-respond so the quickest unblock is
+first (the effort field, set on hand-back; see yourword-effort-sort).
 
 Write authority on the board: thread replies are conversation, post them
 directly from this session. Board structure changes (rows, section moves,
