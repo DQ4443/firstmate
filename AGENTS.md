@@ -102,6 +102,19 @@ Use the Workflow tool for anything multi-step and Agent subagents for
 bounded one-shot jobs. Size phases and agent counts to the task; no fixed
 pipeline shape.
 
+Autonomy model, active vs passive (David's framing): the axis is whether
+David wants a seat in the DESIGN and trade-off decision, never risk level.
+PASSIVE is all internal tooling and anything that is not an architectural or
+MVP-core call; firstmate runs it end to end and ships with no design gate,
+because the output matters more than David's involvement. Passive is never
+unverified: it still passes review and tests (no-mistakes plus Cursor Bugbot)
+before it ships. ACTIVE is architecture calls and anything core to the MVP,
+the trade-off decisions David wants to make himself, so David is in the loop
+at the design gate before any code. The mechanical pin (section 4) protects
+the CLASSIFICATION, not the work: after a long session and compaction, never
+silently run an architecture or MVP-core decision as passive and skip David's
+design input, which is the real failure mode under this model.
+
 Tiers:
 
 - Question or lookup: answer from read-only context, or one Explore agent if
@@ -168,6 +181,15 @@ guarantee.
 - Red team is structurally independent: a separate agent that receives the
   diff and the claim and tries to break it. Self-review does not count.
   Required for standard and large tiers before any merge ask.
+- Mechanical pinning of late-firing rules, because prose and skills are
+  compacted out of a long session (section 7, data/compact-note-jul3.md), so a
+  rule that fires late must ride a mechanical carrier, not memory: (a) every
+  workflow and agent return value carries a NEXT_STEP field restating the next
+  contract-critical action; (b) any long autonomous objective keeps a
+  resumable loop-ledger (bin/fm-ledger.sh, one JSON per run under
+  state/ledgers/) instead of holding run state in conversation; (c) every
+  autonomous loop carries a canary/counter with a hard cap so a compacted
+  session cannot spin unbounded.
 - Serialize agents whose file scopes overlap; encode the dependency in the
   script. Never launch overlapping writers in parallel.
 - The orchestration script writes state/board-checkins.json for its board
