@@ -11,8 +11,12 @@
 #   C (no pane -> graceful degrade): with no recorded pane and no discoverable
 #     one, fm_inject_wake returns 1 and submits nothing (the durable queue and
 #     the session's own drain still carry the event).
-#   D (stale record rejected): a recorded pane whose harness pid is dead does not
-#     inject (the session vacated that pane).
+#   D (vacated pane rejected): a recorded pane whose harness pid is dead AND whose
+#     foreground is no longer a harness does not inject (the session vacated it).
+#   D2 (resume-in-place delivers): a recorded pane whose harness pid is dead but
+#     whose foreground is still a live harness DOES inject - firstmate resumed in
+#     the same pane with a new pid and the stale recorded pid must not blind the
+#     push. This is the regression that left resumed sessions unwoken.
 #   E (discovery fallback): with no recorded file, the pane is found by matching
 #     the lock's harness pid to the pane whose pane_pid is its ancestor.
 #
@@ -179,7 +183,9 @@ else
   echo "skip (composer pending-detection unavailable in this terminal): deferral scenario"
 fi
 
-# --- D: stale record (dead harness pid) is rejected -------------------------
+# --- D: vacated pane (dead pid AND non-harness foreground) is rejected -------
+# The pane's foreground here is the loop's bash, which the default harness regex
+# does not match, so a dead recorded pid reads as a truly vacated pane.
 : > "$LOG_FILE"
 dead=99998
 while kill -0 "$dead" 2>/dev/null; do dead=$((dead - 1)); done
@@ -187,9 +193,31 @@ record_env "$dead"
 rm -f "$STATE_DIR/.lock"   # no discovery escape hatch
 FM_WAKE_PROMPT="INJECT-WAKE-DELTA" fm_inject_wake
 rc=$?
-[ "$rc" -eq 1 ] || fail "stale-record: expected rc 1 (no live pane), got $rc"
-grep -q "INJECT-WAKE-DELTA" "$LOG_FILE" && fail "stale-record: injected into a vacated pane"
-pass "D: recorded pane with a dead harness pid is rejected (no injection)"
+[ "$rc" -eq 1 ] || fail "vacated-pane: expected rc 1 (no live pane), got $rc"
+grep -q "INJECT-WAKE-DELTA" "$LOG_FILE" && fail "vacated-pane: injected into a vacated pane"
+pass "D: dead recorded pid AND non-harness foreground is rejected (no injection)"
+
+# --- D2: resume-in-place (dead pid, live harness foreground) still delivers ---
+# Same dead recorded pid as D, but now the pane's foreground counts as a harness
+# (firstmate resumed in place: same pane, new pid, stale recorded pid). The stale
+# pid must NOT blind the push; validation falls through to the foreground-command
+# check and delivery proceeds. Widen the harness regex to accept the loop's bash
+# as the stand-in harness, since we cannot rename the pane's real foreground.
+: > "$LOG_FILE"
+record_env "$dead"
+rm -f "$STATE_DIR/.lock"   # recorded env only; no discovery escape hatch
+_saved_harness_re="$FM_INJECT_HARNESS_RE"
+FM_INJECT_HARNESS_RE="bash|$FM_INJECT_HARNESS_RE"
+fm_inject_validate "$REAL_TMUX" "$SOCKET" "$PANE" "$dead" \
+  || fail "resume-in-place: dead recorded pid + live harness pane should validate"
+FM_WAKE_PROMPT="INJECT-WAKE-DELTA2" fm_inject_wake
+rc=$?
+FM_INJECT_HARNESS_RE="$_saved_harness_re"
+[ "$rc" -eq 0 ] || fail "resume-in-place: expected rc 0 (delivered), got $rc"
+sleep 0.4
+grep -qx "INJECT-WAKE-DELTA2" "$LOG_FILE" \
+  || fail "resume-in-place: nudge not delivered to the resumed pane"
+pass "D2: dead recorded pid but live harness foreground still delivers (resume survives)"
 
 # --- E: discovery fallback by lock harness pid ------------------------------
 : > "$LOG_FILE"
