@@ -201,7 +201,7 @@ case "$cmd" in
         claim_file="$QUEUE/claimed/$exec_id/$claimed_id.json"
         board_item=$(jq -r '.board_item // ""' "$claim_file" 2>/dev/null || echo "")
         # Light the board through the ONLY sanctioned board-adjacent call.
-        [ -n "$board_item" ] && "$ITEM_AGENT_SH" start "$board_item" "$exec_id" >/dev/null 2>&1 || true
+        if [ -n "$board_item" ]; then "$ITEM_AGENT_SH" start "$board_item" "$exec_id" >/dev/null 2>&1 || true; fi
 
         # ===== DORMANT task-execution HOOK (Phase 1) =====================
         # The real build (isolated worktree -> verify -> no-mistakes -> PR) is
@@ -227,7 +227,7 @@ case "$cmd" in
         else
           "$QUEUE_SH" fail "$exec_id" "$claimed_id" --reason "task hook rc=$hook_rc" >/dev/null 2>&1 || true
         fi
-        [ -n "$board_item" ] && "$ITEM_AGENT_SH" "done" "$board_item" >/dev/null 2>&1 || true
+        if [ -n "$board_item" ]; then "$ITEM_AGENT_SH" "done" "$board_item" >/dev/null 2>&1 || true; fi
         # Count the claim in executors.json.
         write_transform 'if .executors[$id] then .executors[$id].claims = ((.executors[$id].claims // 0) + 1) else . end' \
           --arg id "$exec_id" || true

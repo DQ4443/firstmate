@@ -136,7 +136,16 @@ write_json_atomic() {
 
 # file_mtime <path> - epoch of last content modification, portable across
 # BSD/macOS (stat -f %m) and GNU/Linux (stat -c %Y). 0 if unreadable.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+file_mtime() {
+  # GNU/Linux first (stat -c %Y), then BSD/macOS (stat -f %m). On Linux, the BSD
+  # form `stat -f` exits 0 but prints filesystem text ("File: ..."), which would
+  # feed non-numeric input into arithmetic and abort under `set -u`; always
+  # sanitize to a bare epoch so callers can do arithmetic safely on any platform.
+  local m
+  m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) || m=0
+  case "$m" in ''|*[!0-9]*) m=0 ;; esac
+  printf '%s\n' "$m"
+}
 
 # reap_rehome <src-file> <id> - re-home a reaped claim (or crash-orphaned staging
 # file): attempts++, to failed/ once it reaches the max else back to ready/ with
