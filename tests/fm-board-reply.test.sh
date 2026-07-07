@@ -94,6 +94,80 @@ run_reply "$d" item "shipped, marking done" --done >/dev/null \
   || fail "done: item should have left in_progress after --done"
 pass "--done closes the agent record so an agent-live item also demotes"
 
+# --- --effort stamps the row and rides the demotion into your_word -----------
+# The item starts message-live in in_progress; the reply demotes it to your_word.
+# The effort write lands on the in_progress row BEFORE the reconcile, and the
+# reconcile preserves row fields on the move, so the your_word row carries it.
+new_case
+seed_msglive "$d" item
+run_reply "$d" item "over to you, quick pick" --your-court --effort 1 >/dev/null \
+  || fail "effort: reply --effort 1 exited non-zero"
+[ "$(jq -r '.your_word[0].effort' "$d/state/board.json")" = 1 ] \
+  || fail "effort: your_word row should carry effort=1 after the demotion"
+pass "--effort <n> stamps effort on the row and it survives the demotion to your_word"
+
+# --- a plain your_word reply defaults effort to 3 without a flag --------------
+new_case
+seed_msglive "$d" item
+run_reply "$d" item "over to you" --your-court >/dev/null \
+  || fail "effort-default: reply exited non-zero"
+[ "$(jq -r '.your_word[0].effort' "$d/state/board.json")" = 3 ] \
+  || fail "effort-default: a your_word move with no --effort should default effort to 3"
+pass "a your_word move defaults effort to 3 when --effort is not given"
+
+# --- bare --effort (no intent flag; your-court is the default) stamps too -----
+new_case
+seed_msglive "$d" item
+run_reply "$d" item "quick one for you" --effort 2 >/dev/null \
+  || fail "effort-bare: reply --effort with no intent flag exited non-zero"
+[ "$(jq -r '.your_word[0].effort' "$d/state/board.json")" = 2 ] \
+  || fail "effort-bare: bare --effort (default your-court intent) should stamp effort"
+pass "--effort with no intent flag stamps effort on the default your_word move"
+
+# --- explicit --effort overrides; a later plain reply does not clobber it -----
+# Seed a your_word row that already carries effort=4.
+new_case
+mkdir -p "$d/threads/item"
+cat > "$d/state/board.json" <<'JSON'
+{
+  "meta": {"title": "cc"},
+  "your_word": [{"id": "item", "stamp": "decide", "rid": "IT", "what": "waiting", "effort": 4}],
+  "in_progress": [],
+  "holding": [],
+  "landed": []
+}
+JSON
+printf '{"items":{}}\n' > "$d/state/item-agents.json"
+run_reply "$d" item "still yours, more context" --your-court >/dev/null \
+  || fail "effort-noclobber: reply exited non-zero"
+[ "$(jq -r '.your_word[0].effort' "$d/state/board.json")" = 4 ] \
+  || fail "effort-noclobber: a plain reply must not overwrite an existing effort"
+run_reply "$d" item "actually a trivial yes/no now" --your-court --effort 1 >/dev/null \
+  || fail "effort-override: reply --effort 1 exited non-zero"
+[ "$(jq -r '.your_word[0].effort' "$d/state/board.json")" = 1 ] \
+  || fail "effort-override: explicit --effort should overwrite the existing effort"
+pass "a plain reply preserves an existing effort; explicit --effort overrides it"
+
+# --- --done leaves effort untouched (effort is a your_word concept) -----------
+# A finished workstream resting in your_word must not gain a spurious effort=3.
+new_case
+seed_msglive "$d" item
+FM_STATE_OVERRIDE="$d/state" "$AGENT" start item agent-xyz your_word >/dev/null
+run_reply "$d" item "shipped" --done >/dev/null || fail "done-effort: reply --done exited non-zero"
+[ "$(jq -r '.your_word[0].effort // "none"' "$d/state/board.json")" = none ] \
+  || fail "done-effort: --done should not stamp an effort"
+pass "--done does not stamp effort"
+
+# --- bad --effort values fail loudly -----------------------------------------
+new_case
+seed_msglive "$d" item
+if run_reply "$d" item "hi" --effort 0 >/dev/null 2>&1; then fail "effort-range: 0 should fail"; fi
+if run_reply "$d" item "hi" --effort 6 >/dev/null 2>&1; then fail "effort-range: 6 should fail"; fi
+if run_reply "$d" item "hi" --effort x >/dev/null 2>&1; then fail "effort-range: non-numeric should fail"; fi
+if run_reply "$d" item "hi" --effort >/dev/null 2>&1; then fail "effort-range: missing value should fail"; fi
+if run_reply "$d" item "hi" --done --effort 2 >/dev/null 2>&1; then fail "effort-range: --effort with --done should fail"; fi
+pass "out-of-range, non-numeric, valueless --effort, and --effort+--done all fail loudly"
+
 # --- bad input fails loudly --------------------------------------------------
 new_case
 seed_msglive "$d" item
