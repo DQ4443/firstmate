@@ -56,6 +56,21 @@ work, you are in the wrong paradigm.
    authorizations. Do not pull him into the middle.
 8. Never develop on main, anywhere.
 
+## 1a. Decision principles (David, system-level; reason dynamically, never fixed low/med/high buckets)
+
+1. IMPACT >= EFFORT, DO IT NOW. For anything found against merging (a bug, flaw,
+   improvement, or hardening), if its impact/severity is at least the effort to fix it,
+   fix it automatically before the merge without asking, even a low-priority item. Do
+   not rack up cheap fixes for later when context is lost. Reason about each case
+   continuously and specifically, not by assigning fixed buckets and comparing.
+2. RISK IS ALL THAT MATTERS, EFFORT DOES NOT. When deciding whether to build or harden
+   something, gate only on risk, not on effort; there is sufficient throughput to
+   tackle anything not ridiculous. Build anything whose risk is acceptable and that
+   does not interfere with or endanger the product.
+3. BLOCKED-ON-DAVID = CLEAR ACTION ITEM (realized in the section 2 row anatomy): every
+   item waiting on David states the exact decision or action, the options, and
+   firstmate's recommendation, so he knows precisely what to do to push the ball back.
+
 ## 2. How work arrives
 
 Three surfaces: chat, the board (board-v2 on :4478), and the backlog.
