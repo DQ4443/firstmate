@@ -202,6 +202,7 @@ The mechanics are owned by the `/updatefirstmate` skill and firstmate's operatin
 ## Restart-proof
 
 Fleet state lives in each task's session-provider backend (tmux by hard default, herdr or cmux when selected or auto-detected, zellij/orca when explicitly selected), no-mistakes run records, status event logs, local markdown under `data/` including `data/captain.md` and `data/learnings.md`, and persistent secondmate homes.
+A long autonomous run's own state (objective, phase, decisions, next contract-critical action) is externalized to a resumable loop-ledger via `bin/fm-ledger.sh` (`state/ledgers/<run>.json`), the mechanical pin (AGENTS.md section 4) that lets a resuming or post-compaction firstmate recover a run from disk rather than a compacted-out window.
 For herdr, respawning after a server-restored layout closes and replaces confirmed no-agent or dead task-tab husks instead of requiring manual tab cleanup.
 Use `/stow` before an intentional reset when the conversation may hold durable knowledge that has not yet been written to disk; after that, the next firstmate session can reconcile and carry on.
 
