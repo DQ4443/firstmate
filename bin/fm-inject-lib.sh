@@ -75,10 +75,22 @@ fm_inject_pid_under() {  # <child-pid> <ancestor-pid>
 
 # Validate a recorded (bin, socket, pane, harness-pid) tuple: the pane must
 # still exist on that server AND the session must still be live there. Liveness
-# is the recorded harness pid being alive (authoritative), or, if that pid is
-# unknown, the pane's foreground command still looking like a harness. A pane
-# that exists but whose harness died (now a bare shell) fails, so we never inject
-# into a pane the session has vacated.
+# is the recorded harness pid being alive (authoritative), or, when that pid is
+# unknown OR dead, the pane's foreground command still looking like a harness. A
+# pane that exists but whose harness died (now a bare shell) fails, so we never
+# inject into a pane the session has vacated.
+#
+# The dead-pid fallthrough is what keeps event-wake alive across a harness
+# resume: firstmate is routinely restarted in place (a `claude --resume`) and
+# comes back in the SAME tmux pane with a NEW pid, but the recorded
+# session-pane.env (and state/.lock) still name the pre-resume pid. The pane id
+# is the durable anchor across that resume; the harness pid is not. So a recorded
+# pid that is dead is NOT proof the pane was vacated - if the pane still exists
+# and still runs a harness foreground command, it is the live session and a valid
+# target. Only a dead recorded pid AND a non-harness (bare-shell) pane reads as
+# truly vacated. Before this fallthrough a dead-but-numeric recorded pid returned
+# hard failure, so a resumed firstmate silently stopped receiving board pushes
+# ("no firstmate pane to push to") until it re-registered by hand.
 fm_inject_validate() {  # <bin> <socket> <pane> <harness-pid>
   local b=$1 s=$2 pane=$3 hpid=$4 ids cmd
   [ -n "$pane" ] || return 1
@@ -86,7 +98,8 @@ fm_inject_validate() {  # <bin> <socket> <pane> <harness-pid>
   printf '%s\n' "$ids" | grep -qxF "$pane" || return 1
   if [ -n "$hpid" ] && printf '%s' "$hpid" | grep -qE '^[0-9]+$'; then
     kill -0 "$hpid" 2>/dev/null && return 0
-    return 1
+    # Recorded pid dead: fall through to the pane-command check rather than
+    # declaring the pane vacated (resume-in-place keeps the pane, changes the pid).
   fi
   cmd=$(fm_inject_run "$b" "$s" display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null) || return 1
   printf '%s' "$cmd" | grep -qiE "$FM_INJECT_HARNESS_RE"
