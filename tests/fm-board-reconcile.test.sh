@@ -199,4 +199,50 @@ jq -e '.your_word | map(.id) | index("collide")' "$d/board.json" >/dev/null \
   || fail "collision: the same-ms-answered item should demote to your_word"
 pass "same-ms collision: the -N-suffixed later write wins the newest-file tie-break"
 
+# --- empty-body view-events are ignored in the message-live author check -----
+# board-v2 logs an EMPTY-BODY message authored by david whenever David merely
+# OPENS/VIEWS a thread. That view-event must not flip an item into In progress,
+# and it must not mask an earlier real david message or an earlier firstmate
+# reply. The author check uses the newest message that HAS a body.
+new_case
+seed_board "$d"
+threads="$d/threads"
+# viewonly: a Your-word item whose newest (and only) message is an empty-body
+# david view-event -> NOT promoted.
+mkdir -p "$threads/viewonly"
+printf '{"author":"david","ts":"t"}\n\n'   > "$threads/viewonly/3000.md"
+# davidthenview: [real david message] then [empty david view] -> still live,
+# because the empty view is skipped and the real david message is newest-bodied.
+mkdir -p "$threads/davidthenview"
+printf '{"author":"david","ts":"t"}\nreal question\n' > "$threads/davidthenview/1000.md"
+printf '{"author":"david","ts":"t"}\n   \n'           > "$threads/davidthenview/2000.md"
+# answeredthenview: [david] [firstmate reply] then [empty david view] -> NOT
+# live: the newest bodied message is the firstmate reply, view is skipped.
+mkdir -p "$threads/answeredthenview"
+printf '{"author":"david","ts":"t"}\nq\n'        > "$threads/answeredthenview/1000.md"
+printf '{"author":"firstmate","ts":"t"}\nans\n'  > "$threads/answeredthenview/2000.md"
+printf '{"author":"david","ts":"t"}\n\n'         > "$threads/answeredthenview/3000.md"
+# Add rows for the new items.
+jq '.your_word += [
+  {"id":"viewonly","stamp":"do","rid":"VO","what":"only a view-event"},
+  {"id":"davidthenview","stamp":"do","rid":"DV","what":"real msg then a view"},
+  {"id":"answeredthenview","stamp":"do","rid":"AV","what":"answered then a view"}
+]' "$d/board.json" > "$d/b2" && mv "$d/b2" "$d/board.json"
+printf '{"items":{}}\n' > "$d/item-agents.json"
+rm -f "$d/.thread-author-parse-fail"
+FM_BOARD_THREADS_DIR="$threads" FM_STATE_OVERRIDE="$d" "$REC" >/dev/null 2>&1 || fail "view-event: reconcile errored"
+jq -e '.in_progress | map(.id) | index("viewonly") | not' "$d/board.json" >/dev/null \
+  || fail "view-event: an empty-body david view-event must NOT promote the item to in_progress"
+jq -e '.in_progress | map(.id) | index("davidthenview")' "$d/board.json" >/dev/null \
+  || fail "view-event: a real david message followed by an empty view-event must stay message-live"
+jq -e '.in_progress | map(.id) | index("answeredthenview") | not' "$d/board.json" >/dev/null \
+  || fail "view-event: a firstmate reply followed by an empty view-event must stay demoted"
+jq -e '.your_word | map(.id) | index("viewonly")' "$d/board.json" >/dev/null \
+  || fail "view-event: the view-only item should rest in your_word"
+# A newest empty-body view-event is NOT a parse failure (it has a valid header);
+# the parse-fail marker must not be raised by these threads.
+[ ! -f "$d/.thread-author-parse-fail" ] \
+  || fail "view-event: empty-body view-events must not be counted as author-parse failures"
+pass "empty-body view-events are ignored; the author check uses the newest bodied message"
+
 echo "all fm-board-reconcile tests passed"
