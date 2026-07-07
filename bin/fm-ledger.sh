@@ -52,12 +52,14 @@ FILE="$LEDGERS/$RUN.json"
 
 now() { date +%s; }
 
-write_atomic() {  # <json-on-stdin>
+write_atomic() {  # <json-string>
+  # Publish only a non-empty payload; the caller renders with jq and checks its
+  # status first, so a jq failure never reaches here to clobber the real ledger.
+  [ -n "$1" ] || { echo "fm-ledger: refusing to write empty ledger for '$RUN'" >&2; exit 1; }
   mkdir -p "$LEDGERS"
   local tmp="$LEDGERS/.$RUN.json.tmp.$$"
-  trap 'rm -f "$tmp" 2>/dev/null || true' EXIT
-  cat > "$tmp"
-  mv "$tmp" "$FILE"
+  printf '%s\n' "$1" > "$tmp" || { rm -f "$tmp" 2>/dev/null || true; exit 1; }
+  mv "$tmp" "$FILE" || { rm -f "$tmp" 2>/dev/null || true; exit 1; }
 }
 
 case "$CMD" in
@@ -73,14 +75,15 @@ case "$CMD" in
       esac
     done
     TS=$(now)
-    jq -n \
+    RENDERED=$(jq -n \
       --arg run "$RUN" \
       --arg objective "$OBJECTIVE" \
       --arg next "$NEXT" \
       --argjson ts "$TS" \
       '{run: $run, objective: $objective, phase: "", decisions: [],
-        next: $next, status: "active", created_at: $ts, updated_at: $ts}' \
-      | write_atomic
+        next: $next, status: "active", created_at: $ts, updated_at: $ts}') \
+      || { echo "fm-ledger: failed to render ledger for '$RUN'" >&2; exit 1; }
+    write_atomic "$RENDERED"
     echo "ledger created: $FILE"
     ;;
   update)
@@ -100,7 +103,7 @@ case "$CMD" in
     done
     # Build the added-decisions JSON array from the collected --decision values.
     ADD=$(printf '%s\n' "${DECISIONS[@]:-}" | jq -R . | jq -s 'map(select(. != ""))')
-    jq \
+    RENDERED=$(jq \
       --argjson set_phase "$SET_PHASE" --arg phase "$PHASE" \
       --argjson set_next "$SET_NEXT" --arg next "$NEXT" \
       --argjson set_status "$SET_STATUS" --arg status "$STATUS" \
@@ -111,7 +114,9 @@ case "$CMD" in
        | (if $set_status == 1 then .status = $status else . end)
        | .decisions = (.decisions + $add)
        | .updated_at = $ts' \
-      "$FILE" | write_atomic
+      "$FILE") \
+      || { echo "fm-ledger: failed to render ledger update for '$RUN' (corrupt or unreadable $FILE?)" >&2; exit 1; }
+    write_atomic "$RENDERED"
     echo "ledger updated: $FILE"
     ;;
   read)
