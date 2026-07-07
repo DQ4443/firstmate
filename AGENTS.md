@@ -85,6 +85,16 @@ no bookkeeping from the thread's newest-message author, so a David message flips
 the item in and your reply flips it back out on its own. The full contract is in
 fm-item-agent.sh and docs/liveness-board.md.
 
+Closing the loop is a board post, not a chat reply. A task answered only in
+chat is NOT closed: its newest thread message is still David's, so the board
+keeps it In progress and the count drifts. Every task or thread message you
+handle ends with a board close-out via bin/fm-board-reply.sh <item-id>
+"<outcome>" [--done|--your-court], which posts the firstmate-authored reply
+that makes you the newest author and reconciles the item out of In progress
+(--done also closes the agent record for a finished workstream; --your-court
+hands the ball back to David). Answering in chat without that close-out is a
+ghosted thread.
+
 The two board pollers (state/board-actions.check.sh,
 state/board-threads.check.sh) run under bin/fm-poll.sh, a launchd job
 (com.firstmate.poller) that survives this session and restarts itself. You
