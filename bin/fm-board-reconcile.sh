@@ -16,12 +16,15 @@
 #      phase boundary, AGENTS.md section 4). So a healthy long run stays live via
 #      its check-ins; a crashed or forgotten agent ages out of In progress on its
 #      own; an explicit `fm-item-agent.sh done` demotes immediately.
-#   2. Message-live: the NEWEST message file in the item's thread is authored by
-#      david - a fresh unanswered David message (AGENTS.md section 2). This is
-#      derived from the thread itself with no hand bookkeeping; a firstmate reply
-#      becomes the newest file and clears it, demoting the item to Your word. It
-#      is the same signal board-v2's auto-flip-on-send uses, so reconcile agrees
-#      with the board rather than fighting it.
+#   2. Message-live: the newest message file in the item's thread that HAS a body
+#      is authored by david - a fresh unanswered David message (AGENTS.md section
+#      2). This is derived from the thread itself with no hand bookkeeping; a
+#      firstmate reply becomes the newest bodied file and clears it, demoting the
+#      item to Your word. Empty-body view-events (board-v2 logs one authored by
+#      david whenever David merely OPENS/VIEWS a thread) are ignored, so a bare
+#      thread-open never flips a done or waiting-on-David item back to In
+#      progress. It is the same signal board-v2's auto-flip-on-send uses, so
+#      reconcile agrees with the board rather than fighting it.
 # The registration contract firstmate follows lives in fm-item-agent.sh and
 # docs/liveness-board.md.
 #
@@ -29,8 +32,8 @@
 # board-v2 (lib/store.ts, a separate repo): data/board-threads/<item-id>/
 # <epoch-ms>[-N].md, whose FIRST line is a single-line JSON object carrying
 # .author. Message-live parses exactly that. If the format ever drifts, the
-# scan counts each newest thread file whose first line does not parse to an
-# object with a string .author and surfaces the count once per outage via
+# scan counts each newest-bodied thread file whose first line does not parse to
+# an object with a string .author and surfaces the count once per outage via
 # state/.thread-author-parse-fail (cleared on a clean cycle), instead of
 # silently reading every item as not-david and demoting unanswered-David rows.
 #
@@ -192,7 +195,7 @@ while IFS= read -r id; do
   # becomes 1000-1.md against the david 1000.md. Sort by the numeric ms prefix,
   # then the numeric collision suffix (a bare base = suffix 0), so
   # 1000.md < 1000-1.md < 1000-2.md and the truly-newest file wins the tie.
-  newest=$(
+  sorted=$(
     for f in "$tdir"/*.md; do
       [ -e "$f" ] || continue
       base=$(basename "$f" .md)
@@ -203,8 +206,28 @@ while IFS= read -r id; do
       suf="${base#*-}"
       if [ "$suf" = "$base" ]; then suf=0; fi
       printf '%s\t%s\t%s\n' "$ms" "$suf" "$f"
-    done | sort -k1,1n -k2,2n | tail -1 | cut -f3
+    done | sort -k1,1n -k2,2n | cut -f3
   )
+  # Pick the newest file that has a NON-EMPTY body, ignoring empty-body
+  # view-events. board-v2 logs an empty-body message authored by david whenever
+  # David merely OPENS/VIEWS a thread (no actual text); a bare thread-open must
+  # not flip a done or waiting-on-David item back into In progress. Iterating the
+  # ascending list and keeping the LAST file with a non-empty body yields the
+  # newest substantive message: [real david][empty view] keeps the david message
+  # (the view is skipped, item stays live), a firstmate reply followed by empty
+  # views stays demoted, and an all-view-events thread has no substantive message
+  # and so is not message-live.
+  newest=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # Body = everything after the header line (line 1). Non-empty iff any
+    # non-whitespace char remains; tr strips spaces AND newlines.
+    if [ -n "$(tail -n +2 "$f" 2>/dev/null | tr -d '[:space:]')" ]; then
+      newest="$f"
+    fi
+  done <<EOF
+$sorted
+EOF
   [ -n "$newest" ] || continue
   # The first line must parse to a JSON object with a string .author (the
   # cross-repo contract in the header). Anything else is contract drift, not
