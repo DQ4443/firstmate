@@ -60,6 +60,18 @@ extra=${4:-}
 [ -n "$msg" ] || die "message is required (nothing to post)"
 [ -z "$extra" ] || die "unexpected extra argument: '$extra'"
 printf '%s' "$item" | grep -qE "$ID_RE" || die "invalid item id: '$item'"
+# A message that starts with -- is almost always a forgotten message with the
+# flag slid into its slot (fm-board-reply.sh item --done). Posting "--done" as
+# the outcome and skipping the flag is silently the wrong thing, so refuse it:
+# the message is positional and comes before any flag.
+case "$msg" in
+  --*) die "message looks like a flag ('$msg'); the message is the 2nd argument, before --done/--your-court" ;;
+esac
+# A whitespace-only message would render as an empty outcome, and once the
+# reconcile's empty-body view-event filter lands it would NOT clear message-live
+# (the reply would count as a bodyless view), so the item would never demote.
+# Require real content.
+[ -n "$(printf '%s' "$msg" | tr -d '[:space:]')" ] || die "message is only whitespace (nothing to post)"
 
 done_flag=0
 case "$flag" in

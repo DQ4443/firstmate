@@ -100,6 +100,10 @@ seed_msglive "$d" item
 run_reply "$d" item >/dev/null 2>&1 && fail "input: missing message should fail" || true
 run_reply "$d" item "hi" --bogus >/dev/null 2>&1 && fail "input: unknown flag should fail" || true
 run_reply "$d" "Bad_Id" "hi" >/dev/null 2>&1 && fail "input: invalid id should fail" || true
-pass "missing message, unknown flag, and invalid id all fail loudly"
+# A forgotten message with the flag in its slot must not post "--done" as the body.
+run_reply "$d" item --done >/dev/null 2>&1 && fail "input: a flag-shaped message should fail" || true
+# A whitespace-only message would not clear message-live under the empty-body filter.
+run_reply "$d" item "   " >/dev/null 2>&1 && fail "input: whitespace-only message should fail" || true
+pass "missing/flag-shaped/whitespace message, unknown flag, and invalid id all fail loudly"
 
 echo "all fm-board-reply tests passed"
