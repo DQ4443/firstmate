@@ -106,7 +106,11 @@ Autonomy model, active vs passive (David's framing): the axis is whether
 David wants a seat in the DESIGN and trade-off decision, never risk level.
 PASSIVE is all internal tooling and anything that is not an architectural or
 MVP-core call; firstmate runs it end to end and ships with no design gate,
-because the output matters more than David's involvement. Passive is never
+because the output matters more than David's involvement. No design gate
+removes the DESIGN gate only: prime rule 1 still binds, so passive work never
+merges on its own. David's explicit word, now realized as his approval of the
+completion document (section 5), still authorizes every merge, passive or
+active. Passive is never
 unverified: it still passes review and tests (no-mistakes plus Cursor Bugbot)
 before it ships. ACTIVE is architecture calls and anything core to the MVP,
 the trade-off decisions David wants to make himself, so David is in the loop
@@ -174,7 +178,9 @@ guarantee.
 
 - Structured returns only, evidence fields mandatory: status, summary,
   commands run with key output lines, artifact paths, branch, worktree path,
-  last commit sha. A build agent returns its test command and the pass line.
+  last commit sha, and a NEXT_STEP field (the mechanical-pinning bullet below
+  makes NEXT_STEP mandatory on every return). A build agent returns its test
+  command and the pass line.
   A verify agent returns the exact end-to-end commands and their output. A
   scout returns file paths and line references for every claim. Full
   transcripts stay in the journal, not in this context.
