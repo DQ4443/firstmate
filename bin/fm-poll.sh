@@ -53,6 +53,7 @@ INJECT_SEQ_FILE="$STATE/.wake-inject-seq"
 NOPANE_MARK="$STATE/.wake-inject-nopane"
 TIMEOUT_MARK="$STATE/.wake-inject-timeout"
 RECONCILE_FAIL_MARK="$STATE/.reconcile-fail"
+REAP_FAIL_MARK="$STATE/.queue-reap-fail"
 INJECT_DEBOUNCE=${FM_WAKE_INJECT_DEBOUNCE:-8}   # seconds; coalesce a burst
 case "$INJECT_DEBOUNCE" in ''|*[!0-9]*) INJECT_DEBOUNCE=8 ;; esac
 INJECT_TIMEOUT=${FM_WAKE_INJECT_TIMEOUT:-20}    # seconds; wall-clock cap on a push
@@ -233,6 +234,32 @@ maybe_reconcile_board() {
   fi
 }
 
+# Sharded-executors claim reaper: re-home claims whose owning executor died or
+# whose lease expired, back to ready/ (attempts++) or to failed/ past the max
+# (bin/fm-queue.sh reap). Mirrors maybe_reconcile_board exactly - same
+# run_with_timeout belt, same once-per-outage stderr marker - so a wedged queue
+# can never stall the poller. STRICT ADOPTION SWITCH: a COMPLETE no-op while the
+# queue dir (default state/queue) does not exist, so this changes NOTHING about
+# the current live poller until the queue is adopted by hand. Disable entirely
+# with FM_QUEUE_REAP=0. Side-effect-scoped to the queue dir; never touches the
+# board or the wake queue.
+maybe_reap_claims() {
+  [ "${FM_QUEUE_REAP:-1}" = 1 ] || return 0
+  local q="${FM_QUEUE_DIR:-$STATE/queue}"
+  [ -d "$q" ] || return 0
+  local reaper="$SCRIPT_DIR/fm-queue.sh" err rc
+  [ -f "$reaper" ] || return 0
+  err=$(run_with_timeout "$TIMEOUT" bash "$reaper" reap 2>&1 >/dev/null); rc=$?
+  if [ "$rc" -ne 0 ] || [ -n "$err" ]; then
+    if [ ! -f "$REAP_FAIL_MARK" ]; then
+      touch "$REAP_FAIL_MARK" 2>/dev/null || true
+      echo "fm-poll: claim reaper failing (rc=$rc): $(printf '%s' "$err" | head -1) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+    fi
+  else
+    rm -f "$REAP_FAIL_MARK" 2>/dev/null || true
+  fi
+}
+
 mkdir -p "$STATE"
 
 # Home-scoped singleton with PID-reuse safety: the pidfile records the poller's
@@ -305,5 +332,6 @@ while :; do
   done
   maybe_inject_wake
   maybe_reconcile_board
+  maybe_reap_claims
   sleep "$INTERVAL"
 done
