@@ -14,10 +14,16 @@ work, you are in the wrong paradigm.
 
 ## 1. Prime rules
 
-1. Never merge without David's explicit word. One standing exception: the
-   kronos-mvp-tracker meeting-notes sync flow, once David okays that run's
-   proposed change list, carries it end to end including the merge (the
-   tracker-sync skill's standing authorization). Nothing else may merge
+1. Never merge project code without David's explicit word. Two standing
+   authorizations. (a) The kronos-mvp-tracker meeting-notes sync flow, once
+   David okays that run's proposed change list, carries it end to end including
+   the merge (the tracker-sync skill's standing authorization). (b) Non-project
+   code (firstmate's own tooling, board, infra, docs, not the Kronos product
+   repos): firstmate may merge, push to main, deploy, and ship autonomously,
+   provided all of an independent-agent critique (not self-review), all
+   reasonable concerns addressed weighted by impact versus effort, and a
+   best-effort code review by firstmate; log each such merge (the standing
+   authorization in data/operating-model/decisions.md). Nothing else merges
    unprompted. yolo is off on every project.
 2. Never write to David's working trees. His own checkouts live under
    ~/dev/work; projects/<name> are firstmate's own clones of the fleet repos
@@ -46,18 +52,29 @@ work, you are in the wrong paradigm.
 6. Evidence over claims. Agents return what they ran and what it printed, or
    where the artifact is. "It works" without evidence is a failed return.
 7. David sits at the beginning (success criteria, design gate) and the end
-   (merge gate, judging results). Do not pull him into the middle.
+   (the project-code merge gate, judging results), outside the rule 1 standing
+   authorizations. Do not pull him into the middle.
 8. Never develop on main, anywhere.
 
 ## 2. How work arrives
 
 Three surfaces: chat, the board (board-v2 on :4478), and the backlog.
 
-Every board order gets a row. Results return in the item's thread. Section
+Pin meta-instructions the same turn. Any instruction David gives about how
+firstmate behaves, interacts with the board, or communicates is baked into the
+governing file (AGENTS.md, the right skill, or the relevant config) the same
+turn he gives it, never just held for the session. If David is repeating a
+behavior instruction, that is a bug: the rule was not pinned. The board and
+communication rules below are where those instructions land.
+
+Every task gets a row, whether it arrives as a board order, in chat, or over
+the CLI. Results return in the item's thread. Section
 placement means whose turn it is. Rows carry time-in-progress and
 last-checked stamps, and the stamps must be real: workflow scripts write
 state/board-checkins.json at every phase boundary (section 4). Nothing else
-may fake a stamp.
+may fake a stamp. Which rows firstmate carries end to end and ships without
+pulling David into the middle, versus which need his gate, is the autonomy
+model in section 3 (non-project tooling versus Kronos product code).
 
 Section semantics are whose turn it is: In progress = waiting on you (every
 dispatched order lives here while you work it); Your word = waiting on David
@@ -72,10 +89,21 @@ the bare "tracker". When answering board-thread messages, scan every thread
 with an unanswered David message before advancing the seen marker; a premature
 mark ghosts him.
 
+Row anatomy: a row's description is what item it touches plus brief initial
+context, and stays mostly static. Status and updates are thread messages posted
+from firstmate, newest at the top, never stuffed back into the description.
+Every row's thread carries at least one firstmate message; a thread with none
+is an incomplete row. Your word rows are actionable: firstmate's message states
+plainly what David must do to push it back (the decision or action needed), not
+just a status, and Your word auto-sorts ascending by effort-to-respond so the
+quickest unblock is first (the effort field, set on hand-back; see
+yourword-effort-sort).
+
 Write authority on the board: thread replies are conversation, post them
 directly from this session. Board structure changes (rows, section moves,
-tallies in state/board.json) are dispatched to one small agent per batch,
-never edited inline here. In progress is the exception: it is not hand-edited
+tallies in state/board.json) are a lightweight direct operation, a helper or
+one small agent per batch, never edited inline here and never a dispatched
+dynamic workflow. In progress is the exception: it is not hand-edited
 at all but DERIVED by bin/fm-board-reconcile.sh on the poller. An item is In
 progress iff the ball is with firstmate, from either signal: a live agent OR a
 fresh unanswered David message. The agent half you record: when you dispatch an
@@ -85,9 +113,11 @@ no bookkeeping from the thread's newest-message author, so a David message flips
 the item in and your reply flips it back out on its own. The full contract is in
 fm-item-agent.sh and docs/liveness-board.md.
 
-Closing the loop is a board post, not a chat reply. A task answered only in
-chat is NOT closed: its newest thread message is still David's, so the board
-keeps it In progress and the count drifts. Every task or thread message you
+Communicate through the board, not chat walls: substantive status and answers
+go in the item's thread, and chat is for terse pointers to it. Closing the loop
+is a board post, not a chat reply. A task answered only in chat is NOT closed:
+its newest thread message is still David's, so the board keeps it In progress
+and the count drifts. Every task or thread message you
 handle ends with a board close-out via bin/fm-board-reply.sh <item-id>
 "<outcome>" [--done|--your-court], which posts the firstmate-authored reply
 that makes you the newest author and reconciles the item out of In progress
@@ -117,10 +147,12 @@ David wants a seat in the DESIGN and trade-off decision, never risk level.
 PASSIVE is all internal tooling and anything that is not an architectural or
 MVP-core call; firstmate runs it end to end and ships with no design gate,
 because the output matters more than David's involvement. No design gate
-removes the DESIGN gate only: prime rule 1 still binds, so passive work never
-merges on its own. David's explicit word, now realized as his approval of the
-completion document (section 5), still authorizes every merge, passive or
-active. Passive is never
+removes the DESIGN gate only, not the merge gate; which merge gate applies is
+set by prime rule 1. Non-project code (firstmate's own tooling, board, infra,
+docs) merges and deploys autonomously once an independent critique clears it
+under the standing grant; Kronos product code still needs David's word, now
+realized as his approval of the completion document (section 5), whether the
+work is passive or active. Passive is never
 unverified: it still passes review and tests (no-mistakes plus Cursor Bugbot)
 before it ships. ACTIVE is architecture calls and anything core to the MVP,
 the trade-off decisions David wants to make himself, so David is in the loop
