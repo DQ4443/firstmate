@@ -113,7 +113,12 @@ itself (e.g. "Wire the admin dashboard KPIs to the live backend API", not "the
 admin dashboard"), naming the item, surface, or repo it touches plus brief
 initial context. It stays static. All status and progress lives in thread
 messages posted from firstmate, newest at the top, never stuffed into the
-description or a status field.
+description, a sub-line, or a status field. The ONLY content on a row is its
+task description plus its links: a row carries no sub, no status, and no
+needs-from-David field. Every status update and everything firstmate needs from
+David lives in the thread, never on the row. Any document, page, PR, or other
+artifact a task produces is attached to the row's links field, not merely
+mentioned in a thread message.
 Every row's thread carries at least one firstmate message; a thread with none
 is an incomplete row. Every Your word row is a clear action item: firstmate's
 thread message states the exact decision or action David must take, the options,
