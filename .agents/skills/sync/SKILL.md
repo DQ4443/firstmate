@@ -10,7 +10,7 @@ metadata:
 
 David suspects firstmate has drifted from reality: a ghosted thread, a stalled item, a status that no longer matches. Reconcile fast, fix what is broken, report only the deltas. Run the checks below cheapest-first. Act on problems; stay silent on anything healthy.
 
-1. Threads waiting on you. Scan every board thread for an unanswered David message (thread whose newest author is David). Answer them oldest-first BEFORE advancing any seen marker, a premature mark ghosts him. Thread replies post directly from this session. Confirm no waiting-on-David item is mis-parked in Holding (Holding is dependency-blocked ONLY).
+1. Threads waiting on you. Scan every board thread for an unanswered David message (thread whose newest author is David). Answer them oldest-first BEFORE advancing any seen marker, a premature mark ghosts him. Close the loop on the board, do not just answer in chat: post each reply with `bin/fm-board-reply.sh <item-id> "<outcome>" [--done|--your-court]` so firstmate becomes the newest thread author and the item reconciles out of In progress. An In-progress item you already answered in chat but never posted is the ghost this catches: post the in-thread reply now. Confirm no waiting-on-David item is mis-parked in Holding (Holding is dependency-blocked ONLY).
 
 2. Poller and wakes. `launchctl list com.firstmate.poller` (and com.firstmate.board-v2). If dead, restart and confirm it comes back. Drain queued wakes (`bin/fm-wake-drain.sh`) and re-read state/board.json so your view matches the board. Live poller plus zero queued wakes means the delivery path is in sync.
 
