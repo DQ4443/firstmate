@@ -176,4 +176,99 @@ assert_contains "$out" "DORMANT" "dormant: run should announce it is dormant"
 assert_present "$(ready_f e2)" "dormant: the task must remain UNCLAIMED with no hook wired"
 pass "executor is DORMANT without a task hook: it announces and refuses to drain"
 
+# --- FINDING 1: claim/reap TOCTOU - a mid-stamp claim is never re-homed --------
+# The reported race: claim does the atomic ready->claimed rename, THEN stamps
+# owner_pid/beat as a second step. In that gap the claimed file still carries the
+# enqueue defaults owner_pid:0/beat:0, and the old reaper treated owner_pid<=0 as
+# dead AND beat=0 as expired -> it re-homed the just-claimed task -> a second
+# executor claimed it -> DUPLICATE execution. This test reproduces the exact
+# post-mv/pre-stamp state (owner_pid:0, beat:0) and asserts the reaper does NOT
+# re-home a FRESH one, while an OLD genuinely-stuck unstamped claim IS reaped
+# after the grace period. (Fails on the pre-fix reaper, which re-homes the fresh
+# one immediately.)
+new_case
+mkdir -p "$FM_QUEUE_DIR/claimed/ex1" "$FM_QUEUE_DIR/ready"
+# Direct reproduction: a VISIBLE post-mv/pre-stamp claim (owner_pid:0, beat:0),
+# just created (fresh mtime). A reap in this window must leave it alone.
+vis="$FM_QUEUE_DIR/claimed/ex1/t7.json"
+jq -n '{id:"t7", owner:"", owner_pid:0, started:0, beat:0, attempts:0}' > "$vis"
+FM_QUEUE_CLAIM_GRACE=30 "$Q" reap >/dev/null || fail "toctou: reap errored on a fresh visible claim"
+assert_absent "$(ready_f t7)" "toctou: a fresh (mid-stamp) claim must NOT be re-homed to ready/ (the race)"
+assert_present "$vis" "toctou: the fresh mid-stamp claim must be left in place"
+# The same claim, but genuinely stuck (backdate mtime past the grace): MUST reap.
+touch -t 200001010000 "$vis"
+FM_QUEUE_CLAIM_GRACE=30 "$Q" reap >/dev/null || fail "toctou: reap errored on an old visible claim"
+assert_present "$(ready_f t7)" "toctou: an OLD genuinely-stuck unstamped claim MUST be re-homed after grace"
+# And the authentic post-mv/pre-stamp representation under the fix is the hidden
+# .claiming.<epoch> staging file; it obeys the same grace: fresh is left, an old
+# crash-orphan converges back to ready/ with attempts++. (The reaper rmdir'd the
+# now-empty claimed/ex1 after re-homing t7 above, so recreate it.)
+mkdir -p "$FM_QUEUE_DIR/claimed/ex1"
+fresh="$FM_QUEUE_DIR/claimed/ex1/.t1.json.claiming.$(date +%s).4242"
+jq -n '{id:"t1", owner:"", owner_pid:0, started:0, beat:0, attempts:0}' > "$fresh"
+FM_QUEUE_CLAIM_GRACE=30 "$Q" reap >/dev/null || fail "toctou: reap errored on a fresh staging file"
+assert_absent "$(ready_f t1)" "toctou: a fresh staging (mid-claim) file must NOT be re-homed"
+assert_present "$fresh" "toctou: the fresh staging file must be left in place"
+old="$FM_QUEUE_DIR/claimed/ex1/.t9.json.claiming.$(( $(date +%s) - 100 )).4243"
+jq -n '{id:"t9", owner:"", owner_pid:0, started:0, beat:0, attempts:0}' > "$old"
+FM_QUEUE_CLAIM_GRACE=30 "$Q" reap >/dev/null || fail "toctou: reap errored on an old staging file"
+assert_present "$(ready_f t9)" "toctou: an old crash-orphaned staging claim MUST be re-homed to ready/"
+assert_absent "$old" "toctou: the old staging file should be removed once re-homed"
+jq -e '.attempts == 1 and .owner == "" and .owner_pid == 0' "$(ready_f t9)" >/dev/null \
+  || fail "toctou: the re-homed record should have attempts=1 and cleared owner"
+pass "finding 1: a mid-stamp claim is never reaped; a genuinely-stuck unstamped one is (after grace)"
+
+# --- FINDING 2: a freshened lease is not reaped; heartbeat plumbing works -------
+# The reaper re-homes a claim whose beat is older than LEASE_TTL. A build hook
+# routinely outlives the default lease, so the executor must heartbeat the CLAIM
+# while the hook runs. Part A: a claim freshened by `fm-queue.sh beat` survives a
+# reap past the original lease. Part B: the executor's background heartbeat loop
+# actually advances the claim's beat while the hook runs.
+# Part A control: a stale, un-freshened claim IS reaped past the lease.
+new_case
+"$Q" enqueue hb0 >/dev/null || fail "hb-A: enqueue failed"
+"$Q" claim ex1 --owner-pid $$ >/dev/null || fail "hb-A: claim failed"
+cf=$(claim_f ex1 hb0); tmp="$d/cf.tmp"; jq '.beat = 1' "$cf" > "$tmp" && mv "$tmp" "$cf"
+FM_QUEUE_LEASE_TTL=1 FM_QUEUE_CLAIM_GRACE=0 "$Q" reap >/dev/null || fail "hb-A: reap errored"
+assert_present "$(ready_f hb0)" "hb-A control: a stale un-freshened claim past its lease IS reaped"
+# Part A: a live claim freshened by `beat` survives the same reap (isolated case
+# so the re-homed control task cannot be claimed ahead of this one).
+new_case
+"$Q" enqueue hb1 >/dev/null || fail "hb-A: enqueue failed"
+"$Q" claim ex1 --owner-pid $$ >/dev/null || fail "hb-A: claim failed"
+cf=$(claim_f ex1 hb1); tmp="$d/cf.tmp"; jq '.beat = 1' "$cf" > "$tmp" && mv "$tmp" "$cf"  # simulate an old lease
+"$Q" beat ex1 hb1 >/dev/null || fail "hb-A: beat failed"                                  # freshen it
+jq -e '.beat > 1' "$cf" >/dev/null || fail "hb-A: beat did not advance the claim's beat field"
+FM_QUEUE_LEASE_TTL=1 FM_QUEUE_CLAIM_GRACE=0 "$Q" reap >/dev/null || fail "hb-A: reap errored"
+assert_present "$(claim_f ex1 hb1)" "hb-A: a claim freshened by beat is NOT reaped past the original lease"
+assert_absent "$(ready_f hb1)" "hb-A: the freshened claim must not have been re-homed"
+pass "finding 2A: fm-queue.sh beat freshens a claim's lease so the reaper does not re-home it"
+
+# Part B: the executor's mid-task heartbeat advances the claim beat during a hook.
+new_case
+hook="$d/slowhook.sh"
+cat > "$hook" <<'SH'
+#!/usr/bin/env bash
+# $1=task-id $2=claim-file. Record the claim's beat, sleep past a heartbeat
+# interval, record it again; the test asserts the executor bumped it meanwhile.
+before=$(jq -r '.beat // 0' "$2")
+echo "$before" > "$FM_HB_OUT/before"
+sleep 3
+after=$(jq -r '.beat // 0' "$2")
+echo "$after" > "$FM_HB_OUT/after"
+echo "beefbeef"
+exit 0
+SH
+chmod +x "$hook"
+export FM_HB_OUT="$d/hb"; mkdir -p "$FM_HB_OUT"
+"$Q" enqueue hb2 --board-item bd2 --pool any >/dev/null || fail "hb-B: enqueue failed"
+# LEASE_TTL=4 -> heartbeat every 1s; the 3s hook gets ~2-3 beats.
+FM_EXECUTOR_TASK_HOOK="$hook" FM_QUEUE_LEASE_TTL=4 FM_EXECUTOR_MAX_ITER=1 FM_EXECUTOR_IDLE=1 \
+  "$EX" run drainer --pool any >/dev/null 2>&1 || fail "hb-B: run errored"
+before=$(cat "$FM_HB_OUT/before"); after=$(cat "$FM_HB_OUT/after")
+[ "$after" -gt "$before" ] || fail "hb-B: the mid-task heartbeat should advance the claim beat (before=$before after=$after)"
+assert_present "$(done_f hb2)" "hb-B: the task should still complete to done/ after the heartbeated hook"
+unset FM_HB_OUT
+pass "finding 2B: the executor heartbeats the claim while the hook runs (beat advances mid-task)"
+
 echo "all fm-queue tests passed"

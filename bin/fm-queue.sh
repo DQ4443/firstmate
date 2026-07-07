@@ -23,20 +23,29 @@
 # serialization is Phase 3); they are carried so the record does not have to
 # change shape later.
 #
-# CLAIM PROTOCOL: claim = `mv ready/<id>.json claimed/<exec>/<id>.json`. rename(2)
-# is atomic on a single local filesystem, so exactly one concurrent claimer wins
-# (the losers' source is already gone and their mv fails). This is lockless by
-# construction: the rename is the lock. Everything else is a temp-then-rename
-# content write, matching bin/fm-board-checkin.sh / bin/fm-item-agent.sh. This
-# atomicity assumes single-machine local disk; it would break on NFS/multi-host,
-# which is out of scope for Phase 1.
+# CLAIM PROTOCOL: claim wins the lock by renaming ready/<id>.json to a HIDDEN,
+# timestamped staging name `claimed/<exec>/.<id>.json.claiming.<epoch>.<pid>`;
+# rename(2) is atomic on a single local filesystem, so exactly one concurrent
+# claimer wins (the losers' source is already gone and their mv fails). It then
+# stamps owner_pid/beat in the staging file and PUBLISHES it under
+# claimed/<exec>/<id>.json, so the reaper (which globs *.json) never sees an
+# unstamped claim - closing the claim/reap TOCTOU (a reap in the old
+# mv-then-stamp gap re-homed a just-claimed task -> duplicate execution). The
+# rename is still the lock; this is lockless by construction. Everything else is
+# a temp-then-rename content write, matching bin/fm-board-checkin.sh /
+# bin/fm-item-agent.sh. This atomicity assumes single-machine local disk; it
+# would break on NFS/multi-host, which is out of scope for Phase 1.
 #
-# HEARTBEAT + RECLAIM: a claiming executor stamps owner_pid + beat. The `reap`
+# HEARTBEAT + RECLAIM: a claiming executor stamps owner_pid + beat, and (via
+# bin/fm-executor.sh) heartbeats the claim's beat on a background loop while its
+# build hook runs, so a long build never lets the lease expire. The `reap`
 # subcommand (run each cycle by the poller, bin/fm-poll.sh maybe_reap_claims)
 # re-homes a claim whose owner PID is dead (kill -0 via fm-wake-lib's
 # fm_pid_alive) or whose beat is older than the lease TTL: back to ready/ with
 # attempts++ , or to failed/ once attempts reach the max. A claim whose task
-# already has a done/<id>.json is dropped (idempotency: it finished).
+# already has a done/<id>.json is dropped (idempotency: it finished). A hidden
+# .claiming.<epoch> staging file (a claim that crashed mid-publish) is re-homed
+# only once older than CLAIM_GRACE, so a fresh mid-stamp claim is never touched.
 #
 # ADOPTION SWITCH: `reap` is a COMPLETE no-op when $FM_QUEUE_DIR does not exist,
 # so wiring it into the live poller changes nothing until the queue is adopted
@@ -79,6 +88,19 @@ MAX_ATTEMPTS="${FM_QUEUE_MAX_ATTEMPTS:-3}"
 case "$LEASE_TTL" in ''|*[!0-9]*) LEASE_TTL=1800 ;; esac
 case "$MAX_ATTEMPTS" in ''|*[!0-9]*) MAX_ATTEMPTS=3 ;; esac
 
+# CLAIM_GRACE - the window that protects a just-won, not-yet-stamped claim from
+# the reaper (the claim/reap TOCTOU guard). `claim` wins the ready->claimed
+# rename, then stamps owner_pid/beat in a second step; a reap firing in that gap
+# must never re-home the claim. Two guards use this constant: (1) a claim is
+# published under its <id>.json name only AFTER it is stamped - the pre-stamp
+# record lives under a hidden .claiming.<epoch> staging name the reaper's *.json
+# glob ignores - so an unstamped <id>.json is never visible; (2) the reaper
+# re-homes a crash-orphaned staging file only once it is older than this grace,
+# so a claim being stamped RIGHT NOW is never touched. Must exceed the
+# sub-second stamp duration with wide margin.
+CLAIM_GRACE="${FM_QUEUE_CLAIM_GRACE:-30}"
+case "$CLAIM_GRACE" in ''|*[!0-9]*) CLAIM_GRACE=30 ;; esac
+
 # Same strict slug the board server enforces (board-v2 lib/store.ts ID_RE), so a
 # typo cannot register a ghost task or escape the queue directory.
 ID_RE='^[a-z0-9][a-z0-9-]{0,63}$'
@@ -110,6 +132,30 @@ write_json_atomic() {
     rm -f "$tmp" 2>/dev/null || true
     die "failed to write $dest"
   fi
+}
+
+# file_mtime <path> - epoch of last content modification, portable across
+# BSD/macOS (stat -f %m) and GNU/Linux (stat -c %Y). 0 if unreadable.
+file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+# reap_rehome <src-file> <id> - re-home a reaped claim (or crash-orphaned staging
+# file): attempts++, to failed/ once it reaches the max else back to ready/ with
+# owner cleared, then remove <src-file>. Shared by the staging-orphan sweep and
+# the main claim loop so both dead-letter identically.
+reap_rehome() {
+  local src=$1 id=$2 attempts
+  attempts=$(jq -r '.attempts // 0' "$src" 2>/dev/null || echo 0)
+  case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
+    jq --argjson n "$attempts" --arg reason "max-attempts ($MAX_ATTEMPTS) exceeded" \
+       '.attempts = $n | .owner = "" | .owner_pid = 0 | .fail_reason = $reason' \
+       "$src" | write_json_atomic "$FQ/$id.json"
+  else
+    jq --argjson n "$attempts" '.attempts = $n | .owner = "" | .owner_pid = 0 | .started = 0' \
+       "$src" | write_json_atomic "$RQ/$id.json"
+  fi
+  rm -f "$src" 2>/dev/null || true
 }
 
 now=$(date +%s)
@@ -177,25 +223,45 @@ case "$cmd" in
         pp=$(jq -r '.pool_pref // "any"' "$f" 2>/dev/null || echo any)
         [ "$pp" = any ] || [ "$pp" = "$pool" ] || continue
       fi
-      dst="$CQ/$exec_id/$id.json"
-      if mv "$f" "$dst" 2>/dev/null; then
-        # Won the claim; this file is now exclusively ours to update in place.
+      # CLAIM/REAP TOCTOU FIX: win the lock by renaming ready -> a HIDDEN,
+      # timestamped staging name (never matched by the reaper's *.json glob),
+      # stamp owner_pid/beat there, then PUBLISH under <id>.json. The reaper
+      # therefore never sees an unstamped <id>.json (the owner_pid:0/beat:0 gap
+      # the old mv-then-stamp exposed), so it can never re-home a mid-stamp
+      # claim. The rename is STILL the single-winner lock: exactly one claimer's
+      # mv of ready/<id>.json succeeds; the losers get ENOENT and move on. The
+      # staging name carries the claim epoch so the reaper can re-home a
+      # crash-orphaned staging file after CLAIM_GRACE (convergence preserved)
+      # while never touching a fresh one.
+      stage="$CQ/$exec_id/.$id.json.claiming.$now.$$"
+      if mv "$f" "$stage" 2>/dev/null; then
+        dst="$CQ/$exec_id/$id.json"
         tmp="$CQ/$exec_id/.$id.json.tmp.$$"
         if jq --arg exec "$exec_id" --argjson pid "$owner_pid" --argjson now "$now" \
              '.owner = $exec | .owner_pid = $pid | .started = (if .started > 0 then .started else $now end) | .beat = $now' \
-             "$dst" > "$tmp" 2>/dev/null; then
-          mv "$tmp" "$dst"
+             "$stage" > "$tmp" 2>/dev/null; then
+          mv "$tmp" "$dst"          # publish: <id>.json exists only once stamped
+          rm -f "$stage" 2>/dev/null || true
+          echo "$id"
+          exit 0
         else
+          # Stamp failed (pathological, e.g. jq broke): restore the task to
+          # ready/ and fail the claim rather than publish an unstamped claim.
           rm -f "$tmp" 2>/dev/null || true
+          mv "$stage" "$f" 2>/dev/null || true
+          exit 1
         fi
-        echo "$id"
-        exit 0
       fi
     done
     exit 1
     ;;
 
   beat)
+    # Freshen a live claim's lease. An executor calls this on a background loop
+    # while its (possibly >30min) build hook runs, at an interval << LEASE_TTL
+    # (see bin/fm-executor.sh), so the reaper never re-homes an actively-building
+    # task. Without it the claim's beat is stamped once at claim time and the
+    # lease expires mid-build - the missing mid-task heartbeat (finding 2).
     exec_id=${1:-}; id=${2:-}
     valid_id "$exec_id" 2>/dev/null || die "invalid executor id: '${exec_id:-}'"
     valid_id "$id" || die "invalid task id: '${id:-}'"
@@ -259,6 +325,30 @@ case "$cmd" in
     reaped=0
     for exec_dir in "$CQ"/*/; do
       [ -d "$exec_dir" ] || continue
+
+      # Crash-orphaned mid-claim sweep: a hidden .claiming.<epoch> staging file
+      # is a claim that won the ready->claimed rename but crashed before it could
+      # publish <id>.json. Re-home it ONLY once it is older than CLAIM_GRACE
+      # (epoch parsed from the staging name), so a claim being stamped RIGHT NOW
+      # (a fresh staging file) is never re-homed - this is the TOCTOU guard - while
+      # a genuine crash orphan converges back to ready/.
+      for s in "$exec_dir".*.json.claiming.*; do
+        [ -e "$s" ] || continue
+        sbase=$(basename "$s"); srest=${sbase#.}
+        sid=${srest%%.json.claiming.*}
+        stail=${srest#*.json.claiming.}
+        sts=${stail%%.*}
+        case "$sts" in ''|*[!0-9]*) sts=0 ;; esac
+        # Already published or finished: a post-publish staging leftover; drop it.
+        if [ -f "$exec_dir$sid.json" ] || [ -f "$DQ/$sid.json" ]; then
+          rm -f "$s" 2>/dev/null || true
+          continue
+        fi
+        [ "$((now - sts))" -ge "$CLAIM_GRACE" ] || continue
+        reap_rehome "$s" "$sid"
+        reaped=$((reaped + 1))
+      done
+
       for f in "$exec_dir"*.json; do
         [ -e "$f" ] || continue
         id=$(basename "$f" .json)
@@ -272,6 +362,14 @@ case "$cmd" in
         beat=$(jq -r '.beat // 0' "$f" 2>/dev/null || echo 0)
         case "$opid" in ''|*[!0-9]*) opid=0 ;; esac
         case "$beat" in ''|*[!0-9]*) beat=0 ;; esac
+        # DEFENSE IN DEPTH: a published <id>.json is always stamped (owner_pid>0)
+        # in normal operation thanks to the staging-publish protocol, but if an
+        # unstamped one ever appears, treat it as a fresh mid-stamp claim until it
+        # is older than CLAIM_GRACE (by mtime) - the reaper still never re-homes a
+        # just-claimed task.
+        if [ "$opid" -le 0 ] && [ "$((now - $(file_mtime "$f")))" -lt "$CLAIM_GRACE" ]; then
+          continue
+        fi
         dead=0
         # owner_pid <= 0 is never a live owner; treat as dead (pid 0 is a group).
         if [ "$opid" -le 0 ] || ! fm_pid_alive "$opid"; then
@@ -282,21 +380,9 @@ case "$cmd" in
           expired=1
         fi
         [ "$dead" = 1 ] || [ "$expired" = 1 ] || continue
-        attempts=$(jq -r '.attempts // 0' "$f" 2>/dev/null || echo 0)
-        case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
-        attempts=$((attempts + 1))
-        if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
-          jq --argjson n "$attempts" --arg reason "max-attempts ($MAX_ATTEMPTS) exceeded" \
-             '.attempts = $n | .owner = "" | .owner_pid = 0 | .fail_reason = $reason' \
-             "$f" | write_json_atomic "$FQ/$id.json"
-          rm -f "$f" 2>/dev/null || true
-        else
-          # Re-home to ready/ FIRST (converges on a crash: a leftover claim is
-          # re-reaped next cycle; nothing is lost), then drop the claim.
-          jq --argjson n "$attempts" '.attempts = $n | .owner = "" | .owner_pid = 0 | .started = 0' \
-             "$f" | write_json_atomic "$RQ/$id.json"
-          rm -f "$f" 2>/dev/null || true
-        fi
+        # Re-home FIRST (converges on a crash: a leftover claim is re-reaped next
+        # cycle; nothing is lost), then drop the claim - reap_rehome does both.
+        reap_rehome "$f" "$id"
         reaped=$((reaped + 1))
       done
       rmdir "$exec_dir" 2>/dev/null || true

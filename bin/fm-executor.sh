@@ -72,6 +72,13 @@ MAX_ITER="${FM_EXECUTOR_MAX_ITER:-0}"   # 0 = drain forever; >0 bounds the loop 
 case "$IDLE" in ''|*[!0-9]*) IDLE=15 ;; esac
 case "$MAX_ITER" in ''|*[!0-9]*) MAX_ITER=0 ;; esac
 
+# Lease knob mirrors bin/fm-queue.sh so the mid-task claim-heartbeat interval can
+# be derived from it. INVARIANT: the heartbeat interval must be << LEASE_TTL, or
+# the reaper re-homes an actively-building task (finding 2). We beat the claim
+# every LEASE_TTL/4, giving four heartbeats per lease of margin.
+LEASE_TTL="${FM_QUEUE_LEASE_TTL:-${FM_AGENT_LIVE_TTL:-1800}}"
+case "$LEASE_TTL" in ''|*[!0-9]*) LEASE_TTL=1800 ;; esac
+
 ID_RE='^[a-z0-9][a-z0-9-]{0,63}$'
 
 die() { echo "fm-executor: $1" >&2; exit 2; }
@@ -199,8 +206,20 @@ case "$cmd" in
         # ===== DORMANT task-execution HOOK (Phase 1) =====================
         # The real build (isolated worktree -> verify -> no-mistakes -> PR) is
         # NOT implemented here; a hook is injected for tests/activation only.
+        # While the (possibly >30min) hook runs, heartbeat the CLAIM every
+        # LEASE_TTL/4 so the reaper's lease never expires under an active build
+        # (the missing mid-task heartbeat that let the reaper re-home a live
+        # task, finding 2). The loop is torn down the instant the hook returns.
+        hb_interval=$((LEASE_TTL / 4)); [ "$hb_interval" -ge 1 ] || hb_interval=1
+        ( while :; do
+            sleep "$hb_interval"
+            "$QUEUE_SH" beat "$exec_id" "$claimed_id" >/dev/null 2>&1 || true
+          done ) &
+        hb_pid=$!
         sha=""; hook_rc=0
         sha=$("$FM_EXECUTOR_TASK_HOOK" "$claimed_id" "$claim_file" 2>/dev/null) || hook_rc=$?
+        kill "$hb_pid" 2>/dev/null || true
+        wait "$hb_pid" 2>/dev/null || true
         # =================================================================
 
         if [ "$hook_rc" -eq 0 ]; then
