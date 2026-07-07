@@ -26,14 +26,14 @@ Everything this skill files goes to a local file by default; it only ever reache
    - A project-level memory file, such as `CLAUDE.md`, `AGENTS.md`, or an equivalent at the repo root or nearby.
    - A user-level (global) memory file the running agent reads across projects, if one exists and is readable.
    - A `TODO`, `BACKLOG`, `NOTES`, or similarly named plain file already tracked in the project.
-     This step is about local files only, not remote systems.
-     Do not scan for or infer an issue tracker here - see the priority order in step 3.
+   This step is about local files only, not remote systems.
+   Do not scan for or infer an issue tracker here - see the priority order in step 3.
 
 3. **Route each finding using this fixed priority order, local-first.**
    1. **Highest - an explicit instruction wins.** If the user has explicitly said, earlier in this conversation or as a standing choice previously recorded in the discovered user-level memory file (see step 4), to use a particular system for this kind of finding - including an external tracker - route it there.
-      This is the _only_ path to an external or public system: an issue tracker, a hosted project board, a ticketing system, or similar.
+      This is the *only* path to an external or public system: an issue tracker, a hosted project board, a ticketing system, or similar.
       A configured git host remote, a `.github/`/`.gitlab/` folder, or any other signal that a tracker probably exists is never by itself grounds to file anything there - never route externally on inference.
-   2. **Otherwise - the local system the user already uses.** Route to whatever local memory/backlog convention this project or user already has for that kind of finding: the discovered project memory file (`CLAUDE.md`/`AGENTS.md`) for project facts and operational gotchas, an existing `TODO`/`BACKLOG`/`NOTES` file for undone next steps, or a discovered user-level memory file for user preferences _when one happens to be accessible_ - a global memory file is a bonus if the running agent can reach one, never an assumption or a requirement.
+   2. **Otherwise - the local system the user already uses.** Route to whatever local memory/backlog convention this project or user already has for that kind of finding: the discovered project memory file (`CLAUDE.md`/`AGENTS.md`) for project facts and operational gotchas, an existing `TODO`/`BACKLOG`/`NOTES` file for undone next steps, or a discovered user-level memory file for user preferences *when one happens to be accessible* - a global memory file is a bonus if the running agent can reach one, never an assumption or a requirement.
       Among local durable-finding writes, this tier is the only one that writes findings into a tracked, shared file, and the only one that may write outside the current directory - it only fires when that destination was already an established convention the user (or their agent) already has access to, never a path this skill invents itself.
    3. **Fallback - the default prescribed private file, in the current directory.** If no existing local convention fits, don't improvise a location or invent an ad hoc filename.
       Before writing it in a git worktree, verify that `.stow-notes.md` is not already tracked in the index.
@@ -44,8 +44,8 @@ Everything this skill files goes to a local file by default; it only ever reache
       Then keep it out of git: create or append a `.stow-notes.md` line in a `.gitignore` file **in the current directory** - an ordinary file at that path, so this stays fully in-directory even inside a linked worktree, unlike git's internal exclude mechanism, which can resolve outside the working directory there.
       Leave staging or committing that `.gitignore` line to the user, same as everything else this skill writes.
       If even the `.gitignore` write fails, don't block or error - still create `.stow-notes.md` and tell the user to ignore it manually.
-      Tiers 2 and 3 are always local; only tier 1 - an explicit instruction - ever reaches an external or public system.
-      Tier 2 is the only tier that lands durable findings in a tracked/shared file; tier 3 keeps stowed findings in the private `.stow-notes.md` file only after confirming it is not already tracked, and confines any optional `.gitignore` metadata edit to the current directory.
+   Tiers 2 and 3 are always local; only tier 1 - an explicit instruction - ever reaches an external or public system.
+   Tier 2 is the only tier that lands durable findings in a tracked/shared file; tier 3 keeps stowed findings in the private `.stow-notes.md` file only after confirming it is not already tracked, and confines any optional `.gitignore` metadata edit to the current directory.
 
 4. **When it's genuinely ambiguous between two existing conventions, ask once - then remember the answer.**
    If more than one discovered local convention plausibly fits a finding, ask the user once, plainly, which one they want that kind of note to live in going forward.
