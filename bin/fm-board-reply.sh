@@ -42,7 +42,18 @@
 # workstream and additionally closes the agent record.
 #
 # Usage:
-#   fm-board-reply.sh <item-id> "<message>" [--done | --your-court] [--effort <1-5>]
+#   fm-board-reply.sh <item-id> "<message>" [--done | --your-court] [--effort <1-5>] [--once]
+#
+# --once makes the post IDEMPOTENT against the newest David message in the thread,
+# so the headless drain (bin/fm-drain-worker.sh) and the interactive session can
+# both try to answer the same David message without double-posting. It derives a
+# key from (item-id, newest-david-authored-filename) and takes an atomic claim
+# under state/.reply-claims/<key> BEFORE writing; a second call with the same key
+# is a clean no-op. Interactive callers omit --once (they may legitimately post
+# several replies to one thread); only the auto-drain uses it. Residual: a crash
+# after the claim but before the write suppresses that one auto-ack, but the
+# David message file persists and serviced-seq stays un-advanced, so the pager
+# SLA (docs/headless-drain.md) still escalates it - the message is never lost.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +63,7 @@ THREADS="${FM_BOARD_THREADS_DIR:-$FM_HOME/data/board-threads}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 BOARD="${FM_BOARD_DATA:-$STATE/board.json}"
 LOCK="$STATE/.board.json.lock"
+REPLY_CLAIMS="$STATE/.reply-claims"
 # Bounded lock wait, mirroring fm-board-reconcile.sh: a live-but-stuck holder is
 # never stolen, so past the deadline the effort write is skipped (reconcile still
 # runs) rather than blocking this call forever.
@@ -103,6 +115,7 @@ esac
 done_flag=0
 court_seen=0
 effort=""
+once_flag=0
 validate_effort() {  # <value>
   case "$1" in
     ''|*[!0-9]*) die "--effort needs an integer 1-5 (got '$1')" ;;
@@ -114,6 +127,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --done) done_flag=1 ;;
     --your-court) court_seen=1 ;;
+    --once) once_flag=1 ;;
     --effort)
       shift
       [ "$#" -gt 0 ] || die "--effort needs a value (1-5)"
@@ -124,7 +138,7 @@ while [ "$#" -gt 0 ]; do
       effort=${1#--effort=}
       validate_effort "$effort"
       ;;
-    --*) die "unknown flag: '$1' (expected --done, --your-court, or --effort <1-5>)" ;;
+    --*) die "unknown flag: '$1' (expected --done, --your-court, --effort <1-5>, or --once)" ;;
     *) die "unexpected extra argument: '$1'" ;;
   esac
   shift
@@ -151,6 +165,36 @@ now_ms() {
 
 tdir="$THREADS/$item"
 mkdir -p "$tdir"
+
+# --once: idempotency claim keyed on (item, newest-david-authored filename). The
+# claim is an atomic mkdir taken BEFORE the write, so two concurrent answerers
+# (headless drain + interactive session) racing the SAME David message resolve to
+# one post. The newest-david filename is the message-generation marker: a NEW
+# David message changes it, so the next reply is not suppressed. When no David
+# message exists yet, the key falls back to <item>|none so a spurious duplicate is
+# still coalesced.
+if [ "$once_flag" -eq 1 ]; then
+  david_gen="none"
+  newest_david=0
+  for f in "$tdir"/*.md; do
+    [ -e "$f" ] || continue
+    hdr=$(head -n 1 "$f" 2>/dev/null || true)
+    author=$(printf '%s' "$hdr" | jq -r '.author // ""' 2>/dev/null || true)
+    [ "$author" = "david" ] || continue
+    base=$(basename "$f" .md)
+    ms="${base%%-*}"
+    case "$ms" in ''|*[!0-9]*) continue ;; esac
+    if [ "$ms" -gt "$newest_david" ]; then newest_david="$ms"; david_gen="$base"; fi
+  done
+  key=$(printf '%s|%s|reply' "$item" "$david_gen" | shasum 2>/dev/null | awk '{print $1}')
+  case "$key" in ''|*[!0-9a-f]*) key=$(printf '%s|%s|reply' "$item" "$david_gen" | cksum | awk '{print $1}') ;; esac
+  mkdir -p "$REPLY_CLAIMS" 2>/dev/null || true
+  claim="$REPLY_CLAIMS/$key"
+  if ! mkdir "$claim" 2>/dev/null; then
+    echo "fm-board-reply: idempotent no-op (already replied to $david_gen in $item)"
+    exit 0
+  fi
+fi
 
 # Force the new file strictly newer than any existing thread file so it wins the
 # newest-file tie-break in the reconcile even under a coarse clock. Existing

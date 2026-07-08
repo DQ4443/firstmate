@@ -62,6 +62,25 @@ INJECT_TIMEOUT_BACKOFF=${FM_WAKE_INJECT_TIMEOUT_BACKOFF:-300}  # seconds between
 case "$INJECT_TIMEOUT_BACKOFF" in ''|*[!0-9]*) INJECT_TIMEOUT_BACKOFF=300 ;; esac
 INJECT_PANE_FILE="$STATE/.wake-inject.pane.$$"
 
+# Headless board drain (Phase 0 first-class trigger; docs/headless-drain.md). When
+# there is un-drained board activity (wake-queue seq beyond .drain-attempted-seq)
+# and NO interactive REPL is reachable, the poller spawns bin/fm-drain-worker.sh -
+# a fresh context-loaded `claude -p` turn that answers David's unanswered thread
+# messages with a holding-ack - so a board message becomes a firstmate turn
+# WITHOUT the REPL volunteering. FM_HEADLESS_DRAIN=0 disables it entirely.
+DRAIN_WORKER="$SCRIPT_DIR/fm-drain-worker.sh"
+DRAIN_LEASE="$STATE/.drain-lease"
+DRAIN_ATTEMPTED="$STATE/.drain-attempted-seq"
+DRAIN_SERVICED="$STATE/.serviced-seq"
+DRAIN_PRESENCE="$STATE/repl-presence.json"
+DRAIN_THREADS="${FM_BOARD_THREADS_DIR:-$FM_HOME/data/board-threads}"
+DRAIN_AGE_MARK="$STATE/.drain-age-breach"
+PAGER_BIN="$SCRIPT_DIR/fm-pager.sh"
+PRESENCE_GRACE=${FM_REPL_PRESENCE_GRACE:-90}   # seconds; a presence heartbeat older than this reads as no live REPL
+case "$PRESENCE_GRACE" in ''|*[!0-9]*) PRESENCE_GRACE=90 ;; esac
+DRAIN_SLA=${FM_DRAIN_SLA_SECONDS:-1800}        # seconds; oldest un-answered David message age that pages
+case "$DRAIN_SLA" in ''|*[!0-9]*) DRAIN_SLA=1800 ;; esac
+
 # Print every live descendant of <pid>, depth-first. The watchdog snapshots this
 # BEFORE terminating the worker: once the worker subshell dies its children are
 # reparented, so a post-mortem pkill -P would miss the very process that hangs -
@@ -260,6 +279,117 @@ maybe_reap_claims() {
   fi
 }
 
+# --- headless board drain (Phase 0) -----------------------------------------
+
+drain_read_seq() {  # <file> - non-negative integer, or 0
+  local v
+  v=$(cat "$1" 2>/dev/null || echo 0)
+  case "$v" in ''|*[!0-9]*) v=0 ;; esac
+  printf '%s' "$v"
+}
+
+# Worker (under run_with_timeout) that resolves firstmate's interactive pane; rc 0
+# means a live REPL is attached. Guarded because fm_resolve_session_pane makes
+# tmux calls that can hang on a wedged server.
+resolve_pane_worker() { fm_resolve_session_pane >/dev/null 2>&1; }
+
+# repl_reachable: is a live interactive firstmate REPL present to handle the wake?
+# Fast-path on a fresh presence heartbeat (bin/fm-repl-presence.sh), else a
+# timeout-guarded pane resolution. A stale/absent presence AND no resolvable pane
+# reads as "no REPL" - which is exactly when the headless drain must fire.
+repl_reachable() {
+  local status age
+  if [ -f "$DRAIN_PRESENCE" ]; then
+    status=$(sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' "$DRAIN_PRESENCE" 2>/dev/null | head -n1)
+    age=$(( $(date +%s) - $(fm_path_mtime "$DRAIN_PRESENCE" 2>/dev/null || echo 0) ))
+    if { [ "$status" = idle ] || [ "$status" = busy ]; } && [ "$age" -lt "$PRESENCE_GRACE" ]; then
+      return 0
+    fi
+  fi
+  run_with_timeout "$INJECT_TIMEOUT" resolve_pane_worker
+}
+
+# maybe_drain_headless: when the queue has advanced past the last serviced drain
+# and no REPL is reachable, spawn the headless drain worker. Single-flight is the
+# worker's pid-live lease (state/.drain-lease); the poller only skips spawning
+# when a live drain already holds it, to avoid churn. The worker is spawned
+# DETACHED (nohup, double-forked) so a multi-second `claude -p` turn never stalls
+# the poll loop - the lease, not the loop, bounds concurrency.
+maybe_drain_headless() {
+  [ "${FM_HEADLESS_DRAIN:-1}" = 1 ] || return 0
+  [ -f "$DRAIN_WORKER" ] || return 0
+  local cur att hpid
+  cur=$(drain_read_seq "$STATE/.wake-queue.seq")
+  att=$(drain_read_seq "$DRAIN_ATTEMPTED")
+  [ "$cur" -gt "$att" ] || return 0
+  if repl_reachable; then
+    [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: board activity (seq $cur) but REPL reachable; leaving to the interactive fast path" >&2
+    return 0
+  fi
+  if [ -d "$DRAIN_LEASE" ]; then
+    hpid=$(cat "$DRAIN_LEASE/pid" 2>/dev/null || true)
+    if fm_pid_alive "$hpid"; then
+      [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: a headless drain already holds the lease (pid $hpid); not spawning" >&2
+      return 0
+    fi
+  fi
+  ( nohup bash "$DRAIN_WORKER" >/dev/null 2>&1 & ) 2>/dev/null || true
+  echo "fm-poll: spawned headless board drain (seq $cur > attempted $att; no reachable REPL) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+}
+
+# maybe_pager: heartbeat the off-box dead-man's switch every cycle, and page once
+# per outage when the oldest un-answered David message breaches the age SLA. Both
+# are clean no-ops until config/pager.env is filled in (bin/fm-pager.sh). The SLA
+# scan only runs when serviced-seq lags the queue, so a fully-serviced board costs
+# nothing. "Un-answered" = a thread whose newest *.md file is a David message with
+# a body (the contract in docs/headless-drain.md, shared with fm-drain-worker.sh).
+oldest_unanswered_age() {
+  local now dd f newest ms base hdr author body m age max=""
+  now=$(date +%s)
+  [ -d "$DRAIN_THREADS" ] || return 0
+  for dd in "$DRAIN_THREADS"/*/; do
+    [ -d "$dd" ] || continue
+    newest=""; ms=0
+    for f in "$dd"*.md; do
+      [ -e "$f" ] || continue
+      base=$(basename "$f" .md)
+      case "${base%%-*}" in ''|*[!0-9]*) continue ;; esac
+      if [ "${base%%-*}" -ge "$ms" ]; then ms="${base%%-*}"; newest="$f"; fi
+    done
+    [ -n "$newest" ] || continue
+    hdr=$(head -n 1 "$newest" 2>/dev/null || true)
+    author=$(printf '%s' "$hdr" | jq -r '.author // ""' 2>/dev/null || true)
+    [ "$author" = david ] || continue
+    body=$(sed '1,2d' "$newest" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$body" ] || continue
+    m=$(fm_path_mtime "$newest" 2>/dev/null || echo "$now")
+    age=$(( now - m ))
+    if [ -z "$max" ] || [ "$age" -gt "$max" ]; then max=$age; fi
+  done
+  [ -n "$max" ] && printf '%s' "$max"
+}
+
+maybe_pager() {
+  [ -x "$PAGER_BIN" ] && "$PAGER_BIN" ping >/dev/null 2>&1 || true
+  local cur srv oldest
+  cur=$(drain_read_seq "$STATE/.wake-queue.seq")
+  srv=$(drain_read_seq "$DRAIN_SERVICED")
+  if [ "$cur" -le "$srv" ]; then
+    rm -f "$DRAIN_AGE_MARK" 2>/dev/null || true
+    return 0
+  fi
+  oldest=$(oldest_unanswered_age)
+  if [ -n "$oldest" ] && [ "$oldest" -ge "$DRAIN_SLA" ]; then
+    if [ ! -f "$DRAIN_AGE_MARK" ]; then
+      touch "$DRAIN_AGE_MARK" 2>/dev/null || true
+      [ -x "$PAGER_BIN" ] && "$PAGER_BIN" page "un-answered David board message ${oldest}s old (SLA ${DRAIN_SLA}s)" >/dev/null 2>&1 || true
+      echo "fm-poll: board SLA breach: oldest un-answered David message ${oldest}s old (SLA ${DRAIN_SLA}s) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+    fi
+  else
+    rm -f "$DRAIN_AGE_MARK" 2>/dev/null || true
+  fi
+}
+
 mkdir -p "$STATE"
 
 # Home-scoped singleton with PID-reuse safety: the pidfile records the poller's
@@ -331,6 +461,8 @@ while :; do
     fm_wake_append check "$c" "check: $c: $out" || true
   done
   maybe_inject_wake
+  maybe_drain_headless
+  maybe_pager
   maybe_reconcile_board
   maybe_reap_claims
   sleep "$INTERVAL"
