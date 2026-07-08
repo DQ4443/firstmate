@@ -11,7 +11,11 @@
 # when there is un-drained board activity and no reachable REPL, and it runs a
 # fresh, context-loaded, throwaway `claude -p` turn that reads every unanswered
 # David thread message and posts a holding-ack (Phase 0 never auto-closes from
-# headless - the safe first cut).
+# headless - the safe first cut). That turn runs with a TIGHT tool allowlist (the
+# Bash tool scoped to bin/fm-board-reply.sh alone, NOT --dangerously-skip-
+# permissions), so an unattended, prompt-confused turn is structurally capped at
+# posting a board reply - see the SECURITY note at the claude invocation below and
+# docs/headless-drain.md "Capability scoping".
 #
 # WHY A THROWAWAY `claude -p` AND NOT `--resume`: resuming the interactive
 # session's own session_id while the live REPL owns that file forks it. Phase 0
@@ -244,6 +248,8 @@ main() {
     printf 'thread with exactly this command (do NOT close the item, do NOT invent a final\n'
     printf 'answer, do NOT run any other work):\n'
     printf '  %s <item-id> "<your holding ack>" --your-court --once\n\n' "$REPLY"
+    printf 'That command is the ONLY tool you are permitted to run: your Bash tool is scoped\n'
+    printf 'to it alone and every other tool is denied, so do not attempt anything else.\n\n'
     printf 'A holding ack tells David the message is captured and the live orchestrator will\n'
     printf 'pick it up. Keep it to one or two plain sentences, no markdown, no emojis.\n\n'
     while IFS=$'\t' read -r it body; do
@@ -255,8 +261,31 @@ $pending
 EOF
   } > "$promptfile"
 
-  log "invoking headless claude -p for $(printf '%s\n' "$pending" | grep -c .) unanswered item(s)"
-  run_bounded "$DRAIN_TIMEOUT" "$claude_bin" -p --dangerously-skip-permissions < "$promptfile" >/dev/null 2>&1
+  # SECURITY - scoped capability, NOT --dangerously-skip-permissions. This is an
+  # unattended, human-absent trigger loaded with the full operating contract (whose
+  # autonomy grant lets firstmate merge non-project code, push to main, and dispatch
+  # workflows), so the ONLY structural thing keeping the turn to "just post an ack"
+  # must be a real permission boundary, not the prompt text. The turn runs with a
+  # tight tool allowlist - the Bash tool restricted to bin/fm-board-reply.sh alone -
+  # and default (non-bypass) permission mode, so in headless -p mode every OTHER
+  # tool (arbitrary Bash, Edit/Write, git, network, MCP, sub-agents) is denied with
+  # no prompt to satisfy. A prompt-confused or off-script turn is structurally
+  # capped at posting a board reply; it cannot do arbitrary destructive things. The
+  # residual capability is exactly "post any text as a board thread reply to an
+  # existing item", which is the acceptable Phase-0 blast radius (see
+  # docs/headless-drain.md "Capability scoping"). FM_DRAIN_CLAUDE_MODEL pins the
+  # model when set (the real-binary acceptance test uses it to dodge a rate-limited
+  # default); unset means the account default.
+  log "invoking headless claude -p (scoped to $REPLY) for $(printf '%s\n' "$pending" | grep -c .) unanswered item(s)"
+  if [ -n "${FM_DRAIN_CLAUDE_MODEL:-}" ]; then
+    run_bounded "$DRAIN_TIMEOUT" "$claude_bin" -p \
+      --allowedTools "Bash($REPLY:*)" --model "$FM_DRAIN_CLAUDE_MODEL" \
+      < "$promptfile" >/dev/null 2>&1
+  else
+    run_bounded "$DRAIN_TIMEOUT" "$claude_bin" -p \
+      --allowedTools "Bash($REPLY:*)" \
+      < "$promptfile" >/dev/null 2>&1
+  fi
   rc=$?
   rm -f "$promptfile" 2>/dev/null || true
 

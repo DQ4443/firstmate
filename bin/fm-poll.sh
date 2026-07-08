@@ -315,6 +315,34 @@ repl_reachable() {
 # when a live drain already holds it, to avoid churn. The worker is spawned
 # DETACHED (nohup, double-forked) so a multi-second `claude -p` turn never stalls
 # the poll loop - the lease, not the loop, bounds concurrency.
+# has_unanswered_david: rc 0 iff at least one board thread's NEWEST *.md file is a
+# david-authored message with a body. Early-exits on the first hit, so it is far
+# cheaper than oldest_unanswered_age (no full scan, no age math). It is the REAL
+# drain gate: the queue seq only says "some check fired", which the live
+# board-threads.check.sh (and board-actions.check.sh) can make advance every cycle
+# regardless of whether a David message is actually waiting.
+has_unanswered_david() {
+  local dd f newest ms base hdr author body
+  [ -d "$DRAIN_THREADS" ] || return 1
+  for dd in "$DRAIN_THREADS"/*/; do
+    [ -d "$dd" ] || continue
+    newest=""; ms=0
+    for f in "$dd"*.md; do
+      [ -e "$f" ] || continue
+      base=$(basename "$f" .md)
+      case "${base%%-*}" in ''|*[!0-9]*) continue ;; esac
+      if [ "${base%%-*}" -ge "$ms" ]; then ms="${base%%-*}"; newest="$f"; fi
+    done
+    [ -n "$newest" ] || continue
+    hdr=$(head -n 1 "$newest" 2>/dev/null || true)
+    author=$(printf '%s' "$hdr" | jq -r '.author // ""' 2>/dev/null || true)
+    [ "$author" = david ] || continue
+    body=$(sed '1,2d' "$newest" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$body" ] && return 0
+  done
+  return 1
+}
+
 maybe_drain_headless() {
   [ "${FM_HEADLESS_DRAIN:-1}" = 1 ] || return 0
   [ -f "$DRAIN_WORKER" ] || return 0
@@ -322,6 +350,21 @@ maybe_drain_headless() {
   cur=$(drain_read_seq "$STATE/.wake-queue.seq")
   att=$(drain_read_seq "$DRAIN_ATTEMPTED")
   [ "$cur" -gt "$att" ] || return 0
+  # ANTI-SPIN (robust, not a patch): gate the spawn on a REAL unanswered David
+  # message, never the raw queue seq. Without this, deploying against the live
+  # un-demoted board-threads.check.sh (a "N new" every cycle because 100+ thread
+  # files are newer than its .seen marker) would make the seq outrun attempted-seq
+  # every cycle and spawn a drain worker every cycle forever - and its first fire
+  # would mass-ack the whole current backlog unattended. With this gate the worker
+  # spawns iff a board message is genuinely waiting; a bare seq bump with nothing
+  # unanswered just settles attempted-seq to cur and spawns nothing. This makes the
+  # board-threads.check.sh .seen->.enqueued demotion an optimization, not a hard
+  # deploy prerequisite (docs/headless-drain.md).
+  if ! has_unanswered_david; then
+    printf '%s\n' "$cur" > "$DRAIN_ATTEMPTED" 2>/dev/null || true
+    [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: queue seq $cur > attempted $att but no unanswered David message; settled attempted-seq, no drain" >&2
+    return 0
+  fi
   if repl_reachable; then
     [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: board activity (seq $cur) but REPL reachable; leaving to the interactive fast path" >&2
     return 0
