@@ -32,6 +32,161 @@ compact_text() {
   printf '%s' "${1:-}" | tr '\r\n\t' '   '
 }
 
+codex_registry_update() {
+  local status=$1 commit_sha=$2 reason=$3
+  [ -n "${TASK_ID:-}" ] || return 0
+  [ -n "${REPO:-}" ] || return 0
+  [ -n "${STDOUT_LOG:-}" ] || return 0
+  python3 - "${FM_STATE:-}" "$TASK_ID" build "$REPO" "${BRANCH:-}" "$status" "$commit_sha" "$STDOUT_LOG" "$reason" <<'PY' >/dev/null 2>&1 || true
+import json
+import os
+import sys
+import time
+
+state, task_id, kind, repo, branch, status, commit_sha, log_path, reason = sys.argv[1:]
+if not state:
+    sys.exit(0)
+path = os.path.join(state, "codex-workers.json")
+lock = os.path.join(state, ".codex-workers.lock")
+now = int(time.time())
+lock_stale_seconds = int(os.environ.get("FM_CODEX_REGISTRY_LOCK_STALE_SECONDS", "30"))
+lock_owner = os.path.join(lock, "owner.json")
+lock_token = f"{os.getpid()}-{time.time_ns()}"
+
+def last_non_empty_line(name):
+    try:
+        with open(name, "r", encoding="utf-8", errors="replace") as handle:
+            last = ""
+            for line in handle:
+                text = line.strip()
+                if text:
+                    last = text
+            return last[:200]
+    except OSError:
+        return ""
+
+record = {
+    "task_id": task_id,
+    "kind": kind,
+    "repo": repo,
+    "branch": branch,
+    "status": status,
+    "started_at": now,
+    "ended_at": None if status == "running" else now,
+    "commit_sha": commit_sha or None,
+    "log": os.path.abspath(log_path),
+    "last_line": last_non_empty_line(log_path),
+    "reason": reason[:200],
+}
+
+os.makedirs(state, exist_ok=True)
+locked = False
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+def remove_stale_lock():
+    try:
+        lock_age = time.time() - os.stat(lock).st_mtime
+    except OSError:
+        return False
+    if lock_age < lock_stale_seconds:
+        return False
+    try:
+        with open(lock_owner, "r", encoding="utf-8") as handle:
+            owner = json.load(handle)
+        owner_pid = int(owner.get("pid") or 0)
+    except Exception:
+        owner_pid = 0
+    if owner_pid and pid_alive(owner_pid):
+        return False
+    try:
+        for name in os.listdir(lock):
+            os.unlink(os.path.join(lock, name))
+        os.rmdir(lock)
+        return True
+    except OSError:
+        return False
+
+for _ in range(20):
+    try:
+        os.mkdir(lock)
+        try:
+            with open(lock_owner, "w", encoding="utf-8") as handle:
+                json.dump({"pid": os.getpid(), "token": lock_token, "created_at": now}, handle)
+        except OSError:
+            try:
+                os.rmdir(lock)
+            except OSError:
+                pass
+            sys.exit(0)
+        locked = True
+        break
+    except FileExistsError:
+        if remove_stale_lock():
+            continue
+        time.sleep(0.05)
+if not locked:
+    sys.exit(0)
+try:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict) or not isinstance(data.get("workers"), list):
+            data = {"workers": []}
+    except Exception:
+        data = {"workers": []}
+    workers = []
+    prior = None
+    for worker in data.get("workers", []):
+        if isinstance(worker, dict) and worker.get("task_id") == task_id:
+            prior = worker
+        else:
+            workers.append(worker)
+    if prior:
+        record["started_at"] = prior.get("started_at") or record["started_at"]
+    workers.append(record)
+    indexed = [(idx, worker) for idx, worker in enumerate(workers) if isinstance(worker, dict)]
+    workers = [
+        worker
+        for _, worker in sorted(
+            indexed,
+            key=lambda item: (
+                item[1].get("ended_at") is None,
+                item[1].get("ended_at") or item[1].get("started_at") or 0,
+                item[0],
+            ),
+            reverse=True,
+        )
+    ][:50]
+    out = {"updated_at": now, "workers": workers}
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(out, handle, separators=(",", ":"))
+        handle.write("\n")
+    os.replace(tmp, path)
+finally:
+    try:
+        with open(lock_owner, "r", encoding="utf-8") as handle:
+            owner = json.load(handle)
+        if owner.get("token") == lock_token:
+            os.unlink(lock_owner)
+            os.rmdir(lock)
+    except OSError:
+        pass
+    except Exception:
+        pass
+PY
+}
+
 emit_result() {
   local status=$1 commit_sha=$2 reason=$3
   printf '{"task_id":"%s","status":"%s","repo":"%s","worktree":"%s","branch":"%s","base":"%s","commit_sha":"%s","reason":"%s"}\n' \
@@ -46,6 +201,7 @@ emit_result() {
 }
 
 fail_result() {
+  codex_registry_update failed "${COMMIT_SHA:-}" "$1"
   emit_result failed "${COMMIT_SHA:-}" "$1"
   exit 1
 }
@@ -100,6 +256,11 @@ ref_has_safe_shape() {
   esac
   return 0
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+FM_STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 TASK_ID=${1:-}
 REPO_ARG=${2:-}
@@ -160,6 +321,12 @@ WORKTREES_DIR="$REPO/.claude/worktrees"
 WORKTREE="$WORKTREES_DIR/$TASK_ID"
 BRANCH="feat/$TASK_ID"
 COMMIT_SHA=
+GIT_LOG="$WORKTREES_DIR/$TASK_ID.git-worktree.log"
+STDOUT_LOG="$WORKTREES_DIR/$TASK_ID.codex.stdout.log"
+STDERR_LOG="$WORKTREES_DIR/$TASK_ID.codex.stderr.log"
+mkdir -p "$WORKTREES_DIR" || fail_result "could not create worktrees directory: $WORKTREES_DIR"
+: > "$STDOUT_LOG" 2>/dev/null || true
+codex_registry_update running "" "starting codex build"
 
 command -v codex >/dev/null 2>&1 || fail_result "codex is not installed or not on PATH"
 BASE_COMMIT=$(git -C "$REPO" rev-parse --verify "$BASE_REF^{commit}" 2>/dev/null) \
@@ -168,11 +335,6 @@ if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
   fail_result "branch already exists: $BRANCH"
 fi
 [ ! -e "$WORKTREE" ] || fail_result "worktree path already exists: $WORKTREE"
-mkdir -p "$WORKTREES_DIR"
-
-GIT_LOG="$WORKTREES_DIR/$TASK_ID.git-worktree.log"
-STDOUT_LOG="$WORKTREES_DIR/$TASK_ID.codex.stdout.log"
-STDERR_LOG="$WORKTREES_DIR/$TASK_ID.codex.stderr.log"
 
 # Use a self-contained local CLONE (not a linked worktree) as the worker
 # workspace. A linked worktree's git metadata lives under the parent repo's
@@ -255,4 +417,5 @@ fi
 # (fail paths never reach this line). The sibling *.log files are preserved.
 rm -rf "${WORKTREE:?}" 2>/dev/null || true
 
+codex_registry_update ok "$COMMIT_SHA" "codex exec completed; branch fetched into parent; clone removed"
 emit_result ok "$COMMIT_SHA" "codex exec completed; branch fetched into parent; clone removed; stdout log: $STDOUT_LOG; stderr log: $STDERR_LOG"

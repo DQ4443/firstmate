@@ -32,8 +32,164 @@ compact_text() {
   printf '%s' "${1:-}" | tr '\r\n\t' '   '
 }
 
+codex_registry_update() {
+  local status=$1 reason=$2
+  [ -n "${TASK_ID:-}" ] || return 0
+  [ -n "${REPO:-}" ] || return 0
+  [ -n "${STDOUT_FILE:-}" ] || return 0
+  python3 - "${FM_STATE:-}" "$TASK_ID" review "$REPO" "$status" "$STDOUT_FILE" "$reason" <<'PY' >/dev/null 2>&1 || true
+import json
+import os
+import sys
+import time
+
+state, task_id, kind, repo, status, log_path, reason = sys.argv[1:]
+if not state:
+    sys.exit(0)
+path = os.path.join(state, "codex-workers.json")
+lock = os.path.join(state, ".codex-workers.lock")
+now = int(time.time())
+lock_stale_seconds = int(os.environ.get("FM_CODEX_REGISTRY_LOCK_STALE_SECONDS", "30"))
+lock_owner = os.path.join(lock, "owner.json")
+lock_token = f"{os.getpid()}-{time.time_ns()}"
+
+def last_non_empty_line(name):
+    try:
+        with open(name, "r", encoding="utf-8", errors="replace") as handle:
+            last = ""
+            for line in handle:
+                text = line.strip()
+                if text:
+                    last = text
+            return last[:200]
+    except OSError:
+        return ""
+
+record = {
+    "task_id": task_id,
+    "kind": kind,
+    "repo": repo,
+    "branch": None,
+    "status": status,
+    "started_at": now,
+    "ended_at": None if status == "running" else now,
+    "commit_sha": None,
+    "log": os.path.abspath(log_path),
+    "last_line": last_non_empty_line(log_path),
+    "reason": reason[:200],
+}
+
+os.makedirs(state, exist_ok=True)
+locked = False
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+def remove_stale_lock():
+    try:
+        lock_age = time.time() - os.stat(lock).st_mtime
+    except OSError:
+        return False
+    if lock_age < lock_stale_seconds:
+        return False
+    try:
+        with open(lock_owner, "r", encoding="utf-8") as handle:
+            owner = json.load(handle)
+        owner_pid = int(owner.get("pid") or 0)
+    except Exception:
+        owner_pid = 0
+    if owner_pid and pid_alive(owner_pid):
+        return False
+    try:
+        for name in os.listdir(lock):
+            os.unlink(os.path.join(lock, name))
+        os.rmdir(lock)
+        return True
+    except OSError:
+        return False
+
+for _ in range(20):
+    try:
+        os.mkdir(lock)
+        try:
+            with open(lock_owner, "w", encoding="utf-8") as handle:
+                json.dump({"pid": os.getpid(), "token": lock_token, "created_at": now}, handle)
+        except OSError:
+            try:
+                os.rmdir(lock)
+            except OSError:
+                pass
+            sys.exit(0)
+        locked = True
+        break
+    except FileExistsError:
+        if remove_stale_lock():
+            continue
+        time.sleep(0.05)
+if not locked:
+    sys.exit(0)
+try:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict) or not isinstance(data.get("workers"), list):
+            data = {"workers": []}
+    except Exception:
+        data = {"workers": []}
+    workers = []
+    prior = None
+    for worker in data.get("workers", []):
+        if isinstance(worker, dict) and worker.get("task_id") == task_id:
+            prior = worker
+        else:
+            workers.append(worker)
+    if prior:
+        record["started_at"] = prior.get("started_at") or record["started_at"]
+    workers.append(record)
+    indexed = [(idx, worker) for idx, worker in enumerate(workers) if isinstance(worker, dict)]
+    workers = [
+        worker
+        for _, worker in sorted(
+            indexed,
+            key=lambda item: (
+                item[1].get("ended_at") is None,
+                item[1].get("ended_at") or item[1].get("started_at") or 0,
+                item[0],
+            ),
+            reverse=True,
+        )
+    ][:50]
+    out = {"updated_at": now, "workers": workers}
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(out, handle, separators=(",", ":"))
+        handle.write("\n")
+    os.replace(tmp, path)
+finally:
+    try:
+        with open(lock_owner, "r", encoding="utf-8") as handle:
+            owner = json.load(handle)
+        if owner.get("token") == lock_token:
+            os.unlink(lock_owner)
+            os.rmdir(lock)
+    except OSError:
+        pass
+    except Exception:
+        pass
+PY
+}
+
 emit_manual_failure() {
   local severity=$1 file=$2 summary=$3
+  codex_registry_update failed "$summary"
   printf '{"repo":"%s","diff_base":"%s","findings":[{"severity":"%s","file":"%s","summary":"%s"}],"verdict":"concerns"}\n' \
     "$(json_escape "${REPO:-}")" \
     "$(json_escape "${DIFF_BASE:-}")" \
@@ -82,12 +238,30 @@ make_temp_file() {
   mktemp "${TMPDIR:-/tmp}/fm-codex-review.XXXXXX"
 }
 
+make_stdout_log() {
+  local dir file
+  dir="$FM_STATE/codex-worker-logs"
+  file="$dir/$TASK_ID.codex.stdout.log"
+  if mkdir -p "$dir" 2>/dev/null && : > "$file" 2>/dev/null; then
+    STDOUT_DURABLE=1
+    STDOUT_FILE=$file
+  else
+    STDOUT_DURABLE=0
+    STDOUT_FILE=$(make_temp_file)
+  fi
+}
+
 cleanup() {
-  [ -z "${STDOUT_FILE:-}" ] || rm -f "$STDOUT_FILE"
+  [ "${STDOUT_DURABLE:-0}" = 1 ] || [ -z "${STDOUT_FILE:-}" ] || rm -f "$STDOUT_FILE"
   [ -z "${STDERR_FILE:-}" ] || rm -f "$STDERR_FILE"
   [ -z "${MSG_FILE:-}" ] || rm -f "$MSG_FILE"
 }
 trap cleanup EXIT
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+FM_STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 REPO_ARG=${1:-}
 BRIEF_ARG=${2:-}
@@ -122,6 +296,12 @@ REPO=$(canonical_dir "$REPO_ARG") || die_usage "repo-dir does not exist or is no
 REPO=$(repo_root "$REPO") || die_usage "repo-dir is not inside a git repository: $REPO_ARG"
 BRIEF=$(canonical_file "$BRIEF_ARG") || die_usage "review-brief-file does not exist or is not a file: $BRIEF_ARG"
 [ -r "$BRIEF" ] || die_usage "review-brief-file is not readable: $BRIEF"
+BRIEF_BASE=$(basename "$BRIEF")
+TASK_ID="${FM_CODEX_TASK_ID:-review-${BRIEF_BASE%.*}-$$}"
+make_stdout_log
+STDERR_FILE=$(make_temp_file)
+MSG_FILE=$(make_temp_file)
+codex_registry_update running "starting codex review"
 
 if ! command -v jq >/dev/null 2>&1; then
   emit_manual_failure high "" "jq is required to normalize Codex review output"
@@ -158,10 +338,6 @@ Each finding must have severity, file, and summary.
 Use verdict "pass" only when there are no findings, otherwise use "concerns".
 EOF
 )
-
-STDOUT_FILE=$(make_temp_file)
-STDERR_FILE=$(make_temp_file)
-MSG_FILE=$(make_temp_file)
 
 # --output-last-message writes ONLY the agent's final message (the JSON we asked
 # for), stripping the session/tool/token chatter that codex exec prints to stdout
@@ -213,6 +389,7 @@ NORMALIZED=$(jq -c '
   exit 1
 }
 
+codex_registry_update ok "codex review completed"
 jq -c -n \
   --arg repo "$REPO" \
   --arg diff_base "$DIFF_BASE" \
