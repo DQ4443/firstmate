@@ -111,10 +111,6 @@ HTTP_TIMEOUT = 30
 
 E_USAGE, E_AUTH, E_API, E_NET = 2, 3, 4, 5
 
-# The fetch subcommands whose auth failure must emit the honest "paste the
-# notes" degrade (Decision 4b Option C) rather than a bare error.
-FETCH_CMDS = {"threads", "thread", "files", "doc", "events", "event"}
-
 # Diagnostics recorded during credential resolution, surfaced by the degrade
 # line and by `status`. Never holds a token value.
 _CHECKED = []
@@ -385,6 +381,19 @@ def _q(params):
     return urllib.parse.urlencode(params)
 
 
+def _limit(f, default=10):
+    """Parse --limit as a positive int, or die(E_USAGE) on a bad value so a
+    non-numeric flag surfaces the documented usage error, not a traceback."""
+    raw = f.get("limit", default)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        die(E_USAGE, "--limit must be a positive integer, got %r" % (raw,))
+    if n <= 0:
+        die(E_USAGE, "--limit must be a positive integer, got %r" % (raw,))
+    return n
+
+
 # --- subcommands -------------------------------------------------------------
 
 def cmd_status(argv):
@@ -434,7 +443,7 @@ def _thread_headers(tok, tid):
 def cmd_threads(argv):
     pos, f = opts(argv)
     query = f.get("query", "Kronos Tech Sync")
-    limit = int(f.get("limit", 10))
+    limit = _limit(f)
     tok, _, _ = token_or_degrade("threads")
     url = GMAIL + "/users/me/threads?" + _q([("q", query), ("maxResults", limit)])
     data = _get(tok, url, "threads")
@@ -463,7 +472,7 @@ def cmd_thread(argv):
 def cmd_files(argv):
     pos, f = opts(argv)
     query = f.get("query", "Kronos Tech Sync")
-    limit = int(f.get("limit", 10))
+    limit = _limit(f)
     # Match on name OR full text so a Gemini "Notes: ..." doc is found either way.
     if f.get("name-only"):
         drive_q = "name contains '%s'" % query.replace("'", "\\'")
@@ -569,7 +578,7 @@ def _classify_event(ev):
 def cmd_events(argv):
     pos, f = opts(argv)
     cal = urllib.parse.quote(f.get("calendar", "primary"))
-    limit = int(f.get("limit", 10))
+    limit = _limit(f)
     params = [("singleEvents", "true"), ("orderBy", "startTime"),
               ("maxResults", limit)]
     if "query" in f:
