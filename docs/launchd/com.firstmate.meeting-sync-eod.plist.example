@@ -27,7 +27,7 @@
   INSTALL (only at the Phase 5 gate):
     1. Edit the absolute paths below to the real firstmate checkout.
     2. Decide dry-run (safe) vs apply (lands the autonomous tier); start dry.
-    3. cp config/com.firstmate.meeting-sync-eod.plist.example \
+    3. cp docs/launchd/com.firstmate.meeting-sync-eod.plist.example \
          ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
     4. launchctl load ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
     5. Verify: launchctl list com.firstmate.meeting-sync-eod

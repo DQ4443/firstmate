@@ -75,7 +75,7 @@
 # autonomous tier; it NEVER edits content.ts, NEVER merges/deploys the tracker,
 # NEVER prints EDIT_PASSWORD / DOCS_PASSWORD / the Linear or Google credential.
 # The scheduler is NOT flipped on by this script: cron cadence + launchd examples
-# ship uninstalled (config/, docs/meeting-sync-schedule.md); they are registered
+# ship uninstalled (docs/launchd/, docs/meeting-sync-schedule.md); they are registered
 # only after a hand-run proves one real meeting cycle (design Phase 5).
 #
 # USAGE:
@@ -964,8 +964,8 @@ schedule label, so a fixed UTC fire cannot drift across the 13:00 PT boundary at
 a DST transition.
 
 launchd alternative (long-lived, ship-uninstalled): see
-  config/com.firstmate.meeting-sync-eod.plist.example
-  config/com.firstmate.meeting-sync-morning.plist.example
+  docs/launchd/com.firstmate.meeting-sync-eod.plist.example
+  docs/launchd/com.firstmate.meeting-sync-morning.plist.example
 and the install steps in docs/meeting-sync-schedule.md. Do NOT install until the
 Phase 5 gate. The meeting-LESS daily reconcile can run from launchd (it calls no
 Google MCP); the meeting ingest fires depend on bin/fm-gfetch.sh being credentialed.

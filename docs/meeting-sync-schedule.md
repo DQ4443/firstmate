@@ -74,8 +74,8 @@ transition.
 
 The launchd form of the two meeting fires ships as uninstalled examples:
 
-- `config/com.firstmate.meeting-sync-eod.plist.example`
-- `config/com.firstmate.meeting-sync-morning.plist.example`
+- `docs/launchd/com.firstmate.meeting-sync-eod.plist.example`
+- `docs/launchd/com.firstmate.meeting-sync-morning.plist.example`
 
 The meeting-LESS daily reconcile has its own launchd example on the L5 leaf
 (`config/com.firstmate.reconcile-daily.plist.example`); it calls no Google MCP
