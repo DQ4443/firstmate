@@ -71,6 +71,7 @@ cat > "$WORK/relations.json" <<'JSON'
   "ENG-100": {"blocks": [], "blockedBy": [{"id": "ENG-201", "title": "blocker"}]},
   "ENG-205": {"blocks": [], "blockedBy": [{"id": "ENG-204", "title": "unresolved"}]},
   "ENG-102": {"blocks": [], "blockedBy": []},
+  "ENG-103": {"blocks": [], "blockedBy": [{"id": "ENG-102", "title": "beta"}]},
   "ENG-201": {"blocks": [], "blockedBy": []}
 }
 JSON
@@ -109,6 +110,10 @@ chk "Done -> group done (ENG-100)"          "grep -q 'move_group ENG-100 active 
 chk "merged PR -> done (ENG-102)"           "grep -qE 'set_node_status ENG-102 working -> done.*merged PR observed' \"$WORK/out.txt\""
 chk "In Progress+recent -> working (ENG-103)" "grep -qE 'set_node_status ENG-103 queued -> working.*recent activity' \"$WORK/out.txt\""
 chk "blocked signal -> blocked (ENG-205)"   "grep -qE 'set_node_status ENG-205 queued -> blocked.*open blocked-by ENG-204' \"$WORK/out.txt\""
+# blocked-by a merged-but-not-Done issue (ENG-102) is NOT blocked: done-detection
+# matches the classifier (status Done OR completed OR merged PR), never bare status.
+chk "merged-PR blocker not treated as open (ENG-103)" \
+  "grep -qE 'set_node_status ENG-103 queued -> working' \"$WORK/out.txt\" && ! grep -qE 'ENG-103 .*-> blocked' \"$WORK/out.txt\""
 
 # --- add_node / add_edge with type+cluster ---------------------------------
 chk "add_node only with existing row (ENG-101)" "grep -qE 'add_node ENG-101 .*node n101 in agent' \"$WORK/out.txt\""

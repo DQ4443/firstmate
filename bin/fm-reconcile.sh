@@ -79,7 +79,9 @@
 #                   [--max-relations 80] [--no-relations] [--no-github]
 #
 # Exit codes: 0 ok (dry run always 0 unless a usage error); 2 usage error;
-#             3 --apply needed a write credential that was unavailable.
+#             3 --apply needed a write credential that was unavailable;
+#             4 --apply ran but not every autonomous op verified (some/all writes
+#               failed) so a scheduled run can detect a silent all-writes-failed pass.
 set -euo pipefail
 
 FM_RECONCILE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,7 +99,7 @@ import time
 import urllib.error
 import urllib.request
 
-E_USAGE, E_AUTH = 2, 3
+E_USAGE, E_AUTH, E_APPLY = 2, 3, 4
 
 SCRIPT_DIR = os.environ["FM_RECONCILE_SCRIPT_DIR"]
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -541,8 +543,12 @@ def build_change_list(o, model, issues, relations, merged):
     find_row = build_row_matcher(model)
     drift = load_drift_set()
     skip_exact, skip_substr, skip_labels = load_skip_patterns()
-    done_nums = {eng_num(i.get("id", "")) for i in issues
-                 if str(i.get("status", "")) == "Done"}
+    def _issue_done(i):
+        st = str(i.get("status", "")).strip()
+        stt = str(i.get("statusType", "")).strip().lower()
+        return st == "Done" or stt == "completed" or bool(merged.get(eng_num(i.get("id", ""))))
+
+    done_nums = {eng_num(i.get("id", "")) for i in issues if _issue_done(i)}
     done_nums = {n for n in done_nums if n is not None}
     issues_by_num = {eng_num(i.get("id", "")): i for i in issues
                      if eng_num(i.get("id", "")) is not None}
@@ -848,6 +854,10 @@ def apply_ops(o, auto_ops):
             landed += 1
     print("apply: %d/%d autonomous tracker ops verified; each written to the "
           "audit log (slot %s)." % (landed, len(auto_ops), o["slot"]))
+    if landed < len(auto_ops):
+        print("apply: %d op(s) did not verify; exiting %d so a scheduled run "
+              "detects the failed writes." % (len(auto_ops) - landed, E_APPLY))
+        return E_APPLY
     return 0
 
 
