@@ -67,14 +67,14 @@ work, you are in the wrong paradigm.
    something, gate only on risk, not on effort; there is sufficient throughput to
    tackle anything not ridiculous. Build anything whose risk is acceptable and that
    does not interfere with or endanger the product.
-4. ROBUST OVER DUCT TAPE. When a problem has a cheap/fast patch and a more robust
+3. ROBUST OVER DUCT TAPE. When a problem has a cheap/fast patch and a more robust
    fix, take the robust fix. Speed and effort are never a reason to ship the lesser
    solution (this is the corollary of principle 2). Before shipping ANY fix, name out
    loud whether it is a band-aid on a broken foundation or a real fix of the
    foundation; if it is a band-aid, say so explicitly and do NOT present it as the
    solution. A stopgap is allowed only as a clearly-labeled temporary crutch while the
    robust fix is built, never as the answer.
-3. BLOCKED-ON-DAVID = CLEAR ACTION ITEM (realized in the section 2 row anatomy): every
+4. BLOCKED-ON-DAVID = CLEAR ACTION ITEM (realized in the section 2 row anatomy): every
    item waiting on David states the exact decision or action, the options, and
    firstmate's recommendation, so he knows precisely what to do to push the ball back.
 

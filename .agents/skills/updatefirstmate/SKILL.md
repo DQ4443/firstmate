@@ -21,9 +21,11 @@ This touches only the firstmate repo and its own worktrees, never anything under
 ## What it does
 
 1. **Run the updater:**
+
    ```sh
    bin/fm-update.sh
    ```
+
    It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a treehouse worktree of this same repo, leased at a detached HEAD on the default branch) the same way.
    It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
@@ -36,9 +38,11 @@ This touches only the firstmate repo and its own worktrees, never anything under
 
 3. **Nudge each updated live secondmate.**
    For every target listed on the `nudge-secondmates:` line (do nothing when it says `none`), send a one-line re-read nudge so that secondmate picks up its new instructions too:
+
    ```sh
    bin/fm-send.sh <window-target> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
    ```
+
    This is a gentle steer, not an interruption: the secondmate already got a safe tracked-files fast-forward, and the nudge never forces, tears down, or discards its work.
    A secondmate that was skipped, already current, or has no live metadata is not on the list and needs no nudge.
 
