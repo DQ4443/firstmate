@@ -1,0 +1,26 @@
+# Skip set: tickets the tracker<->Linear SYNC never mirrors (meeting-sync-design.md
+# section 3 "SKIP SET"). This governs SYNC SCOPE ONLY. A newly-committed non-MVP
+# ACTION ITEM is NOT dropped by this list - that is Decision 2c (Phase 2/3),
+# outside this reconcile leaf. Skipping from the DAG is not losing a commitment.
+#
+# The design's skip set: minor-fix / merge-conflict tickets, Canceled tickets
+# (NOTE the node, never delete it - the reconcile handles Canceled specially and
+# does not need them listed here), non-MVP research (Francis SapSim, invDes/FDTD,
+# Yang's research spikes), admin-dashboard tickets (collapsed to one
+# aggregate master item). Borderline -> the reconcile marks it NEEDS-DAVID
+# ("uncertain, David decides"), it does not guess.
+#
+# FORMAT (one rule per line; # and blanks ignored):
+#   eng:NNN        exact ENG ticket id to skip
+#   substr:TEXT    skip any ticket whose title contains TEXT (case-insensitive)
+#   label:NAME     skip any ticket carrying the Linear label NAME (case-insensitive)
+#
+# These substrings are conservative starters, corrected reality-wins as the real
+# non-MVP research titles are observed. Keep them specific enough not to swallow
+# a real MVP deliverable.
+
+substr:sapsim
+substr:invdes
+substr:fdtd
+substr:admin dashboard
+substr:merge conflict

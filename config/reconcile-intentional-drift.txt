@@ -1,0 +1,20 @@
+# Intentional tracker<->Linear drift: items the reconcile must PRESERVE, not revert.
+#
+# WHY (meeting-sync-design.md section 3 "WHAT WINS" + section 6 + open Q4):
+# some tracker items are legitimately "done on the tracker, In Progress on Linear"
+# because the tracker item scope is NARROWER than the ticket scope. ENG-253 and
+# ENG-252 are the canonical example. A naive reconcile would flip these back and
+# fight the human every day.
+#
+# STATUS OF THE DURABLE MARKER: open question 4 (how to record legitimate drift:
+# a model field, a whitelist file, or a per-item note) is UNRESOLVED at David's
+# design gate. Per the L5 leaf brief, while the marker is unresolved this pass
+# does NOT touch these items: fm-reconcile.sh lists each in the change-list under
+# DRIFT-HOLD and generates zero status/group/edge ops against it. This file is
+# the interim greppable whitelist; when David resolves Q4 it is superseded by the
+# chosen mechanism, and this note is the pointer to that decision.
+#
+# FORMAT: one ENG-NNN per line; comments (#) and blanks ignored.
+
+ENG-253
+ENG-252
