@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EXAMPLE ONLY - DO NOT INSTALL FROM THIS LEAF.
+
+  launchd alternative for the EOD meeting-sync fire (design Phase 5, Decision
+  7a). The design's PREFERRED trigger is CronCreate (harness routines): "one
+  mechanism per surface: cron owns the trigger, nothing else does." This plist
+  is the long-lived launchd alternative, shipped UNINSTALLED. Register the
+  schedule (cron OR launchd) ONLY after a hand-run proves one real meeting cycle
+  (design Phase 5); until then the schedule stays off.
+
+  SLOT IDENTITY: the run computes its own slot from the fire date ($(date +%F)),
+  so this entry always processes TODAY's eod slot. Stage A is slot-scoped, so a
+  fixed fire never grabs "the newest doc"; it selects that slot's PT window.
+
+  TIMEZONE: launchd StartCalendarInterval fires in LOCAL time. Confirm the host
+  is America/Los_Angeles (`sudo systemsetup -gettimezone`) before trusting the
+  hour, because classification hinges on the 13:00 PT morning/eod boundary
+  (Decision 7a / TZ-DST). The run also self-defends: it converts fire-time to PT
+  and re-derives its slot rather than trusting the label.
+
+  DEPENDENCY: the meeting ingest needs bin/fm-gfetch.sh credentialed (open
+  question 10). Absent a credential the run takes the honest degrade (posts
+  "paste the notes" to the board) and exits 3; this launchd job then logs that
+  and is a safe no-op, never a crash.
+
+  INSTALL (only at the Phase 5 gate):
+    1. Edit the absolute paths below to the real firstmate checkout.
+    2. Decide dry-run (safe) vs apply (lands the autonomous tier); start dry.
+    3. cp config/com.firstmate.meeting-sync-eod.plist.example \
+         ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
+    4. launchctl load ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
+    5. Verify: launchctl list com.firstmate.meeting-sync-eod
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.meeting-sync-eod</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>/Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/eod" --dry-run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>21</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/meeting-sync-eod.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/meeting-sync-eod.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
