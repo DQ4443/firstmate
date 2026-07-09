@@ -41,13 +41,15 @@
 # narrower-scope items (tracker done, Linear In Progress because the item scope <
 # the ticket scope; ENG-253/ENG-252 are canonical) must NOT be reverted. The
 # durable drift MARKER is open question 4, still UNRESOLVED, so per the leaf brief
-# this pass LISTS those items (config/reconcile-intentional-drift.txt) in the
-# change-list as DRIFT-HOLD and generates NO ops against them.
+# this pass LISTS those items (runtime config/reconcile-intentional-drift.txt,
+# seeded from docs/reconcile-intentional-drift.example.txt) in the change-list as
+# DRIFT-HOLD and generates NO ops against them.
 #
 # SKIP SET (design section 3, tracker<->Linear SYNC scope only): minor-fix /
 # merge-conflict tickets, Canceled tickets (NOTE, do not delete the node),
 # non-MVP research (Francis SapSim, invDes/FDTD, Yang), admin-dashboard tickets
-# (one aggregate master item). Configured in config/reconcile-skip-set.txt.
+# (one aggregate master item). Configured in the runtime
+# config/reconcile-skip-set.txt (seeded from docs/reconcile-skip-set.example.txt).
 # Borderline -> "uncertain, David decides" (NEEDS-DAVID). Skipping from the DAG is
 # not the same as dropping a newly-committed non-MVP action item (that is Phase 2/
 # Decision 2c, out of this leaf's scope).
@@ -69,7 +71,8 @@
 # HERMETIC TEST HOOKS (dependency injection, so the reconcile is testable with no
 # network): FM_RECONCILE_MODEL_FILE, FM_RECONCILE_LINEAR_FILE, FM_RECONCILE_PR_FILE,
 # FM_RECONCILE_RELATIONS_FILE feed fixtures instead of live fetches;
-# FM_RECONCILE_LINEAR_BIN / _GH_BIN / _AUDIT_BIN override the tool paths.
+# FM_RECONCILE_LINEAR_BIN / _GH_BIN / _AUDIT_BIN override the tool paths;
+# FM_RECONCILE_CONFIG_DIR overrides the drift-hold/skip-set config dir.
 #
 # USAGE:
 #   fm-reconcile.sh --dry-run            # default; prints the change-list, no writes
@@ -103,7 +106,8 @@ E_USAGE, E_AUTH, E_APPLY = 2, 3, 4
 
 SCRIPT_DIR = os.environ["FM_RECONCILE_SCRIPT_DIR"]
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-CONFIG_DIR = os.path.join(REPO_ROOT, "config")
+CONFIG_DIR = os.environ.get(
+    "FM_RECONCILE_CONFIG_DIR", os.path.join(REPO_ROOT, "config"))
 
 DEFAULTS = {
     "live_url": "https://kronos-mvp-tracker-production.up.railway.app",

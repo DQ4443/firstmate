@@ -22,7 +22,7 @@
 
   INSTALL (only when David approves the Phase 5 schedule):
     1. Edit the two absolute paths below to the real firstmate checkout.
-    2. cp config/com.firstmate.reconcile-daily.plist.example \
+    2. cp docs/com.firstmate.reconcile-daily.plist.example \
          ~/Library/LaunchAgents/com.firstmate.reconcile-daily.plist
     3. launchctl load ~/Library/LaunchAgents/com.firstmate.reconcile-daily.plist
     4. Verify: launchctl list com.firstmate.reconcile-daily

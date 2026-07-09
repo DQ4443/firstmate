@@ -2,7 +2,8 @@
 # Hermetic tests for bin/fm-reconcile.sh (meeting-sync Phase 1 reconcile).
 #
 # No network: the reconcile is fed fixture files through its documented DI hooks
-# (FM_RECONCILE_MODEL_FILE / _LINEAR_FILE / _RELATIONS_FILE / _PR_FILE), so every
+# (FM_RECONCILE_MODEL_FILE / _LINEAR_FILE / _RELATIONS_FILE / _PR_FILE /
+# _CONFIG_DIR), so every
 # pinned mapping (status/group/blocked/edge/soft-retire), the drift-hold, the
 # skip set, the tiering, and the "zero Linear writes / audit reachable"
 # acceptance invariants are checked deterministically and offline.
@@ -84,12 +85,31 @@ cat > "$WORK/prs.json" <<'JSON'
 ]
 JSON
 
+# Drift-hold + skip-set config is injected too (FM_RECONCILE_CONFIG_DIR), so the
+# test never depends on the untracked runtime config/ dir. Mirrors the seed
+# templates docs/reconcile-intentional-drift.example.txt and
+# docs/reconcile-skip-set.example.txt.
+mkdir -p "$WORK/config"
+cat > "$WORK/config/reconcile-intentional-drift.txt" <<'TXT'
+# one ENG-NNN per line; comments (#) and blanks ignored
+ENG-253
+ENG-252
+TXT
+cat > "$WORK/config/reconcile-skip-set.txt" <<'TXT'
+substr:sapsim
+substr:invdes
+substr:fdtd
+substr:admin dashboard
+substr:merge conflict
+TXT
+
 run() {
   FM_RECONCILE_MODEL_FILE="$WORK/model.json" \
   FM_RECONCILE_LINEAR_FILE="$WORK/linear.json" \
   FM_RECONCILE_RELATIONS_FILE="$WORK/relations.json" \
   FM_RECONCILE_PR_FILE="$WORK/prs.json" \
   FM_RECONCILE_AUDIT_BIN="$AUDIT" \
+  FM_RECONCILE_CONFIG_DIR="$WORK/config" \
   FM_SYNC_AUDIT_DIR="$WORK/audit" \
   FM_RECONCILE_TRACKER_ENV="$WORK/nonexistent.env" \
     "$BIN" "$@"
