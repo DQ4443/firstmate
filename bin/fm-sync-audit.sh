@@ -189,6 +189,8 @@ def cmd_append(argv):
         "note": f.get("note"),
         "target": target,
         "op": op,
+        "slot": slot,
+        "run": f.get("run", slot),
     }
     secret_check(recordable)
 
@@ -211,12 +213,26 @@ def cmd_append(argv):
     # crash-correct record (design section 3). json.dumps never emits a raw
     # newline, so one line == one entry, which read relies on.
     line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+    is_new = not os.path.exists(path)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:
-        os.write(fd, line.encode("utf-8"))
+        buf = line.encode("utf-8")
+        written = 0
+        # POSIX permits a short write; loop until the whole line lands so a
+        # partial write can never leave a torn (non-crash) record.
+        while written < len(buf):
+            written += os.write(fd, buf[written:])
         os.fsync(fd)
     finally:
         os.close(fd)
+    if is_new:
+        # A new slot file also needs its directory entry fsync'd, or a crash
+        # after fsync(fd) can still lose the freshly created file.
+        dir_fd = os.open(os.path.dirname(path), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     sys.stderr.write("fm-sync-audit: appended %s/%s to %s\n" % (op, target, path))
 
 
