@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EXAMPLE ONLY - DO NOT INSTALL FROM THIS LEAF.
+
+  This is an OPTIONAL launchd example for firing the standalone daily
+  reconcile (bin/fm-reconcile.sh) as a short-lived one-shot. Scheduling is
+  Phase 5 in meeting-sync-design.md, NOT this L5 reconcile leaf, and the design
+  (section 7 / Decision 7a) prefers CronCreate (harness routines) as the trigger
+  owner: "one mechanism per surface: cron owns the trigger, nothing else does."
+  This plist is provided only as the launchd alternative for the meeting-LESS
+  daily reconcile, which - unlike the meeting ingest - calls NO Gmail/Drive MCP
+  and so CAN run from launchd (it uses fm-linear.sh + curl + gh, all
+  deterministic CLIs). It is left uninstalled on purpose; David chooses the
+  scheduler at the Phase 5 gate.
+
+  TIMEZONE: launchd StartCalendarInterval fires in LOCAL time. Confirm the host
+  is America/Los_Angeles (`sudo systemsetup -gettimezone`) before trusting the
+  hour below, because the meeting classification hinges on a 13:00 PT boundary
+  (design Decision 7a / TZ-DST). The reconcile itself is timezone-agnostic (it
+  reconciles current state, it does not classify a meeting slot), so a DST drift
+  only shifts WHEN it runs, never WHAT it does.
+
+  INSTALL (only when David approves the Phase 5 schedule):
+    1. Edit the two absolute paths below to the real firstmate checkout.
+    2. cp docs/com.firstmate.reconcile-daily.plist.example \
+         ~/Library/LaunchAgents/com.firstmate.reconcile-daily.plist
+    3. launchctl load ~/Library/LaunchAgents/com.firstmate.reconcile-daily.plist
+    4. Verify: launchctl list com.firstmate.reconcile-daily
+  It runs --dry-run by default here (safe). Switch to --apply only after the
+  reconcile has been proven by hand for at least one cycle (design Phase 5).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.reconcile-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dq4443/dev/personal/firstmate/bin/fm-reconcile.sh</string>
+    <string>--dry-run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/reconcile-daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/reconcile-daily.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
