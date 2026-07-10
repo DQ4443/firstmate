@@ -17,6 +17,14 @@
 # claude shows its own login flow and David completes it. No credential is ever
 # written or printed by this script.
 #
+# TRUST DIALOG: spawn sends no initial prompt, but claude's first launch in a
+# not-yet-trusted directory blocks forever on "Do you trust the files in this
+# folder?", swallowing anything typed at the session afterwards (2026-07-09:
+# both spawned nodes sat on it with their briefs undelivered). spawn therefore
+# polls the pane for up to FM_NODE_TRUST_WAIT seconds (default 15) after
+# launching claude and presses Enter once to accept the dialog if it appears.
+# Login prompts are never auto-answered.
+#
 # Registry: state/fleet-nodes.json (gitignored, like all state/). Shape:
 #   { "updated_at": <epoch>,
 #     "nodes": { "<name>": {
@@ -32,7 +40,8 @@
 #   fm-node.sh list                  # per node: identity, 5h/7d util, live pid (hits the usage API)
 #   fm-node.sh usage [--pretty]      # the generic N-node usage reader, as JSON (additive to the widget feed)
 #   fm-node.sh status                # registry + session liveness only (no network)
-#   fm-node.sh spawn <name>          # tmux session fm-node-<name> running claude with CLAUDE_CONFIG_DIR set
+#   fm-node.sh spawn <name>          # tmux session fm-node-<name> running claude with CLAUDE_CONFIG_DIR set;
+#                                    # auto-accepts the trust-folder dialog (poll capped by FM_NODE_TRUST_WAIT, default 15s)
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,23 +109,26 @@ write_transform() {
 
 # --- node property helpers ---------------------------------------------------
 
-node_default_config_dir() { printf '%s/.claude' "$HOME"; }
-
 node_session_name() { printf 'fm-node-%s' "$1"; }
 
 # The macOS Keychain service that holds a config dir's OAuth token. Claude Code
-# uses the bare "Claude Code-credentials" for the default ~/.claude home, and
-# "Claude Code-credentials-<first 8 hex of sha256(CLAUDE_CONFIG_DIR)>" for any
-# isolated home (verified: ~/.claude-personal -> -338d7248). We hash the exact
-# absolute path we store and set as CLAUDE_CONFIG_DIR, so the derivation always
-# matches the string Claude itself hashed.
+# stores EVERY home's token under
+# "Claude Code-credentials-<first 8 hex of sha256(CLAUDE_CONFIG_DIR)>"
+# (verified 2026-07-09: ~/.claude -> -50e92344, ~/.claude-personal -> -338d7248).
+# Always derive the service from the config dir; the bare legacy
+# "Claude Code-credentials" entry is a stale pre-split slot (it held an old
+# work token, which made every node report IDENTICAL usage when ~/.claude was
+# special-cased to it) and is only a fallback when the derived slot is missing.
+# Mirrors service_for_dir in ~/.firstmate-board/usage-feed.sh. We hash the
+# exact absolute path we store and set as CLAUDE_CONFIG_DIR, so the derivation
+# always matches the string Claude itself hashed.
 node_keychain_service() { # <config_dir_abs>
   local dir=$1 h
-  if [ "$dir" = "$(node_default_config_dir)" ]; then
-    printf 'Claude Code-credentials'
-  else
-    h=$(printf '%s' "$dir" | shasum -a 256 | awk '{print $1}' | cut -c1-8)
+  h=$(printf '%s' "$dir" | shasum -a 256 | awk '{print $1}' | cut -c1-8)
+  if security find-generic-password -s "Claude Code-credentials-$h" >/dev/null 2>&1; then
     printf 'Claude Code-credentials-%s' "$h"
+  else
+    printf 'Claude Code-credentials'
   fi
 }
 
@@ -457,6 +469,29 @@ cmd_spawn() {
   tmux send-keys -t "$ses" "export CLAUDE_CONFIG_DIR=$(shell_quote "$cfg")" Enter
   sleep 0.3
   tmux send-keys -t "$ses" "claude" Enter
+  # Trust-dialog auto-accept (2026-07-09): claude's first launch in a
+  # not-yet-trusted directory shows "Do you trust the files in this folder?"
+  # and sits there indefinitely, so anything typed at the session afterwards
+  # (a dispatch brief) queues behind the dialog undelivered. spawn sends NO
+  # initial prompt itself, but it must hand back a usable session: poll the
+  # pane for up to FM_NODE_TRUST_WAIT seconds (default 15) and press Enter
+  # once to accept the dialog's default if it appears. Login prompts are NOT
+  # auto-answered (NO AUTO-LOGIN stands). The poll stops early once claude's
+  # composer is up ("? for shortcuts") with no dialog.
+  local waited=0 wait_max="${FM_NODE_TRUST_WAIT:-15}" pane
+  while [ "$waited" -lt "$wait_max" ]; do
+    sleep 1
+    waited=$((waited + 1))
+    pane=$(tmux capture-pane -p -t "$ses" 2>/dev/null || true)
+    if printf '%s' "$pane" | grep -qi 'do you trust'; then
+      tmux send-keys -t "$ses" Enter
+      echo "fm-node: accepted claude trust-folder dialog in $ses" >&2
+      break
+    fi
+    if printf '%s' "$pane" | grep -qF '? for shortcuts'; then
+      break
+    fi
+  done
   echo "spawned node $name session=$ses config_dir=$cfg (sign in if claude prompts; NO auto-login)"
 }
 

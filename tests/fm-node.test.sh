@@ -15,6 +15,9 @@
 #   - spawn creates the fm-node-<name> tmux session and sends the CLAUDE_CONFIG_DIR
 #     export + a bare `claude` launch (no auto-login), and is idempotent when the
 #     session already exists
+#   - spawn auto-accepts the trust-folder dialog (one Enter) when the pane shows
+#     it, and sends nothing when the composer is already up (FM_FAKE_PANE drives
+#     the faked capture-pane; FM_NODE_TRUST_WAIT bounds the poll)
 #   - a corrupt registry is a hard refusal, never a silent reset
 #   - unknown command / no command exits 2
 set -u
@@ -44,6 +47,7 @@ case "\${1:-}" in
     [ "\${FM_FAKE_HAS_SESSION:-0}" = 1 ] && exit 0 || exit 1 ;;
   new-session) exit 0 ;;
   send-keys) exit 0 ;;
+  capture-pane) printf '%s\n' "\${FM_FAKE_PANE:-}" ;;
 esac
 exit 0
 SH
@@ -219,12 +223,38 @@ test_spawn_creates_session_and_launches_claude() {
   local log="$d/tmux.log"
   : > "$log"
   local out
-  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 run_node "$d" spawn alpha)
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=0 run_node "$d" spawn alpha)
   assert_contains "$out" "spawned node alpha session=fm-node-alpha" "spawn reports the session"
   assert_grep "new-session -d -s fm-node-alpha" "$log" "spawn creates the fm-node-alpha session"
   assert_grep "export CLAUDE_CONFIG_DIR=" "$log" "spawn seeds CLAUDE_CONFIG_DIR"
   assert_grep "send-keys -t fm-node-alpha claude Enter" "$log" "spawn launches bare claude (no auto-login)"
   pass "spawn creates the node session and launches claude with the config dir"
+}
+
+test_spawn_accepts_trust_dialog() {
+  local d; d=$(new_case spawn-trust)
+  run_node "$d" register alpha "$d/cfg" >/dev/null
+  local log="$d/tmux.log"
+  : > "$log"
+  local out
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=3 \
+        FM_FAKE_PANE='Do you trust the files in this folder?' run_node "$d" spawn alpha 2>&1)
+  assert_contains "$out" "accepted claude trust-folder dialog" "spawn reports the accept"
+  assert_grep "send-keys -t fm-node-alpha Enter" "$log" "spawn presses Enter to accept the trust dialog"
+  pass "spawn auto-accepts the trust-folder dialog when it appears"
+}
+
+test_spawn_stops_poll_when_composer_up() {
+  local d; d=$(new_case spawn-composer)
+  run_node "$d" register alpha "$d/cfg" >/dev/null
+  local log="$d/tmux.log"
+  : > "$log"
+  local out
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=30 \
+        FM_FAKE_PANE='> _  ? for shortcuts' run_node "$d" spawn alpha 2>&1)
+  assert_contains "$out" "spawned node alpha" "spawn completes"
+  assert_no_grep "send-keys -t fm-node-alpha Enter" "$log" "no stray Enter when the composer is already up"
+  pass "spawn stops polling early when the composer is up with no dialog"
 }
 
 test_spawn_idempotent_when_running() {
@@ -279,6 +309,8 @@ test_usage_degrades_when_not_signed_in
 test_status_reports_liveness
 test_status_empty_registry
 test_spawn_creates_session_and_launches_claude
+test_spawn_accepts_trust_dialog
+test_spawn_stops_poll_when_composer_up
 test_spawn_idempotent_when_running
 test_spawn_unknown_node
 test_corrupt_registry_is_hard_error
