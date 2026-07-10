@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# firstmate: full auto-review. This repo is firstmate's own orchestration tooling
+# (bash under bin/, markdown docs and skills, HTML artifacts), not Kronos product
+# code, so CodeRabbit reviews every PR and encodes the pinned house conventions.
+# It comments and can autofix; it does not gate merges
+# (request_changes_workflow stays off).
+language: en-US
+tone_instructions: >-
+  Be direct and evidence-based. In prose you author, never use em dashes; use
+  commas, periods, or parentheses instead. When a PR description or doc claims a
+  result or that something works, expect the command run and its output to back
+  it (evidence over claims) and flag claims that have none.
+early_access: false
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_instructions:
+    - path: "**/*.sh"
+      instructions: >-
+        Bash must be shellcheck-clean: quote every expansion, prefer `[[ ]]`
+        over `[ ]`, use `set -euo pipefail` where appropriate, keep tests
+        colocated, and flag any unquoted variable or other shellcheck warning.
+    - path: "**/*.{md,mdx}"
+      instructions: >-
+        No em dashes anywhere; use commas, periods, or parentheses instead.
+        One sentence per line, plain literal prose. Flag any "it works" or
+        result claim stated without the command run and its output (evidence
+        over claims). Respect the AGENTS.md size caps.
+    - path: "**/*.{html,htm,css}"
+      instructions: >-
+        HTML artifacts use the warm light theme. Do not introduce border-left
+        accent bars for emphasis or decoration (for example
+        `border-left: <n>px solid ...` on callouts, cards, banners, or
+        blockquotes). Flag them and propose a different visual treatment.
+  tools:
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    languagetool:
+      enabled: true
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+chat:
+  auto_reply: true
