@@ -133,7 +133,7 @@ grep -q "spawned headless board drain" "$STATE_DIR/poller.log" \
 pass "poller spawned bin/fm-drain-worker.sh unattended (logged)"
 
 # The reply is firstmate-authored and is a holding-ack (item left un-serviced).
-reply=$(ls -t "$THREAD"/*.md | head -n1)
+reply=$(find "$THREAD" -maxdepth 1 -name "*.md" -print0 | xargs -0 ls -t | head -n1)
 author=$(head -n1 "$reply" | jq -r '.author')
 [ "$author" = firstmate ] || fail "newest thread file is not firstmate-authored (got '$author')"
 assert_grep "live orchestrator will pick this up" "$reply" "holding-ack body not found"

@@ -90,7 +90,7 @@ fi
 pass "a REAL claude -p headless turn posted a holding-ack to an unanswered David thread"
 
 # The posted reply must be firstmate-authored (a real board reply, not an echo).
-reply=$(ls -t "$THREAD"/*.md | head -n1)
+reply=$(find "$THREAD" -maxdepth 1 -name "*.md" -print0 | xargs -0 ls -t | head -n1)
 author=$(head -n1 "$reply" | jq -r '.author')
 [ "$author" = firstmate ] || fail "newest thread file is not firstmate-authored (got '$author')"
 body=$(sed '1,2d' "$reply" | tr -d '[:space:]')
