@@ -13,13 +13,20 @@
 #   - usage emits the additive N-node JSON; a node with no token degrades to ok:false
 #   - status reports session liveness with no network call
 #   - spawn creates the fm-node-<name> tmux session and sends the CLAUDE_CONFIG_DIR
-#     export + a `claude --dangerously-skip-permissions` launch by default (no
-#     auto-login; the write fence stays the structural guard), bare `claude` under
-#     FM_NODE_NO_BYPASS=1, and is idempotent when the session already exists
+#     export + a `claude --dangerously-skip-permissions` launch by default, bare
+#     `claude` under FM_NODE_NO_BYPASS=1, and is idempotent when the session
+#     already exists
+#   - write-fence seeding: register (existing home) and spawn (fresh home) wire
+#     fm-write-fence.sh as a PreToolUse Edit|Write|NotebookEdit hook into the
+#     node's own settings.json by absolute path; existing settings keys are
+#     preserved; re-seeding is idempotent (exactly one fence entry); an
+#     unparseable settings.json is a hard refusal, never a clobber
 #   - spawn auto-accepts the trust-folder dialog (one Enter) and the one-time
-#     bypass-permissions confirmation (Down Enter) when the pane shows them, and
-#     sends nothing when the composer is already up (FM_FAKE_PANE drives the
-#     faked capture-pane; FM_NODE_TRUST_WAIT bounds the poll)
+#     bypass-permissions confirmation (Down Enter, once) when the pane shows
+#     them, and sends nothing when the composer is already up (FM_FAKE_PANE
+#     drives the faked capture-pane; FM_NODE_TRUST_WAIT bounds the poll)
+#   - NO AUTO-LOGIN negative: a pane showing claude's login prompt gets no
+#     keystrokes at all
 #   - a corrupt registry is a hard refusal, never a silent reset
 #   - unknown command / no command exits 2
 set -u
@@ -35,7 +42,7 @@ TMP_ROOT=$(fm_test_tmproot fm-node)
 # A fakebin shadowing tmux/security/curl. Behavior is driven by FM_FAKE_* env read
 # at call time, so a single fakebin serves every case.
 make_fakebin() {  # <dir> -> echoes fakebin path
-  local dir=$1 fb="$1/fakebin"
+  local fb="$1/fakebin"
   mkdir -p "$fb"
   cat > "$fb/tmux" <<SH
 #!/usr/bin/env bash
@@ -260,8 +267,13 @@ test_spawn_accepts_bypass_confirmation() {
   2. Yes, I accept' run_node "$d" spawn alpha 2>&1)
   assert_contains "$out" "accepted claude bypass-permissions confirmation" "spawn reports the accept"
   assert_grep "send-keys -t fm-node-alpha Down Enter" "$log" \
-    "spawn moves off the No-exit default and confirms (Down Enter), exactly once"
-  pass "spawn auto-accepts the one-time bypass-permissions confirmation"
+    "spawn moves off the No-exit default and confirms (Down Enter)"
+  # The pane keeps showing the dialog for the whole 3s poll, so a missing
+  # bypass_done guard would answer it every second: count the actual sends.
+  local n
+  n=$(grep -cF -- "send-keys -t fm-node-alpha Down Enter" "$log" || true)
+  [ "$n" -eq 1 ] || fail "bypass confirmation must be answered exactly once, got $n Down-Enter sends"
+  pass "spawn auto-accepts the one-time bypass-permissions confirmation exactly once"
 }
 
 test_spawn_accepts_trust_dialog() {
@@ -290,6 +302,25 @@ test_spawn_stops_poll_when_composer_up() {
   pass "spawn stops polling early when the composer is up with no dialog"
 }
 
+test_spawn_never_answers_login_prompt() {
+  local d; d=$(new_case spawn-login)
+  run_node "$d" register alpha "$d/cfg" >/dev/null 2>&1
+  local log="$d/tmux.log"
+  : > "$log"
+  local out
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=3 \
+        FM_FAKE_PANE='Select login method:
+  1. Claude account with subscription
+  2. Anthropic Console account' run_node "$d" spawn alpha 2>&1)
+  assert_contains "$out" "spawned node alpha" "spawn completes without touching the login flow"
+  # The launch send-keys lines carry the export/claude command text; a dialog
+  # answer would be a bare keystroke line. None may appear at a login prompt.
+  assert_no_grep "send-keys -t fm-node-alpha Enter" "$log" "no Enter is sent at a login prompt"
+  assert_no_grep "send-keys -t fm-node-alpha Down Enter" "$log" "no selection is made at a login prompt"
+  assert_not_contains "$out" "accepted claude" "nothing is reported as auto-accepted at a login prompt"
+  pass "spawn auto-answers nothing at a login prompt (NO AUTO-LOGIN)"
+}
+
 test_spawn_idempotent_when_running() {
   local d; d=$(new_case spawn-running)
   run_node "$d" register alpha "$d/cfg" >/dev/null
@@ -307,6 +338,82 @@ test_spawn_unknown_node() {
   run_node "$d" spawn ghost >/dev/null 2>&1 || rc=$?
   expect_code 2 "$rc" "spawning an unregistered node exits 2"
   pass "spawn refuses an unregistered node"
+}
+
+# --- write-fence seeding -----------------------------------------------------
+
+# jq filter matching the seeded fence entry inside a node settings.json.
+FENCE_FILTER='.hooks.PreToolUse[]? | select(.matcher == "Edit|Write|NotebookEdit")
+  | .hooks[]? | select(.type == "command" and (.command | endswith("/fm-write-fence.sh")))'
+
+assert_fence_seeded() {  # <settings.json path> <label>
+  jq -e "$FENCE_FILTER" "$1" >/dev/null 2>&1 \
+    || fail "$2 (no fence hook in $1):"$'\n'"$(cat "$1" 2>/dev/null || echo '(missing)')"
+  # The hook command must be absolute: the node's session cwd is $HOME, so a
+  # relative path would never resolve.
+  jq -e "[$FENCE_FILTER] | all(.command | startswith(\"/\"))" "$1" >/dev/null 2>&1 \
+    || fail "$2: fence hook command is not an absolute path"
+}
+
+test_register_seeds_write_fence_into_existing_home() {
+  local d; d=$(new_case fence-register)
+  run_node "$d" register alpha "$d/cfg" >/dev/null 2>&1
+  assert_fence_seeded "$d/cfg/settings.json" "register seeds the fence into an existing home"
+  pass "register seeds the write-fence hook into an existing node home"
+}
+
+test_spawn_seeds_write_fence_into_fresh_home() {
+  local d; d=$(new_case fence-spawn-fresh)
+  # Home absent at register time: register must not create it (David signs in
+  # later), so no settings.json yet; spawn then creates the home and seeds it
+  # before launching claude.
+  run_node "$d" register alpha "$d/newhome" >/dev/null 2>&1
+  assert_absent "$d/newhome/settings.json" "register leaves a not-yet-created home alone"
+  local log="$d/tmux.log"
+  : > "$log"
+  FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=0 \
+    run_node "$d" spawn alpha >/dev/null 2>&1
+  assert_fence_seeded "$d/newhome/settings.json" "spawn seeds the fence into a fresh home"
+  pass "spawn creates a fresh node home and seeds the write fence before launch"
+}
+
+test_seed_preserves_existing_settings_keys() {
+  local d; d=$(new_case fence-preserve)
+  cat > "$d/cfg/settings.json" <<'J'
+{"model": "opus", "env": {"FOO": "bar"}, "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/usr/bin/true"}]}]}}
+J
+  run_node "$d" register alpha "$d/cfg" >/dev/null 2>&1
+  local s="$d/cfg/settings.json"
+  assert_fence_seeded "$s" "seeding into a populated settings.json adds the fence"
+  jq -e '.model == "opus"
+    and .env.FOO == "bar"
+    and (.hooks.SessionStart[0].hooks[0].command == "/usr/bin/true")' "$s" >/dev/null \
+    || fail "existing settings.json keys were not preserved:"$'\n'"$(cat "$s")"
+  pass "seeding merges into an existing settings.json without clobbering keys"
+}
+
+test_seed_idempotent_across_register_and_spawns() {
+  local d; d=$(new_case fence-idempotent)
+  run_node "$d" register alpha "$d/cfg" >/dev/null 2>&1
+  local log="$d/tmux.log"
+  : > "$log"
+  FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=0 \
+    run_node "$d" spawn alpha >/dev/null 2>&1
+  FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=0 \
+    run_node "$d" spawn alpha >/dev/null 2>&1
+  local count
+  count=$(jq "[$FENCE_FILTER] | length" "$d/cfg/settings.json")
+  [ "$count" -eq 1 ] || fail "fence must be seeded exactly once across register + 2 spawns, got $count entries"
+  pass "re-seeding is idempotent: one fence entry after register plus two spawns"
+}
+
+test_seed_refuses_corrupt_settings() {
+  local d rc=0; d=$(new_case fence-corrupt)
+  printf 'not json' > "$d/cfg/settings.json"
+  run_node "$d" register alpha "$d/cfg" >/dev/null 2>&1 || rc=$?
+  expect_code 2 "$rc" "a corrupt settings.json refuses the seed"
+  assert_grep "not json" "$d/cfg/settings.json" "the corrupt settings.json is left untouched, not clobbered"
+  pass "an unparseable settings.json is a hard refusal, never a silent reset"
 }
 
 # --- safety / dispatch -------------------------------------------------------
@@ -346,8 +453,14 @@ test_spawn_no_bypass_optout
 test_spawn_accepts_bypass_confirmation
 test_spawn_accepts_trust_dialog
 test_spawn_stops_poll_when_composer_up
+test_spawn_never_answers_login_prompt
 test_spawn_idempotent_when_running
 test_spawn_unknown_node
+test_register_seeds_write_fence_into_existing_home
+test_spawn_seeds_write_fence_into_fresh_home
+test_seed_preserves_existing_settings_keys
+test_seed_idempotent_across_register_and_spawns
+test_seed_refuses_corrupt_settings
 test_corrupt_registry_is_hard_error
 test_unknown_command
 

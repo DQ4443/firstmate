@@ -20,13 +20,29 @@
 # BYPASS PERMISSIONS (2026-07-10): spawn launches
 # `claude --dangerously-skip-permissions` by DEFAULT. WHY: an unattended fleet
 # node cannot answer permission prompts; a node stuck on a manual-mode prompt is
-# a dead node (2026-07-10: both nodes stalled on manual-mode prompts). The write
-# fence bin/fm-write-fence.sh remains the structural guard on what a node may
-# write. Opt out with FM_NODE_NO_BYPASS=1, which launches bare `claude`
-# (permission prompts back on; only useful for an attended session). Bypass mode
-# may show a one-time acceptance dialog on first use per config dir; the spawn
-# pane-poll below auto-accepts it (see TRUST DIALOG). Login prompts are still
-# NEVER auto-answered.
+# a dead node (2026-07-10: both nodes stalled on manual-mode prompts). Opt out
+# with FM_NODE_NO_BYPASS=1, which launches bare `claude` (permission prompts
+# back on; only useful for an attended session). Bypass mode may show a
+# one-time acceptance dialog on first use per config dir; the spawn pane-poll
+# below auto-accepts it (see TRUST DIALOG). Login prompts are still NEVER
+# auto-answered.
+#
+# WRITE FENCE, SEEDED PER NODE (2026-07-10): a node's CLAUDE_CONFIG_DIR is a
+# fresh Claude home, so it inherits NONE of firstmate's fence wiring (the
+# fence hook is wired project-locally at the poller cutover, not in any
+# user-level settings, and the node session starts in $HOME anyway). A bypass
+# node launched into an unseeded home would therefore run with NO write fence
+# at all. register (when the home already exists) and spawn (always, creating
+# the home if needed) close that gap: they seed bin/fm-write-fence.sh, by
+# absolute path, as a PreToolUse hook on Edit|Write|NotebookEdit into the
+# node's own <config-dir>/settings.json. Existing settings.json keys are
+# merged (python3), never clobbered; an unparseable settings.json is a hard
+# refusal, never a silent reset; the seed is idempotent (a no-op when the
+# fence hook is already wired). SCOPE, stated exactly: the fence guards
+# Edit/Write/NotebookEdit tool writes ONLY. It does NOT guard Bash writes
+# (redirects, sed -i, git commands), and it fails OPEN on unreadable hook
+# input. It is defense-in-depth behind worktree isolation, not the sole
+# guarantee of where a node may write.
 #
 # TRUST DIALOG: spawn sends no initial prompt, but claude's first launch in a
 # not-yet-trusted directory blocks forever on "Do you trust the files in this
@@ -56,6 +72,7 @@
 #   fm-node.sh status                # registry + session liveness only (no network)
 #   fm-node.sh spawn <name>          # tmux session fm-node-<name> running claude --dangerously-skip-permissions
 #                                    # with CLAUDE_CONFIG_DIR set (FM_NODE_NO_BYPASS=1 launches bare claude instead);
+#                                    # seeds the write-fence PreToolUse hook into <config-dir>/settings.json first;
 #                                    # auto-accepts the trust-folder and bypass-confirmation dialogs
 #                                    # (poll capped by FM_NODE_TRUST_WAIT, default 15s)
 set -eu
@@ -198,6 +215,69 @@ shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
   printf "'"
+}
+
+# Seed the write fence into a node's own Claude home (see WRITE FENCE header).
+# Wires bin/fm-write-fence.sh (absolute path; nodes cwd at $HOME) as a
+# PreToolUse hook on Edit|Write|NotebookEdit in <config-dir>/settings.json.
+# Merge semantics: existing keys and existing PreToolUse entries are preserved;
+# the fence entry is appended only when no hook already runs the fence script;
+# an existing settings.json that is not a JSON object is a hard error (same
+# never-silently-reset posture as the registry). Creates the home if missing
+# (spawn calls this unconditionally; claude is happy to find its dir pre-made).
+node_seed_write_fence() { # <config_dir_abs>
+  local dir=$1 fence="$SCRIPT_DIR/fm-write-fence.sh" out
+  [ -f "$fence" ] || die "write fence script missing at $fence; refusing to set up an unfenced node home"
+  mkdir -p "$dir"
+  out=$(python3 - "$dir/settings.json" "$fence" <<'PY'
+import json, os, sys
+path, fence = sys.argv[1], sys.argv[2]
+settings = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            settings = json.load(f)
+    except Exception:
+        print("unparseable"); sys.exit(0)
+if not isinstance(settings, dict):
+    print("unparseable"); sys.exit(0)
+hooks = settings.get("hooks")
+if hooks is None:
+    hooks = settings["hooks"] = {}
+if not isinstance(hooks, dict):
+    print("unparseable"); sys.exit(0)
+pre = hooks.get("PreToolUse")
+if pre is None:
+    pre = hooks["PreToolUse"] = []
+if not isinstance(pre, list):
+    print("unparseable"); sys.exit(0)
+for entry in pre:
+    if isinstance(entry, dict):
+        for h in entry.get("hooks") or []:
+            if isinstance(h, dict) and h.get("command") == fence:
+                print("present"); sys.exit(0)
+pre.append({
+    "matcher": "Edit|Write|NotebookEdit",
+    "hooks": [{"type": "command", "command": fence}],
+})
+tmp = "%s.tmp.%d" % (path, os.getpid())
+with open(tmp, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+print("seeded")
+PY
+) || die "write-fence seeding failed for $dir/settings.json"
+  case "$out" in
+    seeded)
+      echo "fm-node: seeded write fence into $dir/settings.json (PreToolUse Edit|Write|NotebookEdit -> $fence; Bash writes are NOT fenced)" >&2 ;;
+    present)
+      : ;;
+    unparseable)
+      die "existing $dir/settings.json is not a valid JSON object; refusing to rewrite it (fix or remove it by hand, then re-run)" ;;
+    *)
+      die "write-fence seeding returned unexpected state '$out' for $dir/settings.json" ;;
+  esac
 }
 
 # --- the generic N-node usage reader (item 2) --------------------------------
@@ -364,6 +444,10 @@ cmd_register() {
   # shellcheck disable=SC2016
   write_transform '.nodes[$n] = ((.nodes[$n] // {}) + {name:$n, config_dir:$dir, harness:$h, registered_at:(.nodes[$n].registered_at // $now)}) | .updated_at = $now' \
     --arg n "$name" --arg dir "$dir" --arg h "$harness" --argjson now "$now"
+  # Seed the write fence into an already-existing home now; a not-yet-created
+  # home is seeded by spawn instead (register deliberately does not create it,
+  # so the sign-in-later warning above stays true).
+  [ ! -d "$dir" ] || node_seed_write_fence "$dir"
   echo "registered node: $name -> $dir (harness=$harness)"
 }
 
@@ -477,7 +561,11 @@ cmd_spawn() {
     echo "node $name already running: session=$ses${pid:+ pid=$pid}"
     return 0
   fi
-  [ -d "$cfg" ] || echo "fm-node: warning: config dir does not exist yet: $cfg (claude will create it; sign in if prompted)" >&2
+  [ -d "$cfg" ] || echo "fm-node: config dir does not exist yet: $cfg (creating it to seed the write fence; sign in when claude prompts)" >&2
+  # Seed the write fence BEFORE claude launches: a fresh home has no hook
+  # wiring, and a bypass node must never take its first turn unfenced (see
+  # WRITE FENCE header). Hard-fails on an unparseable settings.json.
+  node_seed_write_fence "$cfg"
   tmux new-session -d -s "$ses" -c "$HOME"
   # Seed CLAUDE_CONFIG_DIR into the session's shell, then launch claude. The
   # brief sleeps let each keystroke line land before the next, mirroring
@@ -486,8 +574,9 @@ cmd_spawn() {
   sleep 0.3
   # BYPASS PERMISSIONS by default (2026-07-10): an unattended fleet node cannot
   # answer permission prompts, so a manual-mode node is a dead node. The write
-  # fence (bin/fm-write-fence.sh) remains the structural guard. FM_NODE_NO_BYPASS=1
-  # opts out and launches bare claude (attended sessions only).
+  # fence seeded above guards the node's Edit/Write/NotebookEdit writes (NOT
+  # Bash writes; see WRITE FENCE header). FM_NODE_NO_BYPASS=1 opts out and
+  # launches bare claude (attended sessions only).
   local launch="claude --dangerously-skip-permissions"
   [ "${FM_NODE_NO_BYPASS:-0}" != 1 ] || launch="claude"
   tmux send-keys -t "$ses" "$launch" Enter
