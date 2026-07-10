@@ -58,6 +58,23 @@ expect_allow "(a) subagent( is not mistaken for a bare agent() call" \
 const s = mysubagent();
 const b = agent(\`build\`, { model: 'opus' });"
 
+# --- template-literal masking regressions (the gate's round-2 repros) ---------
+# FP repro: a prompt line that mentions 'agent(' must NOT open a spurious chunk
+# that steals the real call's model: line. Both real calls carry model:, so the
+# script is compliant and must ALLOW. Before masking this false-BLOCKED.
+expect_allow "(a) prose 'agent(' inside a prompt does not steal a real call's model: line" \
+  "$META
+const a = agent(\`Build it.
+Note: the agent( call that lacks a model field is a bug.\`, { model: 'opus' });
+const b = agent(\`Gate it and report back.\`, { model: 'opus' });"
+
+# FN repro: a bare call whose prompt merely says 'model:' must still BLOCK; the
+# prompt prose cannot satisfy the model-routing pin. Before masking this
+# false-ALLOWED.
+expect_block "(a) a bare call whose prompt says 'model:' is still blocked" \
+  "$META
+const b = agent(\`Do the work. Remember to set model: opus in the options.\`, { effort: 'low' });"
+
 # --- (b) one writer per worktree ---------------------------------------------
 expect_block "(b) two writer briefs sharing a worktree path are blocked" \
   "$META

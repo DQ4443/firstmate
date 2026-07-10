@@ -21,6 +21,30 @@
 #   (c) META BLOCK: the script carries an `export const meta` block (runId /
 #       budget carrier; AGENTS.md section 4 pinning).
 #
+# TEMPLATE-LITERAL MASKING (the round-2 robustness fix). The scanner is
+# line-oriented, and a workflow script's agent prompts are backtick template
+# literals whose PROSE routinely mentions `agent(` and `model:`. Read as code,
+# that prose caused two real defects: a compliant script FALSE-BLOCKED when a
+# prompt line said "agent(" (it opened a spurious chunk that stole the real
+# call's `model:` line), and a bare agent() was FALSE-ALLOWED when its prompt
+# said "model:". So before any scan we MASK every backtick template-literal
+# region: each character of template TEXT is replaced with a placeholder byte,
+# preserving line structure (newlines and length), while the backtick
+# delimiters, `${...}` interpolation CODE, string/comment code, and the options
+# object after the closing backtick are left intact. The mask feeds the (c)
+# meta scan, the agent()-chunk-boundary walk, and the (a) model: scan, so only
+# real code is read there. Escaped backticks (\`) do not close a literal and
+# nested ${...} interpolations are tracked with a brace/lexer stack; when the
+# lexer is unsure it keeps masking (prose-as-code is the failure class, so
+# over-masking prose is the safe bias).
+#
+# The (b) worktree scan is the deliberate exception: it reads the RAW (unmasked)
+# chunk, because writer-brief markers ('worktree add', 'commit before
+# returning') and the worktree path itself live INSIDE the brief prose a writer
+# agent receives (see any real build brief), not in code. Masking would blind
+# (b) entirely and break its whole purpose; the raw chunk keeps it working while
+# the corrected chunk boundaries make it strictly more accurate.
+#
 # Conservative by design: for (b) a false BLOCK is worse than a miss, so it fires
 # only on an exact literal collision of a canonical `.claude/worktrees/<name>` or
 # `.treehouse/<name>` path across two distinct writer-brief calls; anything
@@ -47,18 +71,77 @@ fi
 REASONS=""
 add_reason() { REASONS="${REASONS}$1"$'\n'; }
 
+# --- template-literal masker -------------------------------------------------
+# Reads the source on stdin, prints it with every backtick template-literal TEXT
+# character replaced by 'x', preserving line structure. A small stack-based JS
+# lexer tracks: code vs template; single/double-quoted strings and // /* */
+# comments in code (so a backtick or brace inside them is not mistaken for a
+# delimiter); escaped backticks inside a template (\` does not close); and
+# nested ${...} interpolations (their code is preserved, brace-depth found the
+# matching }). 'x' carries no ':' or '(' so a masked run never forms a model:
+# or agent( token. SQ is the single-quote char (the awk program is itself in
+# shell single quotes, so a literal ' cannot appear inside it).
+mask_template() {
+  awk '
+  BEGIN { SQ = sprintf("%c", 39); sp = 0; q = ""; esc = 0 }
+  {
+    line = $0; n = length(line); out = "";
+    for (i = 1; i <= n; i++) {
+      c = substr(line, i, 1);
+      nxt = (i < n) ? substr(line, i + 1, 1) : "";
+      top = (sp > 0) ? stk[sp] : "";
+      if (q == "lc") { out = out c; continue }
+      if (q == "bc") { if (c == "*" && nxt == "/") { out = out "*/"; i++; q = "" } else out = out c; continue }
+      if (q == "sq") { if (esc) esc = 0; else if (c == "\\") esc = 1; else if (c == SQ) q = ""; out = out c; continue }
+      if (q == "dq") { if (esc) esc = 0; else if (c == "\\") esc = 1; else if (c == "\"") q = ""; out = out c; continue }
+      if (top == "T") {
+        if (esc) { out = out "x"; esc = 0; continue }
+        if (c == "\\") { out = out "x"; esc = 1; continue }
+        if (c == "`") { out = out "`"; sp--; continue }
+        if (c == "$" && nxt == "{") { out = out "${"; i++; sp++; stk[sp] = "I"; brace[sp] = 0; continue }
+        out = out "x"; continue
+      } else {
+        if (c == "/" && nxt == "/") { q = "lc"; out = out c; continue }
+        if (c == "/" && nxt == "*") { q = "bc"; out = out c; continue }
+        if (c == SQ) { q = "sq"; out = out c; continue }
+        if (c == "\"") { q = "dq"; out = out c; continue }
+        if (c == "`") { sp++; stk[sp] = "T"; out = out c; continue }
+        if (top == "I") {
+          if (c == "{") { brace[sp]++; out = out c; continue }
+          if (c == "}") { if (brace[sp] == 0) sp--; else brace[sp]--; out = out c; continue }
+        }
+        out = out c; continue
+      }
+    }
+    if (q == "lc") q = "";
+    esc = 0;
+    print out;
+  }
+  '
+}
+
+# The masked full text drives the code-only scans; the raw source is kept for
+# the (b) worktree scan. Both chunk walks below read the two views in lockstep.
+MASKED=$(printf '%s\n' "$SCRIPT" | mask_template)
+
 # --- (c) meta block ----------------------------------------------------------
-# A word-boundary match so `export const metadata` does not satisfy it.
-if ! printf '%s' "$SCRIPT" | grep -qE 'export[[:space:]]+const[[:space:]]+meta([[:space:]]|=|:)'; then
+# Scanned on the MASKED text so a prompt that merely mentions 'export const meta'
+# cannot satisfy the requirement. A word-boundary match so 'export const
+# metadata' does not satisfy it.
+if ! printf '%s' "$MASKED" | grep -qE 'export[[:space:]]+const[[:space:]]+meta([[:space:]]|=|:)'; then
   add_reason "(c) missing meta block: a workflow script must carry an 'export const meta' block (runId/budget carrier, AGENTS.md section 4)."
 fi
 
 # --- walk the agent() calls for (a) and (b) ----------------------------------
-# Line-oriented state machine: a new chunk opens on a line whose 'agent(' sits at
-# a call position (start-of-line or a non-identifier char before it, so 'subagent('
-# and 'myagent(' do not open one). Each chunk accumulates until the next call.
+# Line-oriented state machine over the MASKED and RAW views in lockstep. A new
+# chunk opens on a MASKED line whose 'agent(' sits at a call position
+# (start-of-line or a non-identifier char before it, so 'subagent(' and
+# 'myagent(' do not open one, and masked prose can no longer open one). Each
+# chunk accumulates a masked half (for the model: scan) and a raw half (for the
+# worktree scan) until the next call.
 AGENT_IDX=0
-CHUNK=""
+CHUNK_M=""    # masked chunk text: drives the (a) model: scan
+CHUNK_R=""    # raw chunk text: drives the (b) worktree scan and the report snippet
 IN=0
 BARE=""       # newline list of "idx|snippet" for calls with no model: field
 WT_LINES=""   # newline list of canonical worktree paths, one per chunk-unique hit
@@ -68,21 +151,23 @@ flush_chunk() {
   local idx=$AGENT_IDX
 
   # (a) model routing: a call is OK if it carries a model: field OR the escape
-  # comment (which itself contains 'model:'). Word-boundary to skip 'remodel:'.
-  if ! printf '%s' "$CHUNK" | grep -qE '(^|[^a-zA-Z_])model[[:space:]]*:'; then
+  # comment (which itself contains 'model:'). Read on the MASKED chunk so prompt
+  # prose that says 'model:' cannot satisfy it. Word-boundary to skip 'remodel:'.
+  if ! printf '%s' "$CHUNK_M" | grep -qE '(^|[^a-zA-Z_])model[[:space:]]*:'; then
     local snippet
-    snippet=$(printf '%s' "$CHUNK" | tr '\n' ' ' | cut -c1-70)
+    snippet=$(printf '%s' "$CHUNK_R" | tr '\n' ' ' | cut -c1-70)
     BARE="${BARE}${idx}|${snippet}"$'\n'
   fi
 
   # (b) one writer per worktree: only writer-brief calls contribute a path.
-  if printf '%s' "$CHUNK" | grep -qF 'worktree add' \
-    || printf '%s' "$CHUNK" | grep -qF 'commit before returning'; then
+  # Read on the RAW chunk: the markers and path live in the brief prose.
+  if printf '%s' "$CHUNK_R" | grep -qF 'worktree add' \
+    || printf '%s' "$CHUNK_R" | grep -qF 'commit before returning'; then
     # Canonical worktree roots: <...>/.claude/worktrees/<name> and <...>.treehouse/<name>.
     # The class stops at the first '/' after <name>, so a subfile reference
     # normalizes to the same root. sort -u => one entry per chunk per path.
     local paths
-    paths=$(printf '%s' "$CHUNK" \
+    paths=$(printf '%s' "$CHUNK_R" \
       | grep -oE '(/\.claude/worktrees/|\.treehouse/)[A-Za-z0-9._-]+' \
       | sort -u)
     if [ -n "$paths" ]; then
@@ -91,23 +176,25 @@ flush_chunk() {
   fi
 }
 
-while IFS= read -r line; do
-  case "$line" in
+while IFS= read -r rline <&3 && IFS= read -r mline <&4; do
+  case "$mline" in
     *agent\(*)
-      # Confirm a call-position 'agent(' (not subagent(/identifier).
-      if printf '%s' "$line" | grep -qE '(^|[^a-zA-Z0-9_])agent\('; then
+      # Confirm a call-position 'agent(' on the MASKED line (not subagent(/id).
+      if printf '%s' "$mline" | grep -qE '(^|[^a-zA-Z0-9_])agent\('; then
         flush_chunk
         AGENT_IDX=$((AGENT_IDX + 1))
-        CHUNK="$line"$'\n'
+        CHUNK_M="$mline"$'\n'
+        CHUNK_R="$rline"$'\n'
         IN=1
         continue
       fi
       ;;
   esac
-  [ "$IN" -eq 1 ] && CHUNK="${CHUNK}${line}"$'\n'
-done <<EOF
-$SCRIPT
-EOF
+  if [ "$IN" -eq 1 ]; then
+    CHUNK_M="${CHUNK_M}${mline}"$'\n'
+    CHUNK_R="${CHUNK_R}${rline}"$'\n'
+  fi
+done 3< <(printf '%s\n' "$SCRIPT") 4< <(printf '%s\n' "$SCRIPT" | mask_template)
 flush_chunk
 
 # (a) report bare agent() calls.
@@ -124,9 +211,7 @@ if [ -n "$WT_LINES" ]; then
     while IFS= read -r p; do
       [ -n "$p" ] || continue
       add_reason "(b) one-writer-per-worktree pin: worktree path '$p' appears in two or more writer-brief agent prompts. Give each writing agent its own isolated worktree."
-    done <<EOF
-$dups
-EOF
+    done < <(printf '%s\n' "$dups")
   fi
 fi
 
