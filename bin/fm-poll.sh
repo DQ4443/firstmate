@@ -413,7 +413,7 @@ oldest_unanswered_age() {
 }
 
 maybe_pager() {
-  [ -x "$PAGER_BIN" ] && "$PAGER_BIN" ping >/dev/null 2>&1 || true
+  if [ -x "$PAGER_BIN" ]; then "$PAGER_BIN" ping >/dev/null 2>&1 || true; fi
   local cur srv oldest
   cur=$(drain_read_seq "$STATE/.wake-queue.seq")
   srv=$(drain_read_seq "$DRAIN_SERVICED")
@@ -425,7 +425,7 @@ maybe_pager() {
   if [ -n "$oldest" ] && [ "$oldest" -ge "$DRAIN_SLA" ]; then
     if [ ! -f "$DRAIN_AGE_MARK" ]; then
       touch "$DRAIN_AGE_MARK" 2>/dev/null || true
-      [ -x "$PAGER_BIN" ] && "$PAGER_BIN" page "un-answered David board message ${oldest}s old (SLA ${DRAIN_SLA}s)" >/dev/null 2>&1 || true
+      if [ -x "$PAGER_BIN" ]; then "$PAGER_BIN" page "un-answered David board message ${oldest}s old (SLA ${DRAIN_SLA}s)" >/dev/null 2>&1 || true; fi
       echo "fm-poll: board SLA breach: oldest un-answered David message ${oldest}s old (SLA ${DRAIN_SLA}s) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
     fi
   else

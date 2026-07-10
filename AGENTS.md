@@ -301,6 +301,11 @@ guarantee.
   session cannot spin unbounded.
 - Serialize agents whose file scopes overlap; encode the dependency in the
   script. Never launch overlapping writers in parallel.
+- Every synthesis, verify, or merger agent brief carries the funnel
+  junk-rejection clause verbatim (data/operating-model/funnel-rules.md): reject
+  degenerate upstream outputs, verify referenced artifact paths exist on disk
+  before folding them in, name dead or unverified lanes UNVERIFIED rather than
+  omitting them, and dedupe against everything seen, not just what was accepted.
 - Cap adversarial fix-loops (red-team -> fix -> re-review): 2-3 rounds MAX, and
   stop as soon as no medium-or-higher-benefit issue remains. Minor/low-benefit
   critiques do NOT justify another round; do not burn tokens chasing them or
@@ -319,6 +324,17 @@ guarantee.
   journal and restart the stalled agent from the script with its accumulated
   context.
 - Name agents you may need to steer; steer with SendMessage.
+- Per-flow eval graders (data/operating-model/evals/): every workflow whose
+  deliverable is a decision doc, a your-court hand-back, a merge-review / merge
+  ask, or a board-structure change runs a GRADER step against the matching
+  evals file (decision-doc.md, hand-back.md, merge-ask.md, board-ops.md) before
+  hand-back. The grader walks every binary check, marks each PASS or FAIL, and
+  any FAIL blocks the hand-back until fixed; the grader agent returns the
+  check-by-check result in its structured return. Firstmate's own delivery
+  eyeball (the visual check before it hands David a link) uses the same list, so
+  the banned-pattern and format rules ride a mechanical carrier, not memory.
+  These graders distill the pins in data/operating-model/decisions.md; when a
+  new pin lands, update the matching evals file the same turn.
 
 ## 5. Delivery
 
@@ -348,6 +364,15 @@ tests, and a consolidated case-against-merging section with actionable items
 directly above the decision. Link it from the item thread with the full PR
 URL. David judges from that page, not the diff. A bare link is not a merge
 ask.
+
+Every landed claim on a completion or merge-review doc carries an evidence
+badge from the E0-E5 ladder (data/operating-model/evidence-ladder.md): E0
+asserted, E1 code-read, E2 unit tests green, E3 deployed e2e as the expected
+user (the ready-to-merge bar above), E4 independently reproduced by a
+non-author agent, E5 David-verified live. Anything below E3 on a merge ask is
+explicitly justified in the case-against-merging section; an unbadged claim
+reads as E0. Badge markup uses the evidence badge row component in
+data/operating-model/components/david-warm.html.
 
 After the PR exists: bin/fm-pr-check.sh <id> <PR url> records pr= and pr_head=
 and arms the merge poll. When David says merge in so many words,
@@ -438,6 +463,12 @@ always. Batch non-urgent items into one digest. Multi-option decisions go
 through lavish or the board, not walls of chat text. PT timestamps. Follow
 ~/VOICE.md for anything he reads: no em dashes, no emojis, plain literal
 prose.
+
+All David-facing HTML copies its components from
+data/operating-model/components/david-warm.html verbatim (tokens, cards,
+your-call blocks, chips, the E0-E5 evidence badge row, footer). Restyle
+nothing; the file carries the warm-light palette and the banned-pattern
+guardrails (no border-left accent, no em dashes, no emojis, no dark chrome).
 
 ## 10. Memory
 
