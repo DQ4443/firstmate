@@ -13,11 +13,13 @@
 #   - usage emits the additive N-node JSON; a node with no token degrades to ok:false
 #   - status reports session liveness with no network call
 #   - spawn creates the fm-node-<name> tmux session and sends the CLAUDE_CONFIG_DIR
-#     export + a bare `claude` launch (no auto-login), and is idempotent when the
-#     session already exists
-#   - spawn auto-accepts the trust-folder dialog (one Enter) when the pane shows
-#     it, and sends nothing when the composer is already up (FM_FAKE_PANE drives
-#     the faked capture-pane; FM_NODE_TRUST_WAIT bounds the poll)
+#     export + a `claude --dangerously-skip-permissions` launch by default (no
+#     auto-login; the write fence stays the structural guard), bare `claude` under
+#     FM_NODE_NO_BYPASS=1, and is idempotent when the session already exists
+#   - spawn auto-accepts the trust-folder dialog (one Enter) and the one-time
+#     bypass-permissions confirmation (Down Enter) when the pane shows them, and
+#     sends nothing when the composer is already up (FM_FAKE_PANE drives the
+#     faked capture-pane; FM_NODE_TRUST_WAIT bounds the poll)
 #   - a corrupt registry is a hard refusal, never a silent reset
 #   - unknown command / no command exits 2
 set -u
@@ -227,8 +229,39 @@ test_spawn_creates_session_and_launches_claude() {
   assert_contains "$out" "spawned node alpha session=fm-node-alpha" "spawn reports the session"
   assert_grep "new-session -d -s fm-node-alpha" "$log" "spawn creates the fm-node-alpha session"
   assert_grep "export CLAUDE_CONFIG_DIR=" "$log" "spawn seeds CLAUDE_CONFIG_DIR"
-  assert_grep "send-keys -t fm-node-alpha claude Enter" "$log" "spawn launches bare claude (no auto-login)"
+  assert_grep "send-keys -t fm-node-alpha claude --dangerously-skip-permissions Enter" "$log" \
+    "spawn launches claude in bypass-permissions mode by default (unattended node)"
   pass "spawn creates the node session and launches claude with the config dir"
+}
+
+test_spawn_no_bypass_optout() {
+  local d; d=$(new_case spawn-no-bypass)
+  run_node "$d" register alpha "$d/cfg" >/dev/null
+  local log="$d/tmux.log"
+  : > "$log"
+  local out
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=0 \
+        FM_NODE_NO_BYPASS=1 run_node "$d" spawn alpha)
+  assert_contains "$out" "spawned node alpha" "spawn completes under the opt-out"
+  assert_grep "send-keys -t fm-node-alpha claude Enter" "$log" "opt-out launches bare claude"
+  assert_no_grep "--dangerously-skip-permissions" "$log" "opt-out omits the bypass flag"
+  pass "FM_NODE_NO_BYPASS=1 launches bare claude without the bypass flag"
+}
+
+test_spawn_accepts_bypass_confirmation() {
+  local d; d=$(new_case spawn-bypass-dialog)
+  run_node "$d" register alpha "$d/cfg" >/dev/null
+  local log="$d/tmux.log"
+  : > "$log"
+  local out
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_HAS_SESSION=0 FM_NODE_TRUST_WAIT=3 \
+        FM_FAKE_PANE='WARNING: Claude Code running in Bypass Permissions mode
+  1. No, exit
+  2. Yes, I accept' run_node "$d" spawn alpha 2>&1)
+  assert_contains "$out" "accepted claude bypass-permissions confirmation" "spawn reports the accept"
+  assert_grep "send-keys -t fm-node-alpha Down Enter" "$log" \
+    "spawn moves off the No-exit default and confirms (Down Enter), exactly once"
+  pass "spawn auto-accepts the one-time bypass-permissions confirmation"
 }
 
 test_spawn_accepts_trust_dialog() {
@@ -309,6 +342,8 @@ test_usage_degrades_when_not_signed_in
 test_status_reports_liveness
 test_status_empty_registry
 test_spawn_creates_session_and_launches_claude
+test_spawn_no_bypass_optout
+test_spawn_accepts_bypass_confirmation
 test_spawn_accepts_trust_dialog
 test_spawn_stops_poll_when_composer_up
 test_spawn_idempotent_when_running

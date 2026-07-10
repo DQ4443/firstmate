@@ -13,9 +13,20 @@
 #
 # NO AUTO-LOGIN: this script never signs a node in. David signs in once per node
 # himself (each node's config dir is a fresh Claude home). `spawn` launches
-# `claude` bare in the node's session; if the node is not yet authenticated,
-# claude shows its own login flow and David completes it. No credential is ever
-# written or printed by this script.
+# claude with no initial prompt in the node's session; if the node is not yet
+# authenticated, claude shows its own login flow and David completes it. No
+# credential is ever written or printed by this script.
+#
+# BYPASS PERMISSIONS (2026-07-10): spawn launches
+# `claude --dangerously-skip-permissions` by DEFAULT. WHY: an unattended fleet
+# node cannot answer permission prompts; a node stuck on a manual-mode prompt is
+# a dead node (2026-07-10: both nodes stalled on manual-mode prompts). The write
+# fence bin/fm-write-fence.sh remains the structural guard on what a node may
+# write. Opt out with FM_NODE_NO_BYPASS=1, which launches bare `claude`
+# (permission prompts back on; only useful for an attended session). Bypass mode
+# may show a one-time acceptance dialog on first use per config dir; the spawn
+# pane-poll below auto-accepts it (see TRUST DIALOG). Login prompts are still
+# NEVER auto-answered.
 #
 # TRUST DIALOG: spawn sends no initial prompt, but claude's first launch in a
 # not-yet-trusted directory blocks forever on "Do you trust the files in this
@@ -23,7 +34,10 @@
 # both spawned nodes sat on it with their briefs undelivered). spawn therefore
 # polls the pane for up to FM_NODE_TRUST_WAIT seconds (default 15) after
 # launching claude and presses Enter once to accept the dialog if it appears.
-# Login prompts are never auto-answered.
+# The same poll accepts claude's one-time bypass-permissions confirmation
+# ("Bypass Permissions mode" ... "Yes, I accept": Down to move off the "No,
+# exit" default, then Enter), at most once. Login prompts are never
+# auto-answered.
 #
 # Registry: state/fleet-nodes.json (gitignored, like all state/). Shape:
 #   { "updated_at": <epoch>,
@@ -40,8 +54,10 @@
 #   fm-node.sh list                  # per node: identity, 5h/7d util, live pid (hits the usage API)
 #   fm-node.sh usage [--pretty]      # the generic N-node usage reader, as JSON (additive to the widget feed)
 #   fm-node.sh status                # registry + session liveness only (no network)
-#   fm-node.sh spawn <name>          # tmux session fm-node-<name> running claude with CLAUDE_CONFIG_DIR set;
-#                                    # auto-accepts the trust-folder dialog (poll capped by FM_NODE_TRUST_WAIT, default 15s)
+#   fm-node.sh spawn <name>          # tmux session fm-node-<name> running claude --dangerously-skip-permissions
+#                                    # with CLAUDE_CONFIG_DIR set (FM_NODE_NO_BYPASS=1 launches bare claude instead);
+#                                    # auto-accepts the trust-folder and bypass-confirmation dialogs
+#                                    # (poll capped by FM_NODE_TRUST_WAIT, default 15s)
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -468,25 +484,45 @@ cmd_spawn() {
   # fm-spawn.sh's send cadence.
   tmux send-keys -t "$ses" "export CLAUDE_CONFIG_DIR=$(shell_quote "$cfg")" Enter
   sleep 0.3
-  tmux send-keys -t "$ses" "claude" Enter
+  # BYPASS PERMISSIONS by default (2026-07-10): an unattended fleet node cannot
+  # answer permission prompts, so a manual-mode node is a dead node. The write
+  # fence (bin/fm-write-fence.sh) remains the structural guard. FM_NODE_NO_BYPASS=1
+  # opts out and launches bare claude (attended sessions only).
+  local launch="claude --dangerously-skip-permissions"
+  [ "${FM_NODE_NO_BYPASS:-0}" != 1 ] || launch="claude"
+  tmux send-keys -t "$ses" "$launch" Enter
   # Trust-dialog auto-accept (2026-07-09): claude's first launch in a
   # not-yet-trusted directory shows "Do you trust the files in this folder?"
   # and sits there indefinitely, so anything typed at the session afterwards
   # (a dispatch brief) queues behind the dialog undelivered. spawn sends NO
   # initial prompt itself, but it must hand back a usable session: poll the
   # pane for up to FM_NODE_TRUST_WAIT seconds (default 15) and press Enter
-  # once to accept the dialog's default if it appears. Login prompts are NOT
+  # once to accept the dialog's default if it appears. The same poll accepts
+  # claude's ONE-TIME bypass-permissions confirmation (first bypass launch per
+  # config dir): the pane shows "Bypass Permissions mode" with a "No, exit"
+  # default and a "Yes, I accept" option, so acceptance is Down then Enter,
+  # sent at most once and only when BOTH strings are on screen (a conservative
+  # match so no other prompt can trigger it). Login prompts are NOT
   # auto-answered (NO AUTO-LOGIN stands). The poll stops early once claude's
   # composer is up ("? for shortcuts") with no dialog.
-  local waited=0 wait_max="${FM_NODE_TRUST_WAIT:-15}" pane
+  local waited=0 wait_max="${FM_NODE_TRUST_WAIT:-15}" pane trust_done=0 bypass_done=0
   while [ "$waited" -lt "$wait_max" ]; do
     sleep 1
     waited=$((waited + 1))
     pane=$(tmux capture-pane -p -t "$ses" 2>/dev/null || true)
-    if printf '%s' "$pane" | grep -qi 'do you trust'; then
+    if [ "$trust_done" -eq 0 ] && printf '%s' "$pane" | grep -qi 'do you trust'; then
       tmux send-keys -t "$ses" Enter
+      trust_done=1
       echo "fm-node: accepted claude trust-folder dialog in $ses" >&2
-      break
+      continue
+    fi
+    if [ "$bypass_done" -eq 0 ] \
+      && printf '%s' "$pane" | grep -qi 'bypass permissions mode' \
+      && printf '%s' "$pane" | grep -qi 'yes, i accept'; then
+      tmux send-keys -t "$ses" Down Enter
+      bypass_done=1
+      echo "fm-node: accepted claude bypass-permissions confirmation in $ses" >&2
+      continue
     fi
     if printf '%s' "$pane" | grep -qF '? for shortcuts'; then
       break
