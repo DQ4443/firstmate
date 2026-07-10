@@ -67,14 +67,14 @@ work, you are in the wrong paradigm.
    something, gate only on risk, not on effort; there is sufficient throughput to
    tackle anything not ridiculous. Build anything whose risk is acceptable and that
    does not interfere with or endanger the product.
-4. ROBUST OVER DUCT TAPE. When a problem has a cheap/fast patch and a more robust
+3. ROBUST OVER DUCT TAPE. When a problem has a cheap/fast patch and a more robust
    fix, take the robust fix. Speed and effort are never a reason to ship the lesser
    solution (this is the corollary of principle 2). Before shipping ANY fix, name out
    loud whether it is a band-aid on a broken foundation or a real fix of the
    foundation; if it is a band-aid, say so explicitly and do NOT present it as the
    solution. A stopgap is allowed only as a clearly-labeled temporary crutch while the
    robust fix is built, never as the answer.
-3. BLOCKED-ON-DAVID = CLEAR ACTION ITEM (realized in the section 2 row anatomy): every
+4. BLOCKED-ON-DAVID = CLEAR ACTION ITEM (realized in the section 2 row anatomy): every
    item waiting on David states the exact decision or action, the options, and
    firstmate's recommendation, so he knows precisely what to do to push the ball back.
 
@@ -98,16 +98,24 @@ may fake a stamp. Which rows firstmate carries end to end and ships without
 pulling David into the middle, versus which need his gate, is the autonomy
 model in section 3 (non-project tooling versus Kronos product code).
 
-Section semantics are whose turn it is: In progress = waiting on you (every
-dispatched order lives here while you work it); Your word = waiting on David
-(approvals, merges, plan reviews); Holding = dependency-blocked only, never a
-parking spot for waiting-on-David items. A fresh unanswered David message in
-any thread flips that item to In progress until you respond (realized by the
-reconcile from the thread's last-author signal, see the write-authority note
-below). One item, one
-row: state changes live inside the single row, never as a second row, and only
-a truly finished workstream moves to Landed. Call it the "MVP tracker", never
-the bare "tracker".
+Section semantics are whose turn it is, by David's precise rule (2026-07-07,
+this is exact and overrides looser prior wording):
+
+- In progress = actively being worked (a live agent/PDW), OR a fresh unanswered
+  David message (a David message in any thread flips the item here until
+  firstmate responds; realized by the reconcile from the thread's last-author
+  signal, see the write-authority note below).
+- Backlog = ONLY tasks David EXPLICITLY told firstmate to defer until later.
+  Anything firstmate merely decided to shelve on its own does NOT belong here.
+- Holding = ONLY items EXPLICITLY blocked by a CURRENT item, where "current"
+  means an item that is itself In progress or in Your word. Blocked on an
+  external person or an outside event is NOT Holding.
+- Your word = EVERYTHING ELSE. If it is not actively in progress, not
+  David-deferred, and not blocked by a current item, it belongs in Your word,
+  each with a clear action item + firstmate's recommendation (row anatomy).
+  One item, one row: state changes live inside the single row, never as a second
+  row, and only a truly finished workstream moves to Landed. Call it the "MVP
+  tracker", never the bare "tracker".
 
 Read the threads every turn. Before any other work each turn, scan every board
 thread for an unanswered David message and drain it: a David message in a thread
@@ -131,6 +139,17 @@ is an incomplete row. Every Your word row is a clear action item: firstmate's
 thread message states the exact decision or action David must take, the options,
 and firstmate's recommendation, so he knows precisely how to hand the ball back.
 A bare "waiting on you", or a status with no explicit action, is a violation.
+This holds for EVERY hand-back, including a completed workflow or task result
+(David 2026-07-07): when the ball goes to David, firstmate LEADS with the exact
+decision or action it wants from him plus its recommendation, never a bare
+report of what happened. "Here is what the run did, done" with no ask is the
+violation; "here is the run's result, and what I need you to decide is X (with
+my recommendation Y)" is the contract.
+Hand-back FORMAT (David 2026-07-08): every your-court thread message is
+scannable dot points, never a wall paragraph: first line = the exact ask, then
+short "- " points (options, evidence, recommendation). Applies to every
+hand-back surface (board threads, chat, editor replies).
+
 Your word auto-sorts ascending by effort-to-respond so the quickest unblock is
 first (the effort field, set on hand-back; see yourword-effort-sort).
 
@@ -173,9 +192,16 @@ flight.
 
 ## 3. Dispatch: dynamic workflows
 
-Use the Workflow tool for anything multi-step and Agent subagents for
-bounded one-shot jobs. Size phases and agent counts to the task; no fixed
-pipeline shape.
+Use the Workflow tool (a parallel dynamic workflow, "PDW") for ALL delegated
+work. This is a hard default (David 2026-07-07): even a thin one-to-three-agent
+job (e.g. one research agent, one worker, one review agent) is authored as a
+PDW, NOT as standalone Agent subagents. The whole reason the tmux-crewmate
+paradigm was retired is to run work as dynamic workflows; reaching for a bare
+Agent subagent instead is the wrong paradigm. Standalone Agent subagents are
+reserved for the section 12 escape-hatch cases only (non-Claude harness, or an
+agent that must outlive this session). A read-only lookup firstmate can answer
+itself is not delegation and needs no workflow. Size phases and agent counts to
+the task; no fixed pipeline shape, and a thin workflow is fine.
 
 Autonomy model, active vs passive (David's framing): the axis is whether
 David wants a seat in the DESIGN and trade-off decision, never risk level.
@@ -275,6 +301,11 @@ guarantee.
   session cannot spin unbounded.
 - Serialize agents whose file scopes overlap; encode the dependency in the
   script. Never launch overlapping writers in parallel.
+- Cap adversarial fix-loops (red-team -> fix -> re-review): 2-3 rounds MAX, and
+  stop as soon as no medium-or-higher-benefit issue remains. Minor/low-benefit
+  critiques do NOT justify another round; do not burn tokens chasing them or
+  addressing things not worth doing (David 2026-07-07). Encode the cap and the
+  benefit-threshold in the loop, never open-ended.
 - The orchestration script writes state/board-checkins.json for its board
   item at every phase boundary and log() checkpoint via
   bin/fm-board-checkin.sh. Deterministic, not an agent task.
@@ -297,6 +328,18 @@ own built-in verify while building, then the project verify skill as the
 repo's done-bar, then the no-mistakes pipeline as the terminal ship phase
 (review, tests with evidence, lint, docs, push, PR). They compose; they do not
 double-fire.
+
+Pre-merge success criteria, every Kronos product PR (David 2026-07-09,
+"ready to merge" defined): e2e tested as the expected user on the expected
+workflow, and anything found buggy, missing, wrong, misleading, unclear, or
+confusing is FIXED, looping until nothing is left, max 2 iterations. Where no
+user-facing workflow exists (test-only, pure infra), state "not relevant"
+explicitly in the merge ask instead of skipping silently. The e2e runs on the
+DEPLOYED product, not a branch rig: if a deploy surface is stale (e.g. the
+manual Modal fabric), deploying it is part of the ticket, and the ticket stays
+open until the deployed e2e passes. Problems that e2e finds are added TO the
+ticket, never split into a new one (David 2026-07-09, the ENG-290/306 rule);
+only issues that do not block the ticket's own e2e get their own ticket.
 
 Every merge ask follows the merge-review contract in data/captain.md: a
 lavish merge-review page covering what was done and why, expected behavior

@@ -83,7 +83,12 @@ CHECKS="$STATE/board-checkins.json"
 THREADS="${FM_BOARD_THREADS_DIR:-$FM_HOME/data/board-threads}"
 LOCK="$STATE/.board.json.lock"
 AUTHOR_FAIL_MARK="$STATE/.thread-author-parse-fail"
-TTL="${FM_AGENT_LIVE_TTL:-1800}"
+# INTERIM (2026-07-07): default 1800s demoted long product-code PDWs mid-run,
+# causing items to wrongly appear in Your word while still working. firstmate
+# marks items done explicitly on PDW completion, so this TTL is only the
+# crash-backstop; 3h comfortably covers real PDW durations. The robust fix
+# (real per-worker heartbeats) is command-center redesign Phase 0, not this.
+TTL="${FM_AGENT_LIVE_TTL:-10800}"
 DEFAULT_REST="${FM_RECONCILE_DEFAULT_REST:-your_word}"
 LOCK_WAIT="${FM_BOARD_LOCK_WAIT:-10}"
 
@@ -93,7 +98,7 @@ VERBOSE=0
 note() { if [ "$VERBOSE" -eq 1 ]; then echo "fm-board-reconcile: $1"; fi; }
 
 command -v jq >/dev/null 2>&1 || { echo "fm-board-reconcile: jq required" >&2; exit 1; }
-case "$TTL" in ''|*[!0-9]*) TTL=1800 ;; esac
+case "$TTL" in ''|*[!0-9]*) TTL=10800 ;; esac
 case "$LOCK_WAIT" in ''|*[!0-9]*) LOCK_WAIT=10 ;; esac
 
 # Adoption switch: no registry means the liveness-derived board is not adopted
@@ -181,7 +186,7 @@ rest_json=$(jq -n --argjson agents "$(cat "$AGENTS")" '
 # reconcile agrees with the board instead of fighting it.
 ids=$(printf '%s\n' "$board_json" | jq -r '[(.your_word // []), (.in_progress // []),
               [ (.holding // [])[].rows[]? ], (.landed // [])]
-             | add | map(.id) | .[]' 2>/dev/null)
+             | add | map(select(. != null)) | map(.id) | map(select(type == "string")) | .[]' 2>/dev/null)
 message_live_json='[]'
 author_parse_fails=0
 while IFS= read -r id; do
@@ -259,8 +264,10 @@ live_json=$(jq -n --argjson a "$live_json" --argjson b "${message_live_json:-[]}
 # --- stage 2: transform the board -------------------------------------------
 # shellcheck disable=SC2016  # the jq program references jq variables, not shell.
 TRANSFORM='
-  ($live | map({key: ., value: true}) | from_entries) as $L
-  | def islive($id): ($L[$id] // false);
+  ($live | map(select(. != null)) | map({key: ., value: true}) | from_entries) as $L
+  # null-safe: a null/missing id can never index $L (that threw "Cannot index
+  # object with null" and took down every board write on one stray row).
+  | def islive($id): (if ($id | type) == "string" then ($L[$id] // false) else false end);
   # convert a landed item into a row (for the rare live-again landed item)
   def landed_to_row: {id: .id, stamp: "do", rid: (.title // .id), what: (.what // ""), links: (.links // [])};
   # convert a demoted in-progress row into a landed item
@@ -270,11 +277,13 @@ TRANSFORM='
     + (if (.links | type) == "array" then {links: .links} else {} end);
   def dedup_by_id: reduce .[] as $r ([]; if (map(.id) | index($r.id)) then . else . + [$r] end);
 
-  (.your_word // []) as $yw
-  | (.in_progress // []) as $ip
-  | (.holding // []) as $hg
-  | (.landed // []) as $ld
-  | ([ $hg[].rows[]? ]) as $hrows
+  # Null-safe binds: a stray null row anywhere degrades (is dropped) instead of
+  # crashing the whole transform. Data-shape typos must not take down board writes.
+  (.your_word // [] | map(select(. != null))) as $yw
+  | (.in_progress // [] | map(select(. != null))) as $ip
+  | (.holding // [] | map(select(. != null))) as $hg
+  | (.landed // [] | map(select(. != null))) as $ld
+  | ([ $hg[].rows[]? ] | map(select(. != null))) as $hrows
   # In-progress rows that stay (preserve their order).
   | ($ip | map(select(islive(.id)))) as $kept
   | ($kept | map(.id)) as $keptids
@@ -287,16 +296,26 @@ TRANSFORM='
   # Non-live rows currently in In progress get demoted.
   | ($ip | map(select(islive(.id) | not))) as $demoted
   | ($demoted | map(select((($R[.id]) // $D) == "landed"))) as $dem_landed
-  | ($demoted | map(select((($R[.id]) // $D) != "landed"))) as $dem_yw
+  # Rows carrying hold_under were explicitly HELD (David 2026-07-08): they demote
+  # back into their holding group, never to your_word. Holding keeps its memory.
+  | ($demoted | map(select((($R[.id]) // $D) != "landed"))) as $dem_rest
+  | ($dem_rest | map(select(.hold_under? != null))) as $dem_hold
+  | ($dem_rest | map(select(.hold_under? == null))) as $dem_yw
   # Rebuild each section, stripping any id promoted into In progress.
   | ($yw | map(select((.id) as $i | ($ipids | index($i)) | not))) as $yw_keep
   | ($ld | map(select((.id) as $i | ($ipids | index($i)) | not))) as $ld_keep
-  | ($hg | map(.rows |= map(select((.id) as $i | ($ipids | index($i)) | not)))
-        | map(select((.rows | length) > 0))) as $hg_keep
+  | ($hg | map(.rows |= ((. // []) | map(select(. != null)) | map(select((.id) as $i | ($ipids | index($i)) | not))))
+        | map(select(((.rows // []) | length) > 0))) as $hg_keep
+  # Fold demoted held rows back into their groups (create the group if it is gone).
+  | ($dem_hold | group_by(.hold_under) | map({unlock: .[0].hold_under, rows: .})) as $dem_groups
+  | (reduce $dem_groups[] as $g ($hg_keep;
+      if (map(.unlock) | index($g.unlock)) != null then
+        map(if .unlock == $g.unlock then .rows = ((.rows + $g.rows) | dedup_by_id) else . end)
+      else . + [$g] end)) as $hg_final
   | .in_progress = ($new_ip | dedup_by_id)
   | .your_word = (($yw_keep + $dem_yw) | dedup_by_id)
   | .landed = (($ld_keep + ($dem_landed | map(row_to_landed))) | dedup_by_id)
-  | .holding = $hg_keep
+  | .holding = $hg_final
 '
 
 new_board=$(printf '%s' "$board_json" | jq \
