@@ -115,6 +115,103 @@ expect_block "(c) export const metadata does not satisfy the meta requirement" \
   "export const metadata = { note: 'x' };
 const b = agent(\`x\`, { model: 'opus' });"
 
+# --- (d) swarm-contract size (agent-task-sizing pin) --------------------------
+# A LONE WRITER agent (its prompt carries 'worktree add' / 'commit before
+# returning') grinding an enumerated multi-part prompt is the named anti-pattern.
+# BLOCK when there is exactly one writer and its prompt enumerates 3+ concerns
+# ((N) or N. line starts); the escape comment and any multi-writer swarm ALLOW.
+# All (d) scripts below are (a)/(b)/(c)-compliant so only (d) can be the blocker.
+
+expect_block "(d) a single writer agent enumerating 3 concerns is blocked" \
+  "$META
+const b = agent(\`Build it (own worktree: worktree add /r/.claude/worktrees/w -b x; commit before returning).
+(1) do thing one
+(2) do thing two
+(3) do thing three\`, { model: 'opus' });"
+
+expect_block "(d) the N. enumeration style (4 concerns) is also blocked" \
+  "$META
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning).
+1. one
+2. two
+3. three
+4. four\`, { model: 'opus' });"
+
+# The build+gate shape (one writer + one read-only reviewer at the end) is the
+# exact pin anti-pattern; the lone reviewer does NOT turn it into a swarm.
+expect_block "(d) a build-plus-gate pair (one writer, one reviewer) still blocks" \
+  "$META
+const build = agent(\`Build it (worktree add /r/.claude/worktrees/msync -b x; commit before returning).
+(1) one
+(2) two
+(3) three\`, { model: 'opus' });
+const gate = agent(\`Independent gate (you did NOT write it). Read the diff, report SHIP or FIX.\`, { model: 'opus' });"
+
+expect_allow "(d) a single-writer single-concern brief passes" \
+  "$META
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning). Do the one focused thing.\`, { model: 'opus' });"
+
+expect_allow "(d) only 2 enumerated concerns is below the threshold and passes" \
+  "$META
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning).
+(1) one
+(2) two\`, { model: 'opus' });"
+
+expect_allow "(d) the // size:single-leaf-approved escape on the call passes a 3-concern writer" \
+  "$META
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning).
+(1) one
+(2) two
+(3) three\`, { model: 'opus' }); // size:single-leaf-approved"
+
+expect_allow "(d) the escape on the line directly above the call also passes" \
+  "$META
+// size:single-leaf-approved
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning).
+(1) one
+(2) two
+(3) three\`, { model: 'opus' });"
+
+# A genuine swarm of writers is the point; never blocked regardless of prompt shape.
+expect_allow "(d) a 5-writer swarm with enumerated briefs is never blocked (the swarm is the point)" \
+  "$META
+const a1 = agent(\`worktree add /r/.claude/worktrees/w1 -b x; commit before returning.
+(1) a
+(2) b
+(3) c\`, { model: 'opus' });
+const a2 = agent(\`worktree add /r/.claude/worktrees/w2 -b x; commit before returning.
+(1) a
+(2) b
+(3) c\`, { model: 'opus' });
+const a3 = agent(\`worktree add /r/.claude/worktrees/w3 -b x; commit before returning.
+1. a
+2. b
+3. c\`, { model: 'opus' });
+const a4 = agent(\`worktree add /r/.claude/worktrees/w4 -b x; commit before returning. one focused thing\`, { model: 'opus' });
+const a5 = agent(\`worktree add /r/.claude/worktrees/w5 -b x; commit before returning. another\`, { model: 'opus' });"
+
+# Enumerated concerns in a READ-ONLY scout (no writer marker) are not the writer-
+# grinding shape, so (d) does not fire (0 writers).
+expect_allow "(d) enumerated concerns in a read-only scout prose (no writer) are not blocked" \
+  "$META
+const s = agent(\`Research task, cover:
+(1) one
+(2) two
+(3) three\`, { model: 'opus' });"
+
+# Enumerations in trailing return/schema CODE are never masked, so raw==masked
+# there and they do not count: only the 2 real prompt concerns count => pass.
+expect_allow "(d) enumerations in trailing return/schema code are not counted" \
+  "$META
+const b = agent(\`Build it (worktree add /r/.claude/worktrees/w -b x; commit before returning).
+(1) one
+(2) two\`, { model: 'opus' });
+// follow-ups:
+(1) x
+(2) y
+(3) z
+return { b, NEXT_STEP: 'done' };"
+
 # --- fail open ---------------------------------------------------------------
 run_hook_raw '' >/dev/null 2>&1 || fail "fail-open: empty stdin should ALLOW"
 pass "empty stdin fails open (allow)"
@@ -154,5 +251,34 @@ pass "scriptPath: a compliant file at scriptPath is allowed"
 jq -n --arg p "$TMP_ROOT/nope.js" '{tool_input: {scriptPath: $p}}' | "$HOOK" >/dev/null 2>&1 \
   || fail "scriptPath: a missing file should fail open (allow)"
 pass "a missing scriptPath fails open (allow)"
+
+# --- (d) the real trigger, embedded verbatim ---------------------------------
+# The meeting-sync-pipeline-fix script that motivated rule (d): one writer agent
+# (build) grinding FOUR concerns plus a lone gate. Embedded verbatim (quoted
+# heredoc preserves its backticks and ${...}) so the test is hermetic. It BLOCKS
+# (both (a) the bare calls have no model:, and (d) the one-writer grinding shape).
+msyncfile="$TMP_ROOT/meeting-sync-pipeline-fix.js"
+cat > "$msyncfile" <<'JS'
+export const meta = {
+  name: 'meeting-sync-pipeline-fix',
+  description: 'Make the meeting-sync cadence real: un-pin --dry-run behind the proposal gate, wire the extraction stage, loud board-post on degrade; reopen the board row',
+  phases: [{ title: 'Fix' }, { title: 'Gate' }],
+}
+const FM = '/Users/dq4443/dev/personal/firstmate'
+const build = await agent(`Firstmate-repo build (own worktree: git -C ${FM} worktree add ${FM}/.claude/worktrees/msync-fix -b fix/meeting-sync-pipeline origin/main; commit before returning). The audit found the scheduled meeting-sync is hollow; make it real, preserving the human gate:
+(1) The launchd jobs (com.firstmate.meeting-sync-morning/-eod, plists in ~/Library/LaunchAgents, runner bin/fm-meeting-sync.sh) are pinned --dry-run. Change the scheduled path to run FOR REAL up to the PROPOSAL: fetch notes, extract, build the change list, post the proposal to the board thread (tracker-sync row) for David's one okay. APPLYING still requires his okay (the tracker-sync skill's gate); the cadence must never auto-apply.
+(2) Stage B has no producer in the scheduled path (FM_MSYNC_EXTRACT_FILE unset): wire the extraction stage into the runner per the script's own design comments (read bin/fm-meeting-sync.sh + fm-msync-*.sh libs first).
+(3) SILENT DEGRADE: exit-3 (notes-not-fetchable) currently posts nothing. Make every degrade post ONE loud line to the board via bin/fm-board-reply.sh tracker-sync (e.g. "meeting sync could not fetch the <slot> notes: <reason>; paste them or fix the credential") with dedupe so repeated failures do not spam (one post per slot).
+(4) Update the launchd plists in-repo if they are templated there; note if they must be re-installed by hand.
+Tests per repo conventions (fake the fetch layer; assert: degrade posts once per slot, proposal path produces the change list without applying, dry-run flag still honored when passed explicitly). Repo gates. Commit+push. RETURN: diff summary, commands+output, commit sha, what needs a manual launchd reinstall.`, { label: 'msync-fix', phase: 'Fix' })
+
+phase('Gate')
+const gate = await agent(`Independent gate (you did NOT write it): branch fix/meeting-sync-pipeline in ${FM}/.claude/worktrees/msync-fix. Read the diff; verify: auto-APPLY is impossible from the scheduled path (the proposal gate survives), degrade posts exactly once per slot, extraction wiring matches the script's design, tests genuinely cover those. Run the test files + the existing meeting-sync tests yourself. Verdict SHIP or FIX.`, { label: 'gate:msync', phase: 'Gate' })
+return { build, gate, NEXT_STEP: 'firstmate: on SHIP merge under the internal rule, reinstall the launchd jobs if needed, reopen the tracker-sync board row with the credential ask.' }
+JS
+if jq -n --arg p "$msyncfile" '{tool_input: {scriptPath: $p}}' | "$HOOK" >/dev/null 2>&1; then
+  fail "(d) the real meeting-sync-pipeline-fix script (one grinding writer) should BLOCK"
+fi
+pass "(d) the real meeting-sync-pipeline-fix script blocks (one writer grinding four concerns)"
 
 echo "all fm-workflow-lint tests passed"
