@@ -25,8 +25,15 @@
 #   B. EXTRACT    - the timecode-anchored, classify-to-destination change proposal
 #                   with the full attribute set and roster-resolved owners
 #                   (Decisions 2a/2b/2c) via data/roster-linear.md. LLM-judged: it
-#                   proposes, it does not act. Consumed here from an extraction
-#                   proposal file (the LLM step writes it); see FM_MSYNC_EXTRACT_FILE.
+#                   proposes, it does not act. Two producers: an explicit proposal
+#                   file (FM_MSYNC_EXTRACT_FILE, the hand-run path), or in
+#                   --propose mode the wired extractor bin/fm-msync-extract.sh
+#                   (FM_MSYNC_EXTRACT_BIN), a headless claude -p turn over the
+#                   Stage A notes that writes the same proposal JSON. The
+#                   produced proposal is PERSISTED under
+#                   <state-dir>/proposals/<slot>.extract.json so David's later
+#                   okay can be applied from exactly what he saw
+#                   (FM_MSYNC_EXTRACT_FILE=<that file> ... --apply).
 #   E. REFLECT    - reconcile the tracker to Linear (Linear = SSOT) via L5's
 #                   bin/fm-reconcile.sh, whose autonomous tracker-side ops are the
 #                   AUTONOMOUS tier here.
@@ -71,21 +78,45 @@
 # FM_MSYNC_AUDIT_BIN, FM_MSYNC_LINEAR_BIN, FM_MSYNC_BOARD_REPLY_BIN,
 # FM_MSYNC_BOARD_ITEM, FM_MSYNC_NOW (ISO-8601 UTC, deterministic clock).
 #
+# MODES (three, mutually exclusive; dry-run is the default):
+#   --dry-run  : touches NOTHING (no state write, no board post, no Linear write).
+#   --propose  : THE SCHEDULED MODE. Runs Stage A + B for REAL (fetch the notes,
+#                run the extraction), builds the change-list, persists the
+#                proposal artifacts under <state-dir>/proposals/, and posts the
+#                proposal to the board thread (--your-court) for David's one
+#                okay. It applies NOTHING: no Linear write, no tracker write, no
+#                content.ts edit. The cadence NEVER auto-applies (prime rule 1);
+#                FM_MSYNC_SCHEDULED=1 (set by the launchd plists) structurally
+#                REJECTS --apply so a mis-edited plist cannot flip autonomy on.
+#                On a degrade (notes not fetchable, extraction unavailable) it
+#                posts ONE loud board line per slot ("paste the notes / fix the
+#                credential"), deduped in state so a repeated failing fire never
+#                spams the thread. A re-fire of an already-proposed slot with an
+#                unchanged change-list posts nothing (content-hash dedupe).
+#   --apply    : lands ONLY the autonomous tier, after David's okay of a
+#                proposal (FM_MSYNC_EXTRACT_FILE=<persisted proposal>). Never
+#                from the schedule.
+#
 # SAFETY: dry-run is the default and touches NOTHING. --apply lands only the
 # autonomous tier; it NEVER edits content.ts, NEVER merges/deploys the tracker,
 # NEVER prints EDIT_PASSWORD / DOCS_PASSWORD / the Linear or Google credential.
 # The scheduler is NOT flipped on by this script: cron cadence + launchd examples
 # ship uninstalled (docs/launchd/, docs/meeting-sync-schedule.md); they are registered
-# only after a hand-run proves one real meeting cycle (design Phase 5).
+# only after a hand-run proves one real meeting cycle (design Phase 5), and the
+# scheduled entries run --propose, never --apply.
 #
 # USAGE:
-#   fm-meeting-sync.sh --slot YYYY-MM-DD/<morning|eod|reconcile> [--dry-run|--apply]
+#   fm-meeting-sync.sh --slot YYYY-MM-DD/<morning|eod|reconcile> [--dry-run|--propose|--apply]
 #                      [--lookback N] [--no-backfill] [--live-url URL]
 #   fm-meeting-sync.sh install-schedule    # prints the cadence + install steps; installs NOTHING
 #
-# Exit codes: 0 ok (dry run always 0 unless a usage error); 2 usage error;
-#             3 Stage A could not fetch the notes and no proposal was supplied
-#               (the honest "paste the notes" degrade); the change-list still prints.
+# Exit codes: 0 ok (dry run always 0 unless a usage error); 2 usage error (also
+#             --apply under FM_MSYNC_SCHEDULED=1);
+#             3 the honest degrade: Stage A could not fetch the notes (and no
+#               proposal was supplied) or the --propose extraction was
+#               unavailable; the change-list still prints, and on the propose/
+#               apply paths the degrade is posted loudly to the board once per
+#               slot.
 set -euo pipefail
 
 FM_MSYNC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,6 +125,7 @@ export FM_MSYNC_SCRIPT_DIR
 exec python3 - "$@" <<'PYEOF'
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -121,6 +153,8 @@ AUDIT_BIN = _envpath("FM_MSYNC_AUDIT_BIN", os.path.join(SCRIPT_DIR, "fm-sync-aud
 LINEAR_BIN = _envpath("FM_MSYNC_LINEAR_BIN", os.path.join(SCRIPT_DIR, "fm-linear.sh"))
 BOARD_REPLY_BIN = _envpath("FM_MSYNC_BOARD_REPLY_BIN", os.path.join(SCRIPT_DIR, "fm-board-reply.sh"))
 BOARD_ITEM = os.environ.get("FM_MSYNC_BOARD_ITEM", "tracker-sync")
+EXTRACT_BIN = _envpath("FM_MSYNC_EXTRACT_BIN", os.path.join(SCRIPT_DIR, "fm-msync-extract.sh"))
+PROPOSAL_DIR = os.path.join(STATE_DIR, "proposals")
 
 
 def now_utc():
@@ -480,45 +514,117 @@ def slot_window_pt(slot):
     return "%s (meeting-less daily reconcile)" % slot.date.isoformat()
 
 
-def stage_a_ingest(slot, out):
+def _to_pt(iso):
+    """RFC3339 timestamp -> America/Los_Angeles datetime. Classification hinges
+    on the 13:00 PT boundary (Decision 7a), so the conversion uses the real tz
+    database; the fixed UTC-8 fallback only fires if zoneinfo is unavailable."""
+    s = (iso or "").strip().replace("Z", "+00:00")
+    d = dt.datetime.fromisoformat(s)
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return d.astimezone(ZoneInfo("America/Los_Angeles"))
+    except Exception:  # noqa: BLE001 - a degraded tz is better than a crash
+        return d.astimezone(dt.timezone(dt.timedelta(hours=-8)))
+
+
+def _in_slot_window(slot, f):
+    """True iff a Drive file record plausibly belongs to this slot's PT window
+    (design Stage A: slot-scoped selection, never 'the newest doc'). A record
+    with no usable timestamp is kept (cannot be ruled out; extracting from one
+    extra doc beats a false degrade)."""
+    seen_time = False
+    for key in ("createdTime", "modifiedTime"):
+        v = f.get(key)
+        if not v:
+            continue
+        try:
+            p = _to_pt(v)
+        except ValueError:
+            continue
+        seen_time = True
+        if p.date() != slot.date:
+            continue
+        if slot.kind == "morning" and p.hour < 13:
+            return True
+        if slot.kind == "eod" and p.hour >= 13:
+            return True
+    return not seen_time
+
+
+def stage_a_ingest(slot, out, want_text=False):
     """Locate the slot's notes via bin/fm-gfetch.sh, slot-scoped, multi-doc.
-    Returns (docs:list, degraded:bool). On absence/failure of the fetch wrapper,
-    take the honest degrade (Decision 4b Option C): emit the machine-parseable
-    'notes-not-fetchable' token so the caller posts 'paste the notes', and mark
-    the slot un-fetched rather than silently empty."""
+    Returns (docs:list, degraded:bool, reason:str, notes_text:str). With
+    want_text (the --propose path) it also reads each in-window doc's notes +
+    transcript text for Stage B. On absence/failure of the fetch wrapper, take
+    the honest degrade (Decision 4b Option C): emit the machine-parseable
+    'notes-not-fetchable' token AND return the reason so the caller posts the
+    loud 'paste the notes' board line, rather than staying silently empty."""
     out.append("stage A INGEST: slot-scoped window = %s" % slot_window_pt(slot))
     if slot.kind == "reconcile":
         out.append("  reconcile slot: no meeting fetch (degenerate case, skips B-D)")
-        return [], False
+        return [], False, "", ""
 
     # an explicit extraction proposal implies the notes were already fetched.
     if EXTRACT_FILE and os.path.exists(EXTRACT_FILE):
         out.append("  notes: supplied via extraction proposal (%s)" % EXTRACT_FILE)
-        return ["(from-proposal)"], False
+        return ["(from-proposal)"], False, "", ""
+
+    def degrade(reason):
+        out.append("  notes-not-fetchable: %s. HONEST DEGRADE (Decision 4b "
+                   "Option C): paste the notes or supply FM_MSYNC_EXTRACT_FILE." % reason)
+        return [], True, reason, ""
 
     if not have(GFETCH_BIN):
-        out.append("  notes-not-fetchable: bin/fm-gfetch.sh (leaf L2) is NOT on this "
-                   "branch/PATH; Stage A cannot fetch. HONEST DEGRADE (Decision 4b "
-                   "Option C): paste the notes or supply FM_MSYNC_EXTRACT_FILE.")
-        return [], True
+        return degrade("bin/fm-gfetch.sh (leaf L2) is not on this branch/PATH")
 
     try:
         r = subprocess.run(
-            [GFETCH_BIN, "files", "--query", "Kronos Tech Sync", "--name-only", "--limit", "10"],
+            [GFETCH_BIN, "files", "--query", "Kronos Tech Sync", "--limit", "10"],
             capture_output=True, text=True, timeout=90)
     except Exception as exc:  # noqa: BLE001 - degrade never crashes the run
-        out.append("  notes-not-fetchable: fm-gfetch.sh error (%s). HONEST DEGRADE: paste the notes." % exc)
-        return [], True
+        return degrade("fm-gfetch.sh error (%s)" % exc)
     if r.returncode == 3 or "notes-not-fetchable" in (r.stdout + r.stderr):
-        out.append("  notes-not-fetchable: the Google credential is absent/expired "
-                   "(open question 10). HONEST DEGRADE: paste the notes.")
-        return [], True
+        return degrade("the Google credential is absent/expired (open question 10)")
     if r.returncode != 0:
-        out.append("  notes-not-fetchable: fm-gfetch.sh exit %d. HONEST DEGRADE: paste the notes." % r.returncode)
-        return [], True
-    docs = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
-    out.append("  slot docs (multi-doc identity, the SET not the newest): %d found" % len(docs))
-    return docs, False
+        return degrade("fm-gfetch.sh exit %d" % r.returncode)
+
+    # fm-gfetch.sh files emits {"query":..., "files":[{id,name,createdTime,
+    # modifiedTime,...}]}; tolerate a plain-line emitter (older mocks) too.
+    try:
+        data = json.loads(r.stdout)
+        files = data.get("files", []) if isinstance(data, dict) else []
+    except ValueError:
+        files = [{"id": None, "name": ln.strip()}
+                 for ln in r.stdout.splitlines() if ln.strip()]
+    in_window = [f for f in files if isinstance(f, dict) and _in_slot_window(slot, f)]
+    out.append("  slot docs (multi-doc identity, the SET not the newest): "
+               "%d of %d candidate(s) in the %s window" % (len(in_window), len(files), slot.kind))
+    if not in_window:
+        return degrade("no notes doc found in the %s window (%d candidate doc(s), none match)"
+                       % (slot.sid, len(files)))
+    if not want_text:
+        return in_window, False, "", ""
+
+    # --propose: read each in-window doc's notes + transcript for Stage B.
+    texts = []
+    for f in in_window:
+        fid = f.get("id")
+        if not fid:
+            continue
+        try:
+            rd = subprocess.run([GFETCH_BIN, "doc", str(fid)],
+                                capture_output=True, text=True, timeout=120)
+        except Exception as exc:  # noqa: BLE001
+            return degrade("doc %s fetch error (%s)" % (fid, exc))
+        if rd.returncode != 0 or "notes-not-fetchable" in (rd.stdout + rd.stderr):
+            return degrade("doc %s not readable (fm-gfetch.sh exit %d)" % (fid, rd.returncode))
+        texts.append("===== DOC %s (%s) =====\n%s" % (f.get("name") or fid, fid, rd.stdout))
+    if not texts:
+        return degrade("slot docs found but none carried a readable Drive id")
+    out.append("  notes text fetched for %d doc(s) (Stage B input)" % len(texts))
+    return in_window, False, "", "\n".join(texts)
 
 
 # --- Stage B: extract (LLM-judged; consumed from the proposal file) ---------
@@ -546,6 +652,73 @@ def stage_b_extract(out):
     out.append("stage B EXTRACT: %d extracted item(s), each classify-to-destination "
                "with a transcript timecode anchor (Decision 2a)." % len(items))
     return items
+
+
+def _slot_base(slot):
+    return slot.sid.replace("/", "-")
+
+
+def stage_b_produce(slot, notes_text, out):
+    """The --propose Stage B PRODUCER: run bin/fm-msync-extract.sh (the
+    LLM-judged extraction; it proposes, it does not act) over the Stage A notes
+    and consume its proposal JSON. The notes input and the produced proposal
+    are PERSISTED under <state-dir>/proposals/ so David's later okay applies
+    exactly what he saw (FM_MSYNC_EXTRACT_FILE=<proposal> ... --apply).
+    Returns (items:list, degraded:bool, reason:str)."""
+    os.makedirs(PROPOSAL_DIR, exist_ok=True)
+    base = _slot_base(slot)
+    notes_path = os.path.join(PROPOSAL_DIR, base + ".notes.txt")
+    prop_path = os.path.join(PROPOSAL_DIR, base + ".extract.json")
+    # idempotent re-fire: a persisted, still-valid proposal for this slot is
+    # REUSED rather than re-running the LLM (delete the file to force a fresh
+    # extraction). Keeps a re-fire cheap and its change-list stable.
+    if os.path.exists(prop_path):
+        try:
+            with open(prop_path) as fh:
+                data = json.load(fh)
+            items = data.get("items") if isinstance(data, dict) else None
+            if isinstance(items, list):
+                out.append("stage B EXTRACT: reusing the persisted proposal for %s "
+                           "(%d item(s), %s); delete it to force a re-extraction."
+                           % (slot.sid, len(items), prop_path))
+                return items, False, ""
+        except (OSError, ValueError):
+            pass  # unreadable leftover: fall through and re-produce it.
+    if not have(EXTRACT_BIN):
+        return [], True, "the Stage B extractor (bin/fm-msync-extract.sh) is missing/not executable"
+    try:
+        with open(notes_path, "w") as fh:
+            fh.write(notes_text)
+    except OSError as exc:
+        return [], True, "could not persist the notes for extraction (%s)" % exc
+    cmd = [EXTRACT_BIN, "--slot", slot.sid, "--notes", notes_path,
+           "--out", prop_path, "--roster", ROSTER_FILE]
+    try:
+        timeout_s = int(os.environ.get("FM_MSYNC_EXTRACT_TIMEOUT") or "600")
+    except ValueError:
+        timeout_s = 600
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    except Exception as exc:  # noqa: BLE001 - degrade never crashes the run
+        return [], True, "extraction error (%s)" % exc
+    if r.returncode != 0 or not os.path.exists(prop_path):
+        detail = ""
+        for ln in (r.stdout + "\n" + r.stderr).splitlines():
+            if "extract-not-available" in ln:
+                detail = ln.strip()
+                break
+        return [], True, (detail or "extraction failed (fm-msync-extract.sh exit %d)" % r.returncode)
+    try:
+        with open(prop_path) as fh:
+            data = json.load(fh)
+        items = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            raise ValueError("no 'items' list")
+    except (OSError, ValueError) as exc:
+        return [], True, "extraction proposal unreadable (%s)" % exc
+    out.append("stage B EXTRACT (produced): %d item(s) via %s; proposal persisted at %s"
+               % (len(items), os.path.basename(EXTRACT_BIN), prop_path))
+    return items, False, ""
 
 
 # --- Stage E: reflect (Linear -> tracker via L5 reconcile) ------------------
@@ -588,6 +761,106 @@ def post_to_board(text, apply_mode, out):
                    "(--your-court). content.ts was NOT edited; the tracker was NOT merged." % BOARD_ITEM)
     except Exception as exc:  # noqa: BLE001
         out.append("  board post error (%s); the change-list is still printed above." % exc)
+
+
+def _post_board_line(text, effort, out, label):
+    """One firstmate-authored --your-court board post. True iff it landed."""
+    if not have(BOARD_REPLY_BIN):
+        out.append("%s board post SKIPPED: bin/fm-board-reply.sh unavailable "
+                   "(not recorded, so the next fire retries)." % label)
+        return False
+    try:
+        subprocess.run([BOARD_REPLY_BIN, BOARD_ITEM, text, "--your-court",
+                        "--effort", str(effort)],
+                       capture_output=True, text=True, timeout=60, check=False)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        out.append("%s board post error (%s); not recorded, next fire retries." % (label, exc))
+        return False
+
+
+def post_degrade(slot, reason, st, out):
+    """THE LOUD DEGRADE (never silent): one board line per slot telling David
+    exactly what to do, deduped in state so a nightly re-fire of the same
+    failing slot never spams the thread (one post per slot)."""
+    posts = st.setdefault("degradePosts", {})
+    if slot.sid in posts:
+        out.append("degrade already posted for %s at %s; NOT re-posting (one post per slot)."
+                   % (slot.sid, posts[slot.sid]))
+        return
+    line = ("meeting sync could not fetch the %s notes: %s; paste them or fix the "
+            "credential, then re-run bin/fm-meeting-sync.sh --slot %s --propose"
+            % (slot.sid, reason, slot.sid))
+    if _post_board_line(line, 2, out, "degrade"):
+        posts[slot.sid] = now_utc().isoformat(timespec="seconds")
+        save_state(st)
+        out.append("degrade posted to the '%s' board thread: %s" % (BOARD_ITEM, line))
+
+
+def post_proposal(slot, report, changes, narratives, st, out):
+    """The --propose hand-back: persist the full change-list, then post a
+    scannable your-court ask (first line = the exact ask, then dot points) to
+    the board thread for David's ONE okay. Content-hash deduped per slot, so a
+    re-fire with an unchanged change-list posts nothing and a genuinely new
+    change-list posts again. An EMPTY change-list posts nothing (a meeting with
+    zero actionable items, or a reconcile slot, is not a decision for David),
+    and an already-complete slot never re-proposes."""
+    if slot_complete(st, slot.sid):
+        out.append("proposal: slot %s is already recorded complete (applied); "
+                   "NOT re-proposing." % slot.sid)
+        return
+    if not (changes or narratives):
+        out.append("proposal: nothing to propose for %s (no actionable change "
+                   "extracted); no board post." % slot.sid)
+        return
+    os.makedirs(PROPOSAL_DIR, exist_ok=True)
+    report_path = os.path.join(PROPOSAL_DIR, _slot_base(slot) + ".changelist.txt")
+    try:
+        with open(report_path, "w") as fh:
+            fh.write(report + "\n")
+    except OSError as exc:
+        out.append("proposal: could not persist the change-list (%s); posting anyway." % exc)
+    autos = [c for c in changes if c.tier == AUTONOMOUS]
+    gated = [c for c in changes if c.tier == GATED]
+    hard = [c for c in changes if c.tier == HARDSTOP] + [n for n in narratives if n.tier == HARDSTOP]
+    narr = [n for n in narratives if n.tier != HARDSTOP]
+    lines = ["Meeting sync proposal for %s: okay to apply? Nothing has been applied "
+             "(the cadence never auto-applies); your one okay lands the list below." % slot.sid]
+
+    def emit(tag, items):
+        shown = items[:12]
+        for c in shown:
+            tc = (" @%s" % c.timecode) if c.timecode else ""
+            ow = (" owner=%s" % c.owner) if c.owner else ""
+            lines.append("- [%s] %s %s: %s%s%s" % (tag, c.op, c.target, c.detail or "", ow, tc))
+        if len(items) > len(shown):
+            lines.append("- [%s] +%d more (full change-list below)" % (tag, len(items) - len(shown)))
+
+    emit("AUTONOMOUS on your okay", autos)
+    emit("GATED, rule per item", gated)
+    emit("NARRATIVE, your gate", narr)
+    emit("HARD STOP, reported only", hard)
+    if not (autos or gated or narr or hard):
+        lines.append("- no actionable change extracted this slot (FYI-only or empty meeting)")
+    prop_json = os.path.join(PROPOSAL_DIR, _slot_base(slot) + ".extract.json")
+    lines.append("- full change-list: %s" % report_path)
+    if os.path.exists(prop_json):
+        lines.append("- to apply after your okay: FM_MSYNC_EXTRACT_FILE=%s "
+                     "bin/fm-meeting-sync.sh --slot %s --apply" % (prop_json, slot.sid))
+    lines.append("- recommendation: okay the autonomous tier now; rule on gated/narrative items individually")
+    text = "\n".join(lines)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    rec = slot_record(st, slot.sid)
+    if rec.get("proposalHash") == digest:
+        out.append("proposal for %s unchanged since the last post; NOT re-posting (dedupe)." % slot.sid)
+        return
+    if _post_board_line(text, 3, out, "proposal"):
+        rec["proposalHash"] = digest
+        if rec.get("outcome") == "planned":
+            rec["outcome"] = "proposed"
+        save_state(st)
+        out.append("proposal posted to the '%s' board thread (--your-court) for David's okay; "
+                   "NOTHING was applied." % BOARD_ITEM)
 
 
 # --- apply the AUTONOMOUS tier (Decision 5a; never narrative, never a merge) -
@@ -837,10 +1110,17 @@ def apply_autonomous(slot, changes, canon, st, out):
 # --- rendering --------------------------------------------------------------
 
 def render(slot, backfill, ingest_lines, extract_lines, reflect_text,
-           changes, narratives, roster_present, apply_mode, degraded):
+           changes, narratives, roster_present, apply_mode, degraded,
+           propose_mode=False):
     L = []
     L.append("=== MEETING SYNC CHANGE-LIST (slot %s) ===" % slot.sid)
-    L.append("mode: %s" % ("APPLY (autonomous tier only)" if apply_mode else "dry-run (nothing applied)"))
+    if apply_mode:
+        mode = "APPLY (autonomous tier only)"
+    elif propose_mode:
+        mode = "PROPOSE (real fetch + extract; NOTHING applied; proposal -> board for David's okay)"
+    else:
+        mode = "dry-run (nothing applied)"
+    L.append("mode: %s" % mode)
     L.append("clock: %s UTC" % now_utc().isoformat(timespec="seconds"))
     L.append("")
     L.append("--- backfill gap-scan (design Stage A) ---")
@@ -910,11 +1190,15 @@ def render(slot, backfill, ingest_lines, extract_lines, reflect_text,
     L.append("  autonomous=%d  gated/needs-david=%d  hard-stop=%d  narrative=%d" %
              (na, ng, nh, len(narratives)))
     if degraded:
-        L.append("  Stage A DEGRADED: notes not fetchable -> 'paste the notes' will be "
-                 "posted to the board; no meeting writes proposed this pass.")
+        L.append("  DEGRADED: notes not fetchable / extraction unavailable -> one loud "
+                 "'paste the notes' line goes to the board (propose/apply paths, deduped "
+                 "per slot); no meeting writes proposed this pass.")
     if apply_mode:
         L.append("  APPLY: autonomous tier lands (tracker chat edits, [sync:%s] comments, "
                  "David-self-assigned tickets, digest); gated + narrative go to the board." % slot.sid)
+    elif propose_mode:
+        L.append("  PROPOSE: nothing applied. The change-list goes to the board for David's "
+                 "one okay; apply afterwards with FM_MSYNC_EXTRACT_FILE=<persisted proposal> --apply.")
     else:
         L.append("  dry-run: nothing applied. Re-run with --apply to land the autonomous tier.")
     return "\n".join(L)
@@ -942,6 +1226,13 @@ SCHEDULE_TEXT = """\
 NOT INSTALLED BY THIS SCRIPT. The cadence is registered ONLY after a hand-run
 proves one real meeting cycle (design Phase 5). Until then this prints the plan.
 
+THE CADENCE NEVER AUTO-APPLIES (prime rule 1). Every scheduled fire runs
+--propose: fetch the notes, run the extraction, build the change-list, post the
+proposal to the tracker-sync board thread for David's ONE okay. Applying is a
+separate, human-okayed step. The plists export FM_MSYNC_SCHEDULED=1, which makes
+this script REJECT --apply structurally (exit 2), so a mis-edited schedule
+cannot flip autonomy on.
+
 Trigger owner: CronCreate (harness routines), one entry per cadence SLOT, each
 PINNED to America/Los_Angeles and passing its OWN slot identity so Stage A
 selects slot-scoped docs, never "newest" (prevents the cron-slot-vs-newest-doc
@@ -950,13 +1241,13 @@ draining board wakes. One mechanism per surface: cron owns the trigger.
 
   1. EOD nightly (every day, evening PT):
        schedule: 0 21 * * *  America/Los_Angeles
-       run: fm-meeting-sync.sh --slot $(date +%F)/eod --apply
+       run: FM_MSYNC_SCHEDULED=1 fm-meeting-sync.sh --slot $(date +%F)/eod --propose
   2. MORNING Mon/Fri (morning PT):
        schedule: 0 10 * * 1,5  America/Los_Angeles
-       run: fm-meeting-sync.sh --slot $(date +%F)/morning --apply
+       run: FM_MSYNC_SCHEDULED=1 fm-meeting-sync.sh --slot $(date +%F)/morning --propose
   3. DAILY RECONCILE (meeting-less housekeeping):
        schedule: 30 7 * * *  America/Los_Angeles
-       run: fm-meeting-sync.sh --slot $(date +%F)/reconcile --apply
+       run: FM_MSYNC_SCHEDULED=1 fm-meeting-sync.sh --slot $(date +%F)/reconcile --propose
 
 TIMEZONE/DST self-defense (Decision 7a): if the scheduler can only fire in UTC,
 the run converts fire-time to PT and re-derives its slot rather than trusting the
@@ -983,6 +1274,7 @@ def main(argv):
     ap.add_argument("--slot", required=True)
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--dry-run", action="store_true")
+    g.add_argument("--propose", action="store_true")
     g.add_argument("--apply", action="store_true")
     ap.add_argument("--lookback", type=int, default=14)
     ap.add_argument("--no-backfill", action="store_true")
@@ -992,7 +1284,14 @@ def main(argv):
     except SystemExit as e:
         return E_USAGE if e.code else 0
 
-    apply_mode = bool(args.apply)  # dry-run is the default
+    apply_mode = bool(args.apply)      # dry-run is the default
+    propose_mode = bool(args.propose)  # the scheduled mode: real up to the proposal
+    if os.environ.get("FM_MSYNC_SCHEDULED") == "1" and apply_mode:
+        sys.stderr.write(
+            "fm-meeting-sync: --apply is FORBIDDEN on the scheduled path "
+            "(FM_MSYNC_SCHEDULED=1): the cadence never auto-applies (prime rule 1). "
+            "Scheduled fires run --propose; applying needs David's okay.\n")
+        return E_USAGE
     slot = parse_slot(args.slot)
     st = load_state()
 
@@ -1013,8 +1312,18 @@ def main(argv):
                 backfill.append(s)
 
     ingest_lines, extract_lines, reflect_lines = [], [], []
-    docs, degraded = stage_a_ingest(slot, ingest_lines)
-    items = stage_b_extract(extract_lines)
+    docs, degraded, degrade_reason, notes_text = stage_a_ingest(
+        slot, ingest_lines, want_text=propose_mode)
+    if propose_mode and not degraded and slot.kind != "reconcile" and not (
+            EXTRACT_FILE and os.path.exists(EXTRACT_FILE)):
+        # Stage B has a PRODUCER on the scheduled path: the wired extractor.
+        items, b_degraded, b_reason = stage_b_produce(slot, notes_text, extract_lines)
+        if b_degraded:
+            degraded, degrade_reason = True, b_reason
+            extract_lines.append("stage B EXTRACT: %s. HONEST DEGRADE: paste the "
+                                 "notes or supply FM_MSYNC_EXTRACT_FILE." % b_reason)
+    else:
+        items = stage_b_extract(extract_lines)
     reflect_text = stage_e_reflect(slot, reflect_lines)
     extract_lines.extend(reflect_lines)
 
@@ -1028,7 +1337,8 @@ def main(argv):
             changes.append(c)
 
     report = render(slot, backfill, ingest_lines, extract_lines, reflect_text,
-                    changes, narratives, roster_present, apply_mode, degraded)
+                    changes, narratives, roster_present, apply_mode, degraded,
+                    propose_mode=propose_mode)
     print(report)
 
     # A slot already recorded complete is fully idempotent: neither the writes
@@ -1067,13 +1377,35 @@ def main(argv):
                 for line in apply_out:
                     print(line)
 
+    # --propose: the scheduled path's terminal step. NOTHING is applied; the
+    # proposal (or the loud degrade line) goes to the board for David's okay.
+    if propose_mode:
+        print("")
+        print("--- PROPOSE (nothing applied) ---")
+        prop_out = []
+        if degraded:
+            post_degrade(slot, degrade_reason, st, prop_out)
+        else:
+            post_proposal(slot, report, changes, narratives, st, prop_out)
+        for line in prop_out:
+            print(line)
+
+    # a degraded --apply run is loud too: same one-line-per-slot board post.
+    if apply_mode and degraded:
+        print("")
+        prop_out = []
+        post_degrade(slot, degrade_reason, st, prop_out)
+        for line in prop_out:
+            print(line)
+
     # the board post (narrative + gated items) - NEVER content.ts, NEVER merge.
     # Guarded by the SAME slot-complete check as the writes (the LOW finding): a
     # re-run of a completed slot must not re-post the gated/narrative change-list
     # to David's court, and a run that lost the apply lock posts nothing (the
-    # lock holder will).
+    # lock holder will). --propose has its own hand-back above.
     gated = [c for c in changes if c.tier == GATED]
-    if (narratives or gated) and not was_complete and not apply_locked_out:
+    if (narratives or gated) and not was_complete and not apply_locked_out \
+            and not propose_mode:
         print("")
         print("--- BOARD HANDBACK (--your-court) ---")
         board_out = []
@@ -1085,7 +1417,8 @@ def main(argv):
             print(line)
 
     if degraded:
-        # honest degrade exit, but the change-list already printed above.
+        # honest degrade exit, but the change-list already printed above and the
+        # propose/apply paths posted the loud board line (deduped per slot).
         return E_DEGRADE
     return 0
 

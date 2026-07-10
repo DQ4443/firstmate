@@ -12,9 +12,15 @@
   SLOT IDENTITY: computes today's MORNING slot from $(date +%F). Stage A is
   slot-scoped to the 06:00-13:00 PT window so it never picks up the prior EOD.
 
-  TIMEZONE / DST / DEPENDENCY / INSTALL: identical to the EOD plist; see that
-  file's header. Host must be America/Los_Angeles; the run self-defends by
-  re-deriving its PT slot from fire-time.
+  MODE (propose): same as the EOD plist. The scheduled path runs REAL up to
+  the PROPOSAL (fetch, extract, change-list, board post for David's one okay)
+  and NEVER auto-applies; FM_MSYNC_SCHEDULED=1 makes fm-meeting-sync.sh reject
+  the apply flag structurally. A failed fetch posts one loud deduped
+  "paste the notes / fix the credential" line to the board, never silence.
+
+  TIMEZONE / DST / DEPENDENCY / INSTALL / RE-INSTALL: identical to the EOD
+  plist; see that file's header. Host must be America/Los_Angeles; the run
+  self-defends by re-deriving its PT slot from fire-time.
 -->
 <plist version="1.0">
 <dict>
@@ -24,7 +30,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/morning" --dry-run</string>
+    <string>FM_MSYNC_SCHEDULED=1 /Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/morning" --propose</string>
   </array>
   <key>StartCalendarInterval</key>
   <array>

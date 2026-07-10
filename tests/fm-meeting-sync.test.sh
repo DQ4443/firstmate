@@ -72,10 +72,40 @@ cat > "$WORK/extract.json" <<'JSON'
 ]}
 JSON
 
-# --- mock sibling binaries that record invocations (NEVER touch real Linear) --
+# --- mock sibling binaries that record invocations (NEVER touch real Linear,
+#     NEVER the real Google APIs: bin/fm-gfetch.sh may be credentialed on the
+#     host, so every block pins FM_MSYNC_GFETCH_BIN to a mock or an absent path)
+GF_ABSENT="$WORK/absent-gfetch"   # never created: forces the honest degrade
 cat > "$WORK/board-reply.sh" <<MOCK
 #!/usr/bin/env bash
-echo "BOARD_REPLY_CALLED item=\$1 args=\${*:3}" >> "$WORK/board.log"
+echo "BOARD_REPLY_CALLED item=\$1 msg=\$2 args=\${*:3}" >> "$WORK/board.log"
+MOCK
+cat > "$WORK/gfetch.sh" <<MOCK
+#!/usr/bin/env bash
+# mock fm-gfetch.sh: one in-window morning doc (2026-07-06 18:30Z = 11:30 PT)
+# plus one out-of-window doc, exercising the slot-scoped selection.
+echo "GFETCH_CALLED \$*" >> "$WORK/gfetch.log"
+case "\${1:-}" in
+  files)
+    cat <<'J'
+{"query": "Kronos Tech Sync", "files": [
+  {"id": "doc-1", "name": "Notes - Kronos Tech Sync", "createdTime": "2026-07-06T18:30:00Z", "modifiedTime": "2026-07-06T19:00:00Z"},
+  {"id": "doc-old", "name": "Notes - Kronos Tech Sync (eod)", "createdTime": "2026-07-05T23:30:00Z", "modifiedTime": "2026-07-05T23:40:00Z"}
+]}
+J
+    ;;
+  doc)
+    echo "MOCK NOTES + TRANSCRIPT for \${2:-} (fixture text)"
+    ;;
+esac
+MOCK
+cat > "$WORK/extractor.sh" <<MOCK
+#!/usr/bin/env bash
+# mock fm-msync-extract.sh: records the call, emits the fixture proposal.
+echo "EXTRACT_CALLED \$*" >> "$WORK/extract.log"
+out="" prev=""
+for a in "\$@"; do [ "\$prev" = "--out" ] && out="\$a"; prev="\$a"; done
+[ -n "\$out" ] && cp "$WORK/extract.json" "\$out"
 MOCK
 cat > "$WORK/linear.sh" <<MOCK
 #!/usr/bin/env bash
@@ -115,12 +145,15 @@ cat > "$WORK/audit.sh" <<MOCK
 #!/usr/bin/env bash
 echo "AUDIT_CALLED \$*" >> "$WORK/audit.log"
 MOCK
-chmod +x "$WORK/board-reply.sh" "$WORK/linear.sh" "$WORK/reconcile.sh" "$WORK/audit.sh"
+chmod +x "$WORK/board-reply.sh" "$WORK/linear.sh" "$WORK/reconcile.sh" \
+         "$WORK/audit.sh" "$WORK/gfetch.sh" "$WORK/extractor.sh"
 
 run() {
   FM_MSYNC_STATE_DIR="$WORK/state" \
   FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
   FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" \
+  FM_MSYNC_GFETCH_BIN="$GF_ABSENT" \
+  FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
   FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
   "$BIN" "$@"
 }
@@ -154,6 +187,7 @@ rm -f "$WORK/board.log" "$WORK/linear.log" "$WORK/reconcile.log" "$WORK/audit.lo
 FM_MSYNC_STATE_DIR="$WORK/state" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
 FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh" \
 FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_AUDIT_BIN="$WORK/audit.sh" \
+FM_MSYNC_GFETCH_BIN="$GF_ABSENT" \
 FM_MSYNC_EXTRACT_FILE="$WORK/extract.json" FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
   "$BIN" --slot 2026-07-06/morning --apply >/dev/null 2>&1
 chk "apply posts to the board (--your-court)" "grep -q 'your-court' \"$WORK/board.log\""
@@ -168,10 +202,12 @@ chk "no content.ts written by the run"        "! find \"$WORK\" -name content.ts
 
 # === 4. backfill gap-scan ===================================================
 OUT="$(FM_MSYNC_NOW='2026-07-06T20:00:00Z' FM_MSYNC_STATE_DIR="$WORK/s2" \
+      FM_MSYNC_GFETCH_BIN="$GF_ABSENT" FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
       FM_MSYNC_ROSTER_FILE="$WORK/roster.md" "$BIN" --slot 2026-07-06/eod --lookback 3 --dry-run 2>&1)"
 chk "backfill lists an earlier unrecorded slot" "grep -q '2026-07-03/morning' <<<\"\$OUT\""
 chk "backfill excludes the target slot itself"  "! grep -A40 'backfill gap-scan' <<<\"\$OUT\" | grep -q '2026-07-06/eod'"
 OUT="$(FM_MSYNC_STATE_DIR="$WORK/s2" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
+      FM_MSYNC_GFETCH_BIN="$GF_ABSENT" FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
       "$BIN" --slot 2026-07-06/eod --no-backfill --dry-run 2>&1)"
 chk "--no-backfill suppresses the scan"         "grep -q 'no unrecorded slot' <<<\"\$OUT\""
 
@@ -186,6 +222,7 @@ chk "reconcile slot notes it skips B-D"        "grep -q 'skips B-D' <<<\"\$OUT\"
 IDEM_ENV=(FM_MSYNC_STATE_DIR="$WORK/idem" FM_MSYNC_ROSTER_FILE="$WORK/roster.md"
           FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh"
           FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_AUDIT_BIN="$WORK/audit.sh"
+          FM_MSYNC_GFETCH_BIN="$GF_ABSENT"
           FM_MSYNC_EXTRACT_FILE="$WORK/extract.json" FM_MSYNC_NOW="2026-07-06T20:00:00Z")
 rm -f "$WORK/linear.log" "$WORK/reconcile.log"
 env "${IDEM_ENV[@]}" "$BIN" --slot 2026-07-06/morning --apply >/dev/null 2>&1
@@ -214,6 +251,7 @@ chk "completed slot dropped from backfill"    "! grep -A40 'backfill gap-scan' <
 # === 6c. dry-run persists NOTHING (state dir stays absent) ==================
 rm -rf "$WORK/dryonly"
 env FM_MSYNC_STATE_DIR="$WORK/dryonly" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
+    FM_MSYNC_GFETCH_BIN="$GF_ABSENT" FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
     FM_MSYNC_EXTRACT_FILE="$WORK/extract.json" FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
     "$BIN" --slot 2026-07-06/morning --dry-run >/dev/null 2>&1
 chk "dry-run writes no state dir"             "[ ! -e \"$WORK/dryonly\" ]"
@@ -235,6 +273,7 @@ rm -f "$WORK/linear.log"
 CRASH_ENV=(FM_MSYNC_STATE_DIR="$WORK/crash" FM_MSYNC_ROSTER_FILE="$WORK/roster.md"
            FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh"
            FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_AUDIT_BIN="$WORK/audit.sh"
+           FM_MSYNC_GFETCH_BIN="$GF_ABSENT"
            FM_MSYNC_EXTRACT_FILE="$WORK/extract.json" FM_MSYNC_NOW="2026-07-06T20:00:00Z")
 # shellcheck disable=SC2034  # OUT4 consumed by the chk evals below via <<<"$OUT4"
 OUT4="$(env "${CRASH_ENV[@]}" "$BIN" --slot 2026-07-06/morning --apply 2>&1)"
@@ -264,6 +303,106 @@ STALE_OUT="$(env FM_MSYNC_STATE_DIR="$WORK/lk" FM_MSYNC_ROSTER_FILE="$WORK/roste
   FM_MSYNC_LOCK_STALE_SEC=60 FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
   "$BIN" --slot 2026-07-06/morning --apply 2>&1)"
 chk "stale lock is stolen, not a deadlock"    "grep -qi 'stale' <<<\"\$STALE_OUT\""
+
+# === 7. THE SCHEDULED PATH (--propose): real fetch + real extract, up to the
+#         proposal, applying NOTHING (the cadence never auto-applies) ==========
+rm -f "$WORK/board.log" "$WORK/linear.log" "$WORK/reconcile.log" "$WORK/extract.log" "$WORK/gfetch.log"
+PROP_ENV=(FM_MSYNC_STATE_DIR="$WORK/prop" FM_MSYNC_ROSTER_FILE="$WORK/roster.md"
+          FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh"
+          FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_AUDIT_BIN="$WORK/audit.sh"
+          FM_MSYNC_GFETCH_BIN="$WORK/gfetch.sh" FM_MSYNC_EXTRACT_BIN="$WORK/extractor.sh"
+          FM_MSYNC_NOW="2026-07-06T20:00:00Z")
+# shellcheck disable=SC2034  # POUT consumed by the chk evals below via <<<"$POUT"
+POUT="$(env "${PROP_ENV[@]}" "$BIN" --slot 2026-07-06/morning --propose 2>&1)"; PRC=$?
+chk "propose exits 0 on success"                "[ $PRC -eq 0 ]"
+chk "propose fetches the slot docs (Stage A)"   "grep -q 'GFETCH_CALLED files' \"$WORK/gfetch.log\""
+chk "propose reads the in-window doc text"      "grep -q 'GFETCH_CALLED doc doc-1' \"$WORK/gfetch.log\""
+chk "propose excludes the out-of-window doc"    "! grep -q 'doc doc-old' \"$WORK/gfetch.log\""
+chk "propose runs the Stage B extractor"        "grep -q 'EXTRACT_CALLED --slot 2026-07-06/morning' \"$WORK/extract.log\""
+chk "propose builds the classified change list" "grep -q 'net-new, David' <<<\"\$POUT\""
+chk "propose posts the proposal (--your-court)" "grep -q 'okay to apply' \"$WORK/board.log\""
+chk "proposal post targets tracker-sync"        "grep -q 'item=tracker-sync' \"$WORK/board.log\""
+chk "proposal post is your-court"               "grep -q 'your-court' \"$WORK/board.log\""
+chk "propose persists the extraction proposal"  "[ -f \"$WORK/prop/proposals/2026-07-06-morning.extract.json\" ]"
+chk "propose persists the full change-list"     "[ -f \"$WORK/prop/proposals/2026-07-06-morning.changelist.txt\" ]"
+chk "propose applies NO Linear write"           "[ ! -s \"$WORK/linear.log\" ]"
+chk "propose runs NO reconcile --apply"         "! grep -q 'RECONCILE_CALLED --apply' \"$WORK/reconcile.log\" 2>/dev/null"
+chk "propose does not mark the slot complete"   "! grep -q '\"outcome\": \"complete\"' \"$WORK/prop/state.json\""
+# a re-fire of the same slot with an unchanged change-list posts NOTHING new
+env "${PROP_ENV[@]}" "$BIN" --slot 2026-07-06/morning --propose >/dev/null 2>&1
+N_PROP=$(grep -c 'okay to apply' "$WORK/board.log")
+chk "unchanged proposal is not re-posted"       "[ \"$N_PROP\" -eq 1 ]"
+# the re-fire reuses the persisted extraction instead of re-running the LLM
+N_EXTRACT=$(grep -c 'EXTRACT_CALLED' "$WORK/extract.log")
+chk "re-fire reuses the persisted extraction"   "[ \"$N_EXTRACT\" -eq 1 ]"
+# a reconcile / empty slot posts NO daily proposal (no your-court spam)
+N_BOARD=$(wc -l < "$WORK/board.log" | tr -d ' ')
+env "${PROP_ENV[@]}" "$BIN" --slot 2026-07-06/reconcile --propose >/dev/null 2>&1; RRC=$?
+N_BOARD_AFTER=$(wc -l < "$WORK/board.log" | tr -d ' ')
+chk "reconcile-slot propose exits 0"            "[ $RRC -eq 0 ]"
+chk "reconcile-slot propose posts nothing"      "[ \"$N_BOARD_AFTER\" -eq \"$N_BOARD\" ]"
+# the persisted proposal feeds the human-okayed apply (the tracker-sync gate)
+rm -f "$WORK/linear.log"
+env "${PROP_ENV[@]}" FM_MSYNC_EXTRACT_FILE="$WORK/prop/proposals/2026-07-06-morning.extract.json" \
+    "$BIN" --slot 2026-07-06/morning --apply >/dev/null 2>&1
+chk "okayed apply from the persisted proposal lands" "grep -q 'add_comment ENG-210' \"$WORK/linear.log\""
+# once applied (complete), a propose re-fire never re-proposes
+N_BOARD=$(wc -l < "$WORK/board.log" | tr -d ' ')
+env "${PROP_ENV[@]}" "$BIN" --slot 2026-07-06/morning --propose >/dev/null 2>&1
+N_BOARD_AFTER=$(wc -l < "$WORK/board.log" | tr -d ' ')
+chk "a completed slot is never re-proposed"     "[ \"$N_BOARD_AFTER\" -eq \"$N_BOARD\" ]"
+
+# === 8. SILENT DEGRADE fixed: a failed fetch posts ONE loud board line per slot
+rm -f "$WORK/board.log"
+DEG_ENV=(FM_MSYNC_STATE_DIR="$WORK/deg" FM_MSYNC_ROSTER_FILE="$WORK/roster.md"
+         FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh"
+         FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_GFETCH_BIN="$GF_ABSENT"
+         FM_MSYNC_NOW="2026-07-06T20:00:00Z")
+env "${DEG_ENV[@]}" "$BIN" --slot 2026-07-06/morning --propose >/dev/null 2>&1; DRC=$?
+chk "degraded propose still exits 3"            "[ $DRC -eq 3 ]"
+chk "degrade posts the loud board line"         "grep -q 'could not fetch the 2026-07-06/morning notes' \"$WORK/board.log\""
+chk "degrade line says what to do"              "grep -q 'paste them or fix the credential' \"$WORK/board.log\""
+chk "degrade post is your-court"                "grep -q 'your-court' \"$WORK/board.log\""
+chk "degrade is recorded for dedupe"            "grep -q 'degradePosts' \"$WORK/deg/state.json\""
+# a second failing fire of the SAME slot does not spam (one post per slot)
+env "${DEG_ENV[@]}" "$BIN" --slot 2026-07-06/morning --propose >/dev/null 2>&1
+N_DEG=$(grep -c 'could not fetch the 2026-07-06/morning notes' "$WORK/board.log")
+chk "repeated degrade posts once per slot"      "[ \"$N_DEG\" -eq 1 ]"
+# a DIFFERENT slot's degrade still posts (dedupe is per slot, not global)
+env "${DEG_ENV[@]}" "$BIN" --slot 2026-07-06/eod --propose >/dev/null 2>&1
+chk "a different slot's degrade still posts"    "grep -q 'could not fetch the 2026-07-06/eod notes' \"$WORK/board.log\""
+# an unavailable Stage B extractor degrades loudly too (exit 3, board line)
+rm -f "$WORK/board.log"
+env FM_MSYNC_STATE_DIR="$WORK/deg2" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
+    FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
+    FM_MSYNC_GFETCH_BIN="$WORK/gfetch.sh" FM_MSYNC_EXTRACT_BIN="$WORK/absent-extractor" \
+    FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
+    "$BIN" --slot 2026-07-06/morning --propose >/dev/null 2>&1; XRC=$?
+chk "missing extractor degrades with exit 3"    "[ $XRC -eq 3 ]"
+chk "missing extractor posts the loud line"     "grep -q 'extractor' \"$WORK/board.log\""
+
+# === 9. an EXPLICIT --dry-run still touches nothing (flag honored) ===========
+rm -f "$WORK/board.log" "$WORK/linear.log"
+rm -rf "$WORK/dry2"
+env FM_MSYNC_STATE_DIR="$WORK/dry2" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
+    FM_MSYNC_BOARD_REPLY_BIN="$WORK/board-reply.sh" FM_MSYNC_LINEAR_BIN="$WORK/linear.sh" \
+    FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" FM_MSYNC_GFETCH_BIN="$WORK/gfetch.sh" \
+    FM_MSYNC_EXTRACT_BIN="$WORK/extractor.sh" FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
+    "$BIN" --slot 2026-07-06/morning --dry-run >/dev/null 2>&1
+chk "explicit dry-run posts nothing"            "[ ! -s \"$WORK/board.log\" ]"
+chk "explicit dry-run writes no state"          "[ ! -e \"$WORK/dry2\" ]"
+chk "explicit dry-run lands no Linear write"    "[ ! -s \"$WORK/linear.log\" ]"
+
+# === 10. the scheduled path can NEVER auto-apply (FM_MSYNC_SCHEDULED guard) ===
+rm -f "$WORK/linear.log"
+env FM_MSYNC_SCHEDULED=1 FM_MSYNC_STATE_DIR="$WORK/sched" FM_MSYNC_ROSTER_FILE="$WORK/roster.md" \
+    FM_MSYNC_LINEAR_BIN="$WORK/linear.sh" FM_MSYNC_RECONCILE_BIN="$WORK/reconcile.sh" \
+    FM_MSYNC_GFETCH_BIN="$GF_ABSENT" FM_MSYNC_EXTRACT_FILE="$WORK/extract.json" \
+    FM_MSYNC_NOW="2026-07-06T20:00:00Z" \
+    "$BIN" --slot 2026-07-06/morning --apply >/dev/null 2>"$WORK/sched.err"; SRC=$?
+chk "scheduled --apply is rejected (exit 2)"    "[ $SRC -eq 2 ]"
+chk "scheduled --apply names the rule"          "grep -q 'never auto-applies' \"$WORK/sched.err\""
+chk "scheduled --apply lands NO write"          "[ ! -s \"$WORK/linear.log\" ]"
 
 # === 6. usage + schedule surface ============================================
 "$BIN" --slot bad-slot --dry-run >/dev/null 2>&1; chk "bad slot -> usage error" "[ $? -ne 0 ]"

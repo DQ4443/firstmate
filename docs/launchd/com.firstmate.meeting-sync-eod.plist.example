@@ -19,18 +19,29 @@
   (Decision 7a / TZ-DST). The run also self-defends: it converts fire-time to PT
   and re-derives its slot rather than trusting the label.
 
+  MODE (propose): the scheduled path runs REAL up to the PROPOSAL: fetch the
+  slot's notes (bin/fm-gfetch.sh), run the Stage B extraction
+  (bin/fm-msync-extract.sh, a headless scoped claude turn), build the
+  change-list, and post the proposal to the tracker-sync board thread for
+  David's ONE okay. THE CADENCE NEVER AUTO-APPLIES: applying stays behind
+  David's okay (the tracker-sync gate), and FM_MSYNC_SCHEDULED=1 makes
+  fm-meeting-sync.sh structurally REJECT the apply flag (exit 2), so a
+  mis-edit here cannot flip autonomy on.
+
   DEPENDENCY: the meeting ingest needs bin/fm-gfetch.sh credentialed (open
-  question 10). Absent a credential the run takes the honest degrade (posts
-  "paste the notes" to the board) and exits 3; this launchd job then logs that
-  and is a safe no-op, never a crash.
+  question 10). Absent a credential the run takes the honest degrade: it posts
+  ONE loud "paste the notes / fix the credential" line to the tracker-sync
+  board thread (deduped in state, one post per slot) and exits 3; this launchd
+  job then logs that and is a safe no-op, never a crash and never silent.
 
   INSTALL (only at the Phase 5 gate):
     1. Edit the absolute paths below to the real firstmate checkout.
-    2. Decide dry-run (safe) vs apply (lands the autonomous tier); start dry.
-    3. cp docs/launchd/com.firstmate.meeting-sync-eod.plist.example \
+    2. cp docs/launchd/com.firstmate.meeting-sync-eod.plist.example \
          ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
-    4. launchctl load ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
-    5. Verify: launchctl list com.firstmate.meeting-sync-eod
+    3. launchctl load ~/Library/LaunchAgents/com.firstmate.meeting-sync-eod.plist
+    4. Verify: launchctl list com.firstmate.meeting-sync-eod
+  RE-INSTALL after this template changes: launchctl unload the installed plist,
+  re-copy, launchctl load again (launchd never re-reads a changed file).
 -->
 <plist version="1.0">
 <dict>
@@ -40,7 +51,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/eod" --dry-run</string>
+    <string>FM_MSYNC_SCHEDULED=1 /Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/eod" --propose</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
