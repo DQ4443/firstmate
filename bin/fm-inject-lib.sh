@@ -182,3 +182,89 @@ fm_inject_wake() {
   [ "$verdict" = empty ] && return 0
   return 3
 }
+
+# --- parrot wake target (fleet routing/status session) ------------------------
+#
+# The parrot (data/fleet/briefs/parrot-charter.md) is the thin routing-and-status
+# session that answers board threads. Its PRIMARY trigger is the same
+# event-driven wake the primary session gets: when board activity lands in the
+# durable queue, the poller pushes a nudge into the parrot's pane too, so it
+# answers in seconds instead of on its fallback heartbeat. Same mechanism, same
+# primitives (fm-tmux-lib.sh composer detection + verified submit), just a
+# second registered target - never a second delivery system.
+#
+# The parrot needs no pane-registration file of its own: it lives in a
+# well-known tmux session (default fm-parrot, override FM_PARROT_SESSION) on the
+# SAME server as the primary session, so its pane is resolved by session name
+# against the server recorded in state/session-pane.env. If the fm-parrot
+# session does not exist, resolution fails and the push is a SILENT no-op - a
+# parrot is optional by design, and its absence is normal, not an outage.
+
+FM_PARROT_SESSION_DEFAULT='fm-parrot'
+
+# The parrot's nudge names the parrot's own next actions (its charter loop),
+# not the primary's. Overridable for tests via FM_PARROT_WAKE_PROMPT.
+FM_PARROT_WAKE_PROMPT_DEFAULT='fm-wake: new board activity is queued. Run bin/fm-wake-drain.sh, then bash bin/fm-board-surface.sh, per your charter.'
+
+# fm_parrot_server: commit FM_TMUX_BIN/FM_TMUX_SOCKET to the fleet's tmux
+# server. The recorded primary server (state/session-pane.env) is authoritative;
+# the fallbacks below only matter when no primary session has registered since
+# boot. The FIRST candidate that answers list-panes wins and the search stops:
+# the parrot is defined to live on the same server as the rest of the fleet, so
+# "reachable server without an fm-parrot session" means no parrot, never "try
+# another server". That determinism is also what keeps the tests hermetic (a
+# recorded fake server is never fallen through to a real one).
+fm_parrot_server() {
+  local envf="$FM_INJECT_STATE/session-pane.env" b s uid
+  uid=$(id -u 2>/dev/null || echo "")
+  while IFS='|' read -r b s; do
+    if [ -z "$b" ] || [ ! -x "$b" ]; then continue; fi
+    fm_inject_run "$b" "$s" list-panes -a -F '#{pane_id}' >/dev/null 2>&1 || continue
+    FM_TMUX_BIN=$b
+    FM_TMUX_SOCKET=$s
+    export FM_TMUX_BIN FM_TMUX_SOCKET
+    return 0
+  done <<EOF
+$(fm_inject_envget "$envf" FM_SESSION_TMUX_BIN)|$(fm_inject_envget "$envf" FM_SESSION_TMUX_SOCKET)
+$(command -v tmux 2>/dev/null || true)|
+/opt/homebrew/bin/tmux|/tmp/tmux-$uid/default
+/opt/homebrew/bin/tmux|/private/tmp/tmux-$uid/default
+/usr/local/bin/tmux|/tmp/tmux-$uid/default
+/usr/bin/tmux|/tmp/tmux-$uid/default
+EOF
+  return 1
+}
+
+# fm_resolve_parrot_pane: resolve the parrot's pane, committing FM_PARROT_PANE
+# and the fm_tmux target (FM_TMUX_BIN/FM_TMUX_SOCKET). Returns 1 (with
+# FM_PARROT_PANE empty) when there is no reachable server, no fm-parrot session,
+# or the session's pane no longer runs a harness - a vacated pane (bare shell)
+# must never be typed into, same rule as fm_inject_validate.
+fm_resolve_parrot_pane() {
+  local sess="${FM_PARROT_SESSION:-$FM_PARROT_SESSION_DEFAULT}" pane cmd
+  FM_PARROT_PANE=""
+  fm_parrot_server || return 1
+  fm_tmux has-session -t "=$sess" 2>/dev/null || return 1
+  pane=$(fm_tmux list-panes -t "=$sess" -F '#{pane_id}' 2>/dev/null | head -n 1)
+  [ -n "$pane" ] || return 1
+  cmd=$(fm_tmux display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null) || return 1
+  printf '%s' "$cmd" | grep -qiE "$FM_INJECT_HARNESS_RE" || return 1
+  FM_PARROT_PANE=$pane
+  return 0
+}
+
+# fm_inject_parrot_wake: push the wake nudge into the parrot's pane. Same return
+# contract as fm_inject_wake (0 delivered / 1 no pane / 2 deferred on pending
+# input / 3 submit unconfirmed) and the same safety: a composer holding real
+# input defers, never forces. Callers that push to BOTH targets in one process
+# must call the resolvers back to back per push (as fm-poll.sh does via separate
+# run_with_timeout subshells), since both commit FM_TMUX_BIN/FM_TMUX_SOCKET.
+fm_inject_parrot_wake() {
+  local prompt="${FM_PARROT_WAKE_PROMPT:-$FM_PARROT_WAKE_PROMPT_DEFAULT}" state verdict
+  fm_resolve_parrot_pane || return 1
+  state=$(fm_tmux_composer_state "$FM_PARROT_PANE")
+  [ "$state" = pending ] && return 2
+  verdict=$(fm_tmux_submit_core "$FM_PARROT_PANE" "$prompt" 3 0.3 0.15)
+  [ "$verdict" = empty ] && return 0
+  return 3
+}

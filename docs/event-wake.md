@@ -35,6 +35,14 @@ The fix is a push: the instant a wake-worthy event lands in the queue, the polle
   A queue the poller has already nudged (same seq, the session simply slow to drain) is not re-nudged, so the session is never spammed.
   `FM_WAKE_INJECT_DEBOUNCE` (default 8s) caps how often a nudge can fire across cycles.
 
+## The parrot mirror (second registered target, same mechanism)
+
+The parrot (`data/fleet/briefs/parrot-charter.md`, the thin routing-and-status session) gets the same push: each poller cycle, `maybe_inject_parrot_wake` in `bin/fm-poll.sh` mirrors `maybe_inject_wake` against the parrot's own seq/backoff markers (`state/.wake-inject-seq.parrot`, `state/.wake-inject-timeout.parrot`), so the wake feed is the parrot's PRIMARY trigger and its old 60-second polling loop demotes to a 10-minute fallback heartbeat.
+
+- **Resolution by session name, not a registration file.** The parrot lives in a well-known tmux session (default `fm-parrot`, override `FM_PARROT_SESSION`) on the SAME server as the primary session, so `fm_resolve_parrot_pane` (`bin/fm-inject-lib.sh`) resolves the server from `state/session-pane.env` (with the discovery fallbacks only when no primary has registered), then finds the session's pane and validates its foreground command still looks like a harness. The first reachable server is authoritative: no parrot session there means no parrot, never "try another server".
+- **Absence is silent.** No `fm-parrot` session (or a vacated pane) is a no-op with no log line, because a parrot is optional by design; the durable queue and the parrot's fallback heartbeat carry the event. This differs from the primary's once-per-outage "no firstmate pane" line.
+- **Same safety, independent markers.** The push reuses the ghost-aware composer detection and verified submit, defers on pending input, runs under the same watchdog and timeout backoff, and never mutates the queue. Its seq marker advances only on confirmed delivery and is independent of the primary's, so one target's delivery never masks the other's. `FM_PARROT_WAKE_INJECT=0` disables just the mirror; `FM_WAKE_INJECT=0` disables both pushes.
+
 ## Degradation
 
 Every failure mode degrades to the pre-existing behavior and never loses a wake:
@@ -58,3 +66,4 @@ Once the new `bin/fm-poll.sh` is live, verify the push end to end:
 
 - `tests/fm-inject-wake.test.sh` - pane resolution, delivery, pending-input deferral, stale-record rejection, and discovery fallback against a private-socket tmux pane; plus pure-logic units (envget parsing, pid ancestry).
 - `tests/fm-poll-inject-e2e.test.sh` - the real `bin/fm-poll.sh` pushing its synthetic startup wake and an appended board wake into a private-socket pane, the seq-tracking no-repeat guarantee, and `FM_WAKE_INJECT=0` disabling the push while the queue still fills.
+- `tests/fm-parrot-wake.test.sh` - the parrot mirror against a fake tmux: delivery when `fm-parrot` exists, silent no-op when absent or vacated, deferral on pending composer input, the primary push unaffected alongside the parrot's, and the real poller loop advancing the parrot seq marker independently.

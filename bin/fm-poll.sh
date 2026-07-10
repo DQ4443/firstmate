@@ -62,6 +62,18 @@ INJECT_TIMEOUT_BACKOFF=${FM_WAKE_INJECT_TIMEOUT_BACKOFF:-300}  # seconds between
 case "$INJECT_TIMEOUT_BACKOFF" in ''|*[!0-9]*) INJECT_TIMEOUT_BACKOFF=300 ;; esac
 INJECT_PANE_FILE="$STATE/.wake-inject.pane.$$"
 
+# Parrot mirror of the wake push: the same nudge, delivered to the parrot
+# session's pane (bin/fm-inject-lib.sh fm_inject_parrot_wake;
+# data/fleet/briefs/parrot-charter.md) so the parrot's primary trigger is the
+# event feed, not its old polling loop. Independent seq/backoff markers so
+# primary and parrot deliveries never mask each other. A missing fm-parrot
+# session is a SILENT no-op every cycle (a parrot is optional by design),
+# unlike the primary's once-per-outage nopane line. FM_PARROT_WAKE_INJECT=0
+# disables just the parrot mirror; FM_WAKE_INJECT=0 disables both pushes.
+PARROT_SEQ_FILE="$STATE/.wake-inject-seq.parrot"
+PARROT_TIMEOUT_MARK="$STATE/.wake-inject-timeout.parrot"
+PARROT_PANE_FILE="$STATE/.wake-inject.parrot-pane.$$"
+
 # Headless board drain (Phase 0 first-class trigger; docs/headless-drain.md). When
 # there is un-drained board activity (wake-queue seq beyond .drain-attempted-seq)
 # and NO interactive REPL is reachable, the poller spawns bin/fm-drain-worker.sh -
@@ -215,6 +227,72 @@ maybe_inject_wake() {
       ;;
     *)
       [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: wake push deferred/unconfirmed rc=$rc (seq $cur)" >&2
+      ;;
+  esac
+  return 0
+}
+
+# Worker for the guarded parrot push, mirroring inject_push_worker: the resolved
+# pane travels through a side file because the worker runs in run_with_timeout's
+# subshell.
+parrot_push_worker() {
+  fm_inject_parrot_wake
+  local rc=$?
+  printf '%s' "${FM_PARROT_PANE:-}" > "$PARROT_PANE_FILE" 2>/dev/null || true
+  return "$rc"
+}
+
+# maybe_inject_parrot_wake: mirror of maybe_inject_wake for the parrot target -
+# same undelivered-seq gate, same debounce, same watchdog belt and timeout
+# backoff, against the parrot's own marker files. The one contract difference:
+# rc 1 (no fm-parrot session or a vacated pane) is fully silent, because a
+# parrot's absence is its normal state, not an outage; the durable queue and the
+# parrot's own fallback heartbeat carry the event exactly as before. Never
+# mutates the queue, and the parrot seq marker only advances on a confirmed
+# delivery, so a killed or deferred push is retried on a later cycle.
+maybe_inject_parrot_wake() {
+  [ "${FM_WAKE_INJECT:-1}" = 1 ] || return 0
+  [ "${FM_PARROT_WAKE_INJECT:-1}" = 1 ] || return 0
+  [ -s "$FM_WAKE_QUEUE" ] || return 0
+  local cur last age rc now pane
+  cur=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || echo 0)
+  case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+  last=$(cat "$PARROT_SEQ_FILE" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ "$cur" -gt "$last" ] || return 0
+  if [ -f "$PARROT_SEQ_FILE" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$PARROT_SEQ_FILE" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_DEBOUNCE" ] || return 0
+  fi
+  if [ -f "$PARROT_TIMEOUT_MARK" ]; then
+    now=$(date +%s)
+    age=$(( now - $(fm_path_mtime "$PARROT_TIMEOUT_MARK" 2>/dev/null || echo 0) ))
+    [ "$age" -ge "$INJECT_TIMEOUT_BACKOFF" ] || return 0
+  fi
+  rm -f "$PARROT_PANE_FILE" 2>/dev/null || true
+  run_with_timeout "$INJECT_TIMEOUT" parrot_push_worker
+  rc=$?
+  pane=$(cat "$PARROT_PANE_FILE" 2>/dev/null || true)
+  rm -f "$PARROT_PANE_FILE" 2>/dev/null || true
+  case "$rc" in
+    0)
+      printf '%s\n' "$cur" > "$PARROT_SEQ_FILE"
+      rm -f "$PARROT_TIMEOUT_MARK" 2>/dev/null || true
+      echo "fm-poll: pushed board wake to parrot pane $pane (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')"
+      ;;
+    1)
+      # No fm-parrot session/pane: silent no-op by contract (debug line only).
+      [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: no parrot pane; skipped parrot push (seq $cur)" >&2
+      ;;
+    99)
+      if [ ! -f "$PARROT_TIMEOUT_MARK" ]; then
+        echo "fm-poll: parrot wake push killed at ${INJECT_TIMEOUT}s (wedged tmux server?); backing off ${INJECT_TIMEOUT_BACKOFF}s between attempts (seq $cur) $(date '+%Y-%m-%dT%H:%M:%S%z')" >&2
+      fi
+      touch "$PARROT_TIMEOUT_MARK" 2>/dev/null || true
+      ;;
+    *)
+      [ "${FM_POLL_DEBUG:-0}" = 1 ] && echo "fm-poll: parrot wake push deferred/unconfirmed rc=$rc (seq $cur)" >&2
       ;;
   esac
   return 0
@@ -504,6 +582,7 @@ while :; do
     fm_wake_append check "$c" "check: $c: $out" || true
   done
   maybe_inject_wake
+  maybe_inject_parrot_wake
   maybe_drain_headless
   maybe_pager
   maybe_reconcile_board
