@@ -119,7 +119,7 @@ fi
 
 if [ "$#" -eq 1 ]; then
   task_id=$1
-  [ "$task_id" != "-h" ] && [ "$task_id" != "--help" ] || { usage; exit 0; }
+  if [ "$task_id" = "-h" ] || [ "$task_id" = "--help" ]; then usage; exit 0; fi
   [ -f "$REGISTRY" ] || { echo "fm-codex-status: no registry at $REGISTRY" >&2; exit 1; }
   python3 - "$REGISTRY" "$task_id" <<'PY'
 import json

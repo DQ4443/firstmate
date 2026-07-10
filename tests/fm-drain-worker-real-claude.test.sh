@@ -42,7 +42,7 @@ if [ -z "$CLAUDE_BIN" ]; then
     [ -x "$c" ] && { CLAUDE_BIN="$c"; break; }
   done
 fi
-[ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ] || { echo "skip: no real claude binary resolvable"; exit 0; }
+if [ -z "$CLAUDE_BIN" ] || [ ! -x "$CLAUDE_BIN" ]; then echo "skip: no real claude binary resolvable"; exit 0; fi
 
 WORKER="$ROOT/bin/fm-drain-worker.sh"
 SANDBOX=$(fm_test_tmproot fm-drain-real)

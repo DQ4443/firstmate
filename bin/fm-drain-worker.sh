@@ -197,7 +197,7 @@ dead_letter() {  # <cur-seq> <reason>
     printf '%s\tseq=%s\t%s\n' "$ts" "$cur" "$reason"
     unanswered_threads | sed 's/^/  unanswered: /'
   } >> "$DEADLETTER" 2>/dev/null || true
-  [ -x "$PAGER" ] && "$PAGER" page "headless drain dead-lettered at seq $cur: $reason" >/dev/null 2>&1 || true
+  if [ -x "$PAGER" ]; then "$PAGER" page "headless drain dead-lettered at seq $cur: $reason" >/dev/null 2>&1 || true; fi
   log "DEAD-LETTER seq=$cur ($reason); paged and advancing attempted-seq"
 }
 

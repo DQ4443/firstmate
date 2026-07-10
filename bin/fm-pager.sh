@@ -31,7 +31,7 @@ CONFIG="${FM_PAGER_CONFIG:-$FM_HOME/config/pager.env}"
 # Load config if present. It only sets the fixed FM_PAGER_* tokens; parse-free
 # sourcing is acceptable here because the file is operator-authored local config.
 # shellcheck source=/dev/null
-[ -f "$CONFIG" ] && . "$CONFIG" 2>/dev/null || true
+if [ -f "$CONFIG" ]; then . "$CONFIG" 2>/dev/null || true; fi
 
 CURL_TIMEOUT=${FM_PAGER_CURL_TIMEOUT:-10}
 case "$CURL_TIMEOUT" in ''|*[!0-9]*) CURL_TIMEOUT=10 ;; esac
