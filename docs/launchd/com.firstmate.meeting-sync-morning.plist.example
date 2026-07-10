@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EXAMPLE ONLY - DO NOT INSTALL FROM THIS LEAF.
+
+  launchd alternative for the MORNING meeting-sync fire, which runs ONLY on
+  Monday and Friday (the Mon/Fri Eric-driven morning sync, meetings-cadence.md).
+  launchd StartCalendarInterval supports an array of dicts to fire on multiple
+  weekdays (Weekday 1 = Monday, 5 = Friday). Same design caveats as the EOD
+  plist: CronCreate is the preferred trigger; this is the shipped-uninstalled
+  launchd alternative, registered only at the Phase 5 gate after a proven hand-run.
+
+  SLOT IDENTITY: computes today's MORNING slot from $(date +%F). Stage A is
+  slot-scoped to the 06:00-13:00 PT window so it never picks up the prior EOD.
+
+  TIMEZONE / DST / DEPENDENCY / INSTALL: identical to the EOD plist; see that
+  file's header. Host must be America/Los_Angeles; the run self-defends by
+  re-deriving its PT slot from fire-time.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.meeting-sync-morning</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>/Users/dq4443/dev/personal/firstmate/bin/fm-meeting-sync.sh --slot "$(date +%F)/morning" --dry-run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key><integer>1</integer>
+      <key>Hour</key><integer>10</integer>
+      <key>Minute</key><integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key><integer>5</integer>
+      <key>Hour</key><integer>10</integer>
+      <key>Minute</key><integer>0</integer>
+    </dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/meeting-sync-morning.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dq4443/dev/personal/firstmate/data/meeting-sync-audit/meeting-sync-morning.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
