@@ -1,0 +1,14 @@
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+
+[agents.planner]
+description = "Divergent read-only mapper for the Map phase."
+config_file = "agents/planner.toml"
+
+[agents.implementer]
+description = "Convergent writer for one reviewed implementation leaf."
+config_file = "agents/implementer.toml"
+
+[agents.refute-reviewer]
+description = "Read-only adversarial reviewer for the Review phase."
+config_file = "agents/refute-reviewer.toml"
