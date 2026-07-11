@@ -82,7 +82,7 @@ def block(name):
 
 decision = block("DECISION ZONE")
 sidebar = block("DYNAMIC SIDEBAR")
-for token in ("What", "Why now", "Why / why not", "Cost / risk", "{{BENEFIT}}", "{{COST}}", "<details", "tabbar.offsetTop", "press Command-C", "[data-decision]", "[data-question]"):
+for token in ("What", "Why now", "Why / why not", "Cost / risk", "david-warm-option-template", "david-warm-question-template", "spec.options.length < 2", "spec.options.length > 4", "spec.options.forEach", "input.checked = index === 0", "fallback.hidden = false", "fallback.select()", "<details", "tabbar.offsetTop", "press Command-C", "[data-decision]", "[data-question]"):
     assert token in decision
 for forbidden in ("for (const id of ['D1','D2'])", "data-question=\"Q1\""):
     assert forbidden not in decision
@@ -108,7 +108,24 @@ for script in "$tmp"/components/script-*.js; do
 done
 pass "deterministic fixture supports arbitrary IDs and byte-identical generic components"
 
-python3 "$VALIDATOR" --lavish "$LAVISH" --evals "$EVALS" --oat "$OAT" --decision "$DECISION" --sidebar "$SIDEBAR" >"$tmp/validate.out"
+cp "$tmp/lf.html" "$tmp/duplicate.html"
+python3 - "$tmp/duplicate.html" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+marker = "<!-- ==================== COPY VERBATIM: DECISION ZONE ====================== -->"
+assert text.count(marker) == 1
+path.write_text(text.replace(marker, marker + "\n" + marker, 1), encoding="utf-8")
+PY
+if python3 "$INSTALLER" "$tmp/duplicate.html" >"$tmp/duplicate.out" 2>"$tmp/duplicate.err"; then
+  fail "installer accepted duplicate canonical markers"
+fi
+assert_grep 'duplicate DECISION ZONE component marker' "$tmp/duplicate.err" "duplicate marker failure is not explicit"
+pass "installer rejects duplicate canonical markers"
+
+python3 "$VALIDATOR" --lavish "$LAVISH" --evals "$EVALS" --oat "$OAT" --decision "$DECISION" --sidebar "$SIDEBAR" --installer "$INSTALLER" >"$tmp/validate.out"
 
 mutate_and_reject() {
   local label=$1 file=$2 old=$3 new=$4
@@ -119,6 +136,7 @@ mutate_and_reject() {
   cp "$OAT" "$dir/oat.md"
   cp "$DECISION" "$dir/decision.md"
   cp "$SIDEBAR" "$dir/sidebar.md"
+  cp "$INSTALLER" "$dir/installer.py"
   python3 - "$dir/$file" "$old" "$new" <<'PY'
 import pathlib
 import sys
@@ -128,7 +146,7 @@ text = path.read_text(encoding="utf-8")
 assert sys.argv[2] in text
 path.write_text(text.replace(sys.argv[2], sys.argv[3], 1), encoding="utf-8")
 PY
-  if python3 "$VALIDATOR" --lavish "$dir/lavish.md" --evals "$dir/evals.md" --oat "$dir/oat.md" --decision "$dir/decision.md" --sidebar "$dir/sidebar.md" >"$dir/out" 2>"$dir/err"; then
+  if python3 "$VALIDATOR" --lavish "$dir/lavish.md" --evals "$dir/evals.md" --oat "$dir/oat.md" --decision "$dir/decision.md" --sidebar "$dir/sidebar.md" --installer "$dir/installer.py" >"$dir/out" 2>"$dir/err"; then
     fail "validator accepted mutation: $label"
   fi
 }
@@ -148,7 +166,18 @@ mutate_and_reject style-owner oat.md 'only source of visual tokens and component
 mutate_and_reject arbitrary-ids decision.md 'arbitrary page-scoped `Dn`, `On`, and `Qn`' 'fixed D1 and D2 identifiers'
 mutate_and_reject decision-source decision.md 'DAVID_WARM_COMPONENT_FILE' 'hardcoded component path'
 mutate_and_reject sidebar-source sidebar.md 'DAVID_WARM_COMPONENT_FILE' 'hardcoded component path'
-mutate_and_reject dynamic-sidebar sidebar.md 'Build round links at load time' 'Maintain a hand-written round list'
+mutate_and_reject nav-fields sidebar.md 'data-nav="<group>|<status-glyph>|<label>"' 'data-nav="<status>|<label>"'
+mutate_and_reject nav-parser installer.py "const [group,status,label] = section.dataset.nav.split('|');" "const [status,label] = section.dataset.nav.split('|');"
+mutate_and_reject option-range installer.py 'spec.options.length < 2 || spec.options.length > 4' 'spec.options.length < 1 || spec.options.length > 6'
+mutate_and_reject option-repeat installer.py 'spec.options.forEach((option, index) =>' 'spec.options.slice(0, 1).forEach((option, index) =>'
+mutate_and_reject recommended-gate installer.py 'spec.options[0].recommended !== true' 'spec.options[0].recommended === true'
+mutate_and_reject checked-state installer.py 'input.checked = index === 0;' 'input.checked = false;'
+mutate_and_reject question-template installer.py '<textarea class="qtext" data-question="{{Q_ID}}"' '<div class="qtext" data-question="{{Q_ID}}"'
+mutate_and_reject input-binding installer.py 'bindInputs(fragment);' 'compose();'
+mutate_and_reject fallback-visible installer.py 'fallback.hidden = false;' 'fallback.hidden = true;'
+mutate_and_reject fallback-select installer.py 'fallback.select();' 'area.select();'
+mutate_and_reject manual-visible installer.py 'instruction.hidden = false;' 'instruction.hidden = true;'
+mutate_and_reject duplicate-markers installer.py 'if open_count > 1 or close_count > 1:' 'if open_count > 2 or close_count > 2:'
 pass "hostile mutations protect component ownership and Lavish interaction contracts"
 
 assert_no_grep 'COPY VERBATIM: EXECUTABLE MERMAID' "$OAT" "Oat claims unverified executable Mermaid"

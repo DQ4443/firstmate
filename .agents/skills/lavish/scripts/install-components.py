@@ -35,14 +35,18 @@ COMPONENTS = {
       <tr><th>Why / why not</th><td>{{WHY_WHY_NOT}}</td></tr>
       <tr><th>Cost / risk</th><td>{{COST_RISK}}</td></tr>
     </tbody></table></div>
-    <div class="opt pick" data-option-card="{{O_ID}}"><div class="oh">{{O_ID}} &middot; Recommended<span class="pill">recommended</span></div><div class="od">{{DESCRIPTION}}</div><div class="pro">+ {{BENEFIT}}</div><div class="con">- {{COST}}</div></div>
-    <input data-decision="{{D_ID}}" type="radio" name="{{D_ID}}" value="{{O_ID}}" checked>
+    <div data-options-for="{{D_ID}}"></div>
     <input class="dnote" data-note="{{D_ID}}" aria-label="{{D_ID}} note" placeholder="Optional note">
   </section>
-  <textarea class="qtext" data-question="{{Q_ID}}" aria-label="{{Q_ID}} answer"></textarea>
   <details data-decided="{{D_ID}}"><summary>{{D_ID}} decided: {{PICK}}</summary><div>{{PRESERVED_DECISION_CONTENT}}</div></details>
 </template>
-<div class="replybar" data-replybar><code data-reply></code><button data-copy-reply type="button">Copy</button><span class="copy-manual" data-copy-manual>If Copy is blocked, select the reply and press Command-C.</span></div>
+<template id="david-warm-option-template">
+  <label class="opt" data-option-card="{{O_ID}}"><span class="oh" data-option-heading></span><span class="od" data-option-description></span><span class="pro" data-option-benefit></span><span class="con" data-option-cost></span><input data-decision="{{D_ID}}" value="{{O_ID}}"></label>
+</template>
+<template id="david-warm-question-template">
+  <label data-question-block="{{Q_ID}}"><span data-question-label></span><textarea class="qtext" data-question="{{Q_ID}}" aria-label="{{Q_ID}} answer"></textarea></label>
+</template>
+<div class="replybar" data-replybar><code data-reply></code><button data-copy-reply type="button">Copy</button><textarea class="qtext" data-copy-fallback aria-label="Selectable reply text" hidden></textarea><span class="copy-manual" data-copy-manual hidden>If Copy is blocked, select the reply text here and press Command-C.</span></div>
 <script>
 (() => {
   const compose = () => {
@@ -60,7 +64,55 @@ COMPONENTS = {
     const reply = document.querySelector('[data-reply]');
     if (reply) reply.textContent = parts.join(' | ');
   };
-  document.querySelectorAll('[data-decision],[data-note],[data-question]').forEach(node => node.addEventListener('input', compose));
+  const replace = (root, token, value) => {
+    root.querySelectorAll('*').forEach(node => {
+      [...node.attributes].forEach(attribute => { if (attribute.value.includes(token)) node.setAttribute(attribute.name, attribute.value.replaceAll(token, value)); });
+    });
+  };
+  const bindInputs = root => root.querySelectorAll('[data-decision],[data-note],[data-question]').forEach(node => node.addEventListener('input', compose));
+  const instantiateDecision = spec => {
+    if (!spec || !/^D[1-9][0-9]*$/.test(spec.id) || !Array.isArray(spec.options) || spec.options.length < 2 || spec.options.length > 4) throw new Error('decision requires a Dn id and two to four options');
+    if (spec.options[0].recommended !== true || spec.options.slice(1).some(option => option.recommended)) throw new Error('the first option must be the only Recommended option');
+    if (new Set(spec.options.map(option => option.id)).size !== spec.options.length || spec.options.some(option => !/^O[1-9][0-9]*$/.test(option.id))) throw new Error('option IDs must be unique On values');
+    const template = document.getElementById('david-warm-decision-template');
+    const optionTemplate = document.getElementById('david-warm-option-template');
+    if (!template || !optionTemplate) throw new Error('decision templates unavailable');
+    const fragment = template.content.cloneNode(true);
+    replace(fragment, '{{D_ID}}', spec.id);
+    const rows = fragment.querySelectorAll('tbody td');
+    [spec.what, spec.whyNow, spec.whyWhyNot, spec.costRisk].forEach((value, index) => { rows[index].textContent = value || ''; });
+    const options = fragment.querySelector(`[data-options-for="${spec.id}"]`);
+    spec.options.forEach((option, index) => {
+      const optionFragment = optionTemplate.content.cloneNode(true);
+      replace(optionFragment, '{{D_ID}}', spec.id);
+      replace(optionFragment, '{{O_ID}}', option.id);
+      const card = optionFragment.querySelector('[data-option-card]');
+      card.classList.toggle('pick', index === 0);
+      card.querySelector('[data-option-heading]').innerHTML = `${option.id}${index === 0 ? ' &middot; Recommended<span class="pill">recommended</span>' : ''}`;
+      card.querySelector('[data-option-description]').textContent = option.description || '';
+      card.querySelector('[data-option-benefit]').textContent = `+ ${option.benefit || ''}`;
+      card.querySelector('[data-option-cost]').textContent = `- ${option.cost || ''}`;
+      const input = card.querySelector('[data-decision]');
+      input.type = spec.multiple ? 'checkbox' : 'radio';
+      input.name = spec.id;
+      input.checked = index === 0;
+      options.appendChild(optionFragment);
+    });
+    bindInputs(fragment);
+    return fragment;
+  };
+  const instantiateQuestion = spec => {
+    if (!spec || !/^Q[1-9][0-9]*$/.test(spec.id)) throw new Error('question requires a Qn id');
+    const template = document.getElementById('david-warm-question-template');
+    if (!template) throw new Error('question template unavailable');
+    const fragment = template.content.cloneNode(true);
+    replace(fragment, '{{Q_ID}}', spec.id);
+    fragment.querySelector('[data-question-label]').textContent = spec.label || spec.id;
+    bindInputs(fragment);
+    return fragment;
+  };
+  window.DavidWarmDecisionZone = {instantiateDecision,instantiateQuestion,compose};
+  bindInputs(document);
   document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
     const tabbar = button.closest('.tabbar');
     document.querySelectorAll('[data-tab],.tab').forEach(node => node.classList.remove('on'));
@@ -83,6 +135,12 @@ COMPONENTS = {
       area.select();
       if (!document.execCommand('copy')) {
         const instruction = document.querySelector('[data-copy-manual]');
+        const fallback = document.querySelector('[data-copy-fallback]');
+        if (fallback) {
+          fallback.value = text;
+          fallback.hidden = false;
+          fallback.select();
+        }
         if (instruction) instruction.hidden = false;
       }
       area.remove();
@@ -152,8 +210,12 @@ def install(source: Path, output: Path) -> None:
     for name in COMPONENTS:
         open_marker = f"COPY VERBATIM: {name}"
         close_marker = f"/COPY VERBATIM: {name}"
-        opened = open_marker in text
-        closed = close_marker in text
+        close_count = text.count(close_marker)
+        open_count = text.count(open_marker) - close_count
+        if open_count > 1 or close_count > 1:
+            raise ValueError(f"unknown or unsafe substrate: duplicate {name} component marker")
+        opened = open_count == 1
+        closed = close_count == 1
         if opened != closed:
             raise ValueError(f"unknown or unsafe substrate: partial {name} component")
         component = component_block(name, newline)

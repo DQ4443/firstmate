@@ -20,7 +20,7 @@ Each open-decision button uses a page-scoped `data-tab` value and contains the d
 
 Each `.tab` pane contains the four-row context table, `.opt` cards, and one `.dnote` input.
 
-The Questions pane contains real `.qtext` textareas.
+The Questions pane contains real `.qtext` textareas created by the canonical question template.
 
 The fixed `.replybar` contains `<code id="reply">` and a Copy button.
 
@@ -31,6 +31,12 @@ Do not reimplement their CSS in the page.
 ## JavaScript behavior
 
 Use the canonical generic behavior, which discovers arbitrary page-scoped `Dn`, `On`, and `Qn` values from data attributes.
+
+Instantiate each decision from a specification with two to four options by calling the canonical `instantiateDecision()` carrier.
+
+The first option is the only Recommended option and the carrier checks it by default.
+
+Instantiate every short-answer question with `instantiateQuestion()` so its real textarea is bound to `compose()`.
 
 Do not hardcode D1, D2, O1, O2, or Q1 into the behavior.
 
@@ -48,7 +54,7 @@ The Copy button first tries `navigator.clipboard.writeText`.
 
 On rejection or unavailability, it tries `document.execCommand('copy')` on a temporary textarea.
 
-If that also fails, it selects the reply text and exposes the visible instruction to press Command-C.
+If that also fails, it keeps a visible selectable textarea containing the reply text while it exposes the instruction to press Command-C.
 
 A bare promise success handler without rejection handling fails this contract.
 

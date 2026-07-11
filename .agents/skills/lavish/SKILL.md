@@ -43,7 +43,7 @@ Do not run `lavish-axi share`, do not publish to `ht-ml.app`, and do not send th
 
 The reply bar and its Copy button are the page's response channel.
 
-The Copy button must try `navigator.clipboard.writeText`, fall back to `document.execCommand('copy')` on a temporary textarea, then select the text and tell the reader to press Command-C.
+The Copy button must try `navigator.clipboard.writeText`, fall back to `document.execCommand('copy')` on a temporary textarea, then keep a selectable textarea visible with the manual Command-C instruction if both methods fail.
 
 Keep one living page per workstream.
 
@@ -102,6 +102,8 @@ Use stable page-scoped IDs `D1`, `D2`, and later.
 Each block starts with a four-row context table named `What`, `Why now`, `Why / why not`, and `Cost / risk`.
 
 Each block has two to four option cards.
+
+Instantiate and repeat those cards through the canonical generic decision carrier rather than hand-writing a fixed option count.
 
 The Recommended option is first and preselected.
 

@@ -56,7 +56,9 @@ Use `overflow-y:auto` and `overscroll-behavior:contain`.
 
 Keep entries above the reply bar.
 
-Build round links at load time from a `data-nav="<status-class>|<label>"` attribute on each round section.
+Build links at load time from a `data-nav="<group>|<status-glyph>|<label>"` attribute on each indexed section.
+
+Use `main`, `round`, or `decision` as the group field.
 
 Do not maintain a second hand-written round list.
 
