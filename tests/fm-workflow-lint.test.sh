@@ -116,11 +116,16 @@ expect_block "(c) export const metadata does not satisfy the meta requirement" \
 const b = agent(\`x\`, { model: 'opus' });"
 
 # --- (d) swarm-contract size (agent-task-sizing pin) --------------------------
-# A LONE WRITER agent (its prompt carries 'worktree add' / 'commit before
-# returning') grinding an enumerated multi-part prompt is the named anti-pattern.
-# BLOCK when there is exactly one writer and its prompt enumerates 3+ concerns
-# ((N) or N. line starts); the escape comment and any multi-writer swarm ALLOW.
-# All (d) scripts below are (a)/(b)/(c)-compliant so only (d) can be the blocker.
+# A single agent grinding an enumerated multi-part prompt is the named anti-
+# pattern. Two triggers, either fires: (d1) exactly ONE writer-brief agent (its
+# prompt carries 'worktree add' / 'commit before returning') enumerates 3+
+# concerns, optionally trailed by a lone reviewer (the build+gate shape); (d2)
+# the script's TOTAL agent() count is 1 and that sole agent enumerates 3+
+# concerns, WHETHER OR NOT it is a writer (the swarm contract covers ALL work,
+# so a lone read-only scout grinding many concerns blocks too). Concern markers
+# are (N) or N. line starts in template PROSE. The escape comment and any
+# multi-writer (2+) swarm ALLOW. All (d) scripts below are (a)/(b)/(c)-compliant
+# so only (d) can be the blocker.
 
 expect_block "(d) a single writer agent enumerating 3 concerns is blocked" \
   "$META
@@ -190,14 +195,21 @@ const a3 = agent(\`worktree add /r/.claude/worktrees/w3 -b x; commit before retu
 const a4 = agent(\`worktree add /r/.claude/worktrees/w4 -b x; commit before returning. one focused thing\`, { model: 'opus' });
 const a5 = agent(\`worktree add /r/.claude/worktrees/w5 -b x; commit before returning. another\`, { model: 'opus' });"
 
-# Enumerated concerns in a READ-ONLY scout (no writer marker) are not the writer-
-# grinding shape, so (d) does not fire (0 writers).
-expect_allow "(d) enumerated concerns in a read-only scout prose (no writer) are not blocked" \
+# (d2) The swarm contract covers ALL work: when the WHOLE script is a single
+# agent, 3+ enumerated concerns block even a read-only scout (no writer marker).
+# This is the new law: total agent() count == 1 blocks regardless of writer shape.
+expect_block "(d2) a lone read-only scout (only agent) enumerating 3 concerns is blocked" \
   "$META
 const s = agent(\`Research task, cover:
 (1) one
 (2) two
 (3) three\`, { model: 'opus' });"
+
+# A single-agent single-concern prose brief (no writer marker, no enumeration) is
+# a genuine leaf and ALLOWs: (d2) only fires at 3+ concerns.
+expect_allow "(d2) a single-agent single-concern prose brief still allows" \
+  "$META
+const s = agent(\`Research the one focused question and report back with citations.\`, { model: 'opus' });"
 
 # Enumerations in trailing return/schema CODE are never masked, so raw==masked
 # there and they do not count: only the 2 real prompt concerns count => pass.
@@ -280,5 +292,60 @@ if jq -n --arg p "$msyncfile" '{tool_input: {scriptPath: $p}}' | "$HOOK" >/dev/n
   fail "(d) the real meeting-sync-pipeline-fix script (one grinding writer) should BLOCK"
 fi
 pass "(d) the real meeting-sync-pipeline-fix script blocks (one writer grinding four concerns)"
+
+
+# --- (d2) the real trigger, embedded verbatim --------------------------------
+# The demo-feature-surfacing script David killed: a SINGLE non-writer agent whose
+# prompt enumerates THREE concerns ((1) backend SHA, (2) thinking emitter, (3)
+# beat-1 plan ask). Under the swarm contract "covers ALL work" law this is the
+# grinding shape even with no writer marker, so total agent() count == 1 with 3
+# concerns must BLOCK. Embedded verbatim (quoted heredoc preserves backticks/${}).
+demofile="$TMP_ROOT/demo-feature-surfacing.js"
+cat > "$demofile" <<'JS'
+export const meta = {
+  name: 'demo-feature-surfacing',
+  description: 'Make Eddie\'s live features visible in the take: backend SHA check/redeploy, thinking-emitter knob, beat-1 plan ask',
+  phases: [{ title: 'Surface' }],
+}
+const REPO = '/Users/dq4443/dev/personal/firstmate/projects/kronosai_agentic_simulation'
+const D = '/Users/dq4443/dev/personal/firstmate/data/demo-252'
+const r = await agent(`Demo feature-surfacing, three small items, evidence per item (loop grant; flag anything bigger than expected instead of doing it):
+(1) BACKEND SHA: what commit does the Railway backend (project kronos-mvp, service backend) run right now? (railway deployment list / status). Eddie's newest backend commits are da95737, 32dd98f, 1eeb1e2 (direct pushes to main this evening). If the backend predates them, trigger its redeploy from main (railway up --ci from a fresh main worktree, or redeploy the latest commit via the dashboard-equivalent CLI) and poll to SUCCESS. These carry his artifact-visibility work (partial ENG-277).
+(2) THINKING EMITTER: the production orchestrator defaults to NullThinkingEmitter (no-op), so Eddie's thinking-token streaming (ChatRail ThinkingIndicator, backend chat_thinking SSE from project/view.py ~564) shows nothing. Find the configuration seam in code (grep NullThinkingEmitter / ThinkingEmitter wiring in orchestrator.py + settings): is there an env var or config flag that enables a real emitter? If YES and it is env-only: set it on the Railway backend (name the var in your return), redeploy, and verify a chat turn emits chat_thinking frames (drive one tiny prompt in a throwaway project via the CDP :9223 browser, watch the SSE/network or the indicator). If enabling requires CODE changes: do NOT write code; return the exact change needed as a proposal.
+(3) BEAT-1 PLAN ASK: edit ${D}/script-v3.md beat 1's TYPE prompt to ask the agent to propose a plan first (insert "Plan the approach first, then" naturally into the existing ask; keep everything else byte-identical) so the plan card + step progress render on camera. Note the change for the caption/narration alignment (beat 1 narration mentions describing the problem; it stays true).
+RETURN: backend sha before/after, the emitter knob (name + set or the code proposal), the beat-1 diff, and evidence per item.`, { label: 'feature-surfacing', phase: 'Surface', model: 'opus' })
+return { r, NEXT_STEP: 'firstmate: fold into the take gate; the take rolls when round-4 READY + this returns.' }
+JS
+if jq -n --arg p "$demofile" '{tool_input: {scriptPath: $p}}' | "$HOOK" >/dev/null 2>&1; then
+  fail "(d2) the real demo-feature-surfacing script (one non-writer agent, 3 concerns) should BLOCK"
+fi
+pass "(d2) the real demo-feature-surfacing script blocks (single agent grinding three concerns)"
+
+# --- (d2) boundary: a single-agent script with NO (N)/N. enumeration ----------
+# The script-v4-website-shape script David also killed: a SINGLE non-writer agent
+# authoring one document. Its prompt describes structure as ACT 1/2/3 prose but
+# carries ZERO (N)/N. line-start concern markers, so the (N)/N.-keyed size rule
+# does not fire and it ALLOWs. Embedded verbatim to pin that boundary: the
+# mechanical detector keys on (N)/N. markers only (the pinned law), so a prose-
+# described multi-step task without them is not caught. FLAGGED TO DAVID: if he
+# wants prose-step tasks like this caught, that is a separate widening of the
+# marker detection beyond the current (N)/N. scope, not this change.
+v4file="$TMP_ROOT/script-v4-website-shape.js"
+cat > "$v4file" <<'JS'
+export const meta = {
+  name: 'script-v4-website-shape',
+  description: 'Script v4: the kronosai.co mechanical-demo shape as the spine (conversational, plan, gates, static solve, follow-up), features woven, STL chain as a segment; narration re-rendered where changed',
+  phases: [{ title: 'Author' }],
+}
+const D = '/Users/dq4443/dev/personal/firstmate/data/demo-252'
+const r = await agent(`Author ${D}/script-v4.md, the corrected demo script. David's reframe (verbatim intent): "the point of the video is to demonstrate our platform. It should be as similar as possible to the mechanical demo on the Kronos website, with all the features we have added woven in. STL is just ONE possible input, not the start."
+READ FIRST: /Users/dq4443/dev/work/kronos-docs/demos/mvp-demo-spec.html (the canonical beat sheet: what "match the demo" means: same cell sequence, cell types, deliverable class; clarifying question + wait; explicit run-confirmation gates; numbered Plan with an N-of-M counter; post-result follow-up answered from computed results WITHOUT re-running); the intent buckets in the meeting-sync extraction (${'/Users/dq4443/dev/personal/firstmate'}/state/msync-extract-2026-07-10-morning.json, esp. the Jul-6 "single solid L-bracket, mark a side fixed" scenario and "static elasticity not modal" discipline); ${D}/script-v3.md (reuse its verified choreography facts, prompts, fallbacks, and tutorial narration voice); ${D}/style-notes.md (all rules bind: splice rule, tutorial voice, honesty).
+STRUCTURE v4: ACT 1, the website-demo replay on our platform (the spine, ~half the runtime): conversational ask about the bracket (static stress, NOT modal; never promise modal), agent asks a clarifying question and waits, agent proposes the PLAN (Eddie's pinned plan card + N-of-M progress on camera), explicit solve-gate confirmations, solve with the live progress panel, results render, then a follow-up question answered from the just-computed results without re-running. Use the input mode that makes this spine bulletproof (the .msh with named groups lane is proven end to end; or built-in geometry if the mvp-demo-spec names one). ACT 2, "bring your own CAD" (the differentiator segment): the full STL chain: upload, recognition, click-select faces in the picker, gmsh meshing with named sidesets, solve on the produced mesh (this is the ENG-285+261 showcase; reuse v3 beats 2-8). ACT 3, close: the honest-refusal beat if it fits naturally + the wrap. Target 6-9 minutes.
+FORMAT: same per-beat contract as v3 (ON SCREEN exact prompts/clicks, NARRATION tutorial voice, CAPTION, TARGET seconds, FALLBACK). Then: diff the narration lines against v3; for UNCHANGED lines map to the existing audio-openai-v3 wavs (name the mapping); for NEW/CHANGED lines render them with the existing ${D}/audio-openai-v3/render_openai_v3.py (same onyx voice, key from the tracker Railway env, never printed) into audio-openai-v4/ + durations.json + updated captions-draft-v4.srt. RETURN: the act/beat outline, the narration reuse map, new-render count + cost, file paths.`, { label: 'script-v4', phase: 'Author', model: 'opus', effort: 'high' })
+return { r, NEXT_STEP: 'firstmate: the take drives script-v4 when round-4 READY + feature-surfacing land; assembly consumes the v4 audio map.' }
+JS
+jq -n --arg p "$v4file" '{tool_input: {scriptPath: $p}}' | "$HOOK" >/dev/null 2>&1 \
+  || fail "(d2) script-v4-website-shape (single agent, no (N)/N. markers) should ALLOW under the (N)/N.-keyed rule"
+pass "(d2) script-v4-website-shape allows (single agent, zero (N)/N. concern markers)"
 
 echo "all fm-workflow-lint tests passed"

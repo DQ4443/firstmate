@@ -21,26 +21,34 @@
 #   (c) META BLOCK: the script carries an `export const meta` block (runId /
 #       budget carrier; AGENTS.md section 4 pinning).
 #   (d) SWARM-CONTRACT SIZE (data/operating-model/decisions.md, 2026-07-10
-#       agent-task-sizing pin): a lone WRITER agent must not grind a multi-part
-#       task. BLOCK when the script has exactly ONE writer-brief agent() call and
-#       that call's PROMPT enumerates 3+ separate concerns (lines that start with
-#       "(N)" or "N." for N=1..9). That is the named anti-pattern: one agent
-#       sequentially grinding a many-concern task, optionally followed by a lone
-#       reviewer at the end (the msync-fix shape). The pin says shard it into a
-#       swarm of single-leaf agents (each its own worktree) plus an integrator,
-#       with a check per leaf. Escape per call: a `// size:single-leaf-approved`
-#       comment on the call line or the line directly above it, for the rare case
-#       that the enumerated prompt truly is one focused leaf.
+#       agent-task-sizing / swarm-contract pin): a single agent must not grind a
+#       multi-concern task. BLOCK on either shape, both keyed on a PROMPT that
+#       enumerates 3+ separate concerns (lines that start with "(N)" or "N." for
+#       N=1..9):
+#         (d1) exactly ONE writer-brief agent() call enumerates 3+ concerns (the
+#              grinding-writer shape, optionally trailed by a lone read-only
+#              reviewer/gate at the end: the msync-fix "build then one review"
+#              anti-pattern). A genuine swarm of multiple WRITERS is the point and
+#              is never blocked.
+#         (d2) the script's TOTAL agent() count is 1 and that sole agent
+#              enumerates 3+ concerns, WHETHER OR NOT it is a writer. The swarm
+#              contract "covers ALL work" (decisions.md 2026-07-10), so a lone
+#              research or scout agent grinding many concerns is the same
+#              anti-pattern and blocks too.
+#       Either way the pin says shard it into a swarm of single-leaf agents (each
+#       its own worktree) plus an integrator, with a check per leaf. Escape per
+#       call: a `// size:single-leaf-approved` comment on the call line or the line
+#       directly above it, for the rare case that the enumerated prompt truly is
+#       one focused leaf.
 #
-#       WHY "writer" and not "total agent() count": the pin's anti-pattern is
-#       explicitly "one agent working ... followed by one review at the end", so
-#       a build+gate pair (one writer, one read-only reviewer) is still the smell
-#       and must block; a genuine swarm of multiple WRITERS is the point and must
-#       not. A writer is identified by the same brief heuristic as (b): its RAW
-#       prompt contains 'worktree add' or 'commit before returning'. A read-only
-#       scout or reviewer never counts, so a lone Explore scout that enumerates
-#       sub-questions is not blocked. Multi-writer scripts are never blocked by
-#       (d) regardless of prompt shape.
+#       WHY two triggers: the pin's core anti-pattern is "one agent working ...
+#       followed by one review at the end", so a build+gate pair (one writer, one
+#       read-only reviewer) must block (d1) while a genuine multi-WRITER swarm
+#       must not. But the contract covers ALL work, not just writers, so a script
+#       whose ONLY agent grinds 3+ concerns also blocks (d2), even a read-only
+#       scout. A writer is identified by the same brief heuristic as (b): its RAW
+#       prompt contains 'worktree add' or 'commit before returning'. Multi-writer
+#       scripts (2+ writers) are never blocked by (d) regardless of prompt shape.
 #
 # TEMPLATE-LITERAL MASKING (the round-2 robustness fix). The scanner is
 # line-oriented, and a workflow script's agent prompts are backtick template
@@ -177,6 +185,8 @@ PREV_R=""     # (d) the raw line before the current one (feeds CHUNK_PREV at eac
 WRITER_COUNT=0    # (d) number of writer-brief agent() calls in the whole script
 D_WRITER_MARK=0   # (d) marker count of the sole writer (meaningful iff WRITER_COUNT==1)
 D_WRITER_ESC=0    # (d) escape status of the sole writer
+LAST_MARK=0       # (d) marker count of the last flushed agent (== sole agent iff AGENT_IDX==1)
+LAST_ESC=0        # (d) escape status of the last flushed agent (== sole agent iff AGENT_IDX==1)
 
 # (d) bump CHUNK_MARK when a line is an enumerated-concern marker in template
 # PROSE. It qualifies when the RAW line ($1) starts (after whitespace) with
@@ -228,21 +238,30 @@ flush_chunk() {
     fi
   fi
 
-  # (d) tally writers and remember the sole writer's marker/escape state. These
-  # snapshots are only consulted after the walk when WRITER_COUNT lands on 1.
-  # The escape covers the call if // size:single-leaf-approved appears anywhere in
-  # the call statement (CHUNK_R spans the opening 'agent(' line through its
+  # (d) escape status of THIS call: // size:single-leaf-approved appears anywhere
+  # in the call statement (CHUNK_R spans the opening 'agent(' line through its
   # closing options line, so a trailing comment on a multi-line call is caught)
   # OR on the line directly above the opening (CHUNK_PREV).
+  local this_esc=0
+  if printf '%s' "$CHUNK_R" | grep -qF '// size:single-leaf-approved' \
+    || printf '%s' "$CHUNK_PREV" | grep -qF '// size:single-leaf-approved'; then
+    this_esc=1
+  fi
+
+  # (d2) snapshot EVERY call's marker/escape state. After the walk, when the whole
+  # script has exactly one agent (AGENT_IDX==1), LAST_MARK/LAST_ESC hold that sole
+  # agent's values and drive the "total agent count is 1" trigger regardless of
+  # writer markers (the swarm contract covers ALL work, not just writers).
+  LAST_MARK=$CHUNK_MARK
+  LAST_ESC=$this_esc
+
+  # (d1) tally writers and remember the sole writer's marker/escape state. These
+  # snapshots are only consulted after the walk when WRITER_COUNT lands on 1 (the
+  # grinding-writer / build+gate shape, which may trail read-only reviewers).
   if [ "$is_writer" -eq 1 ]; then
     WRITER_COUNT=$((WRITER_COUNT + 1))
     D_WRITER_MARK=$CHUNK_MARK
-    if printf '%s' "$CHUNK_R" | grep -qF '// size:single-leaf-approved' \
-      || printf '%s' "$CHUNK_PREV" | grep -qF '// size:single-leaf-approved'; then
-      D_WRITER_ESC=1
-    else
-      D_WRITER_ESC=0
-    fi
+    D_WRITER_ESC=$this_esc
   fi
 }
 
@@ -291,11 +310,26 @@ if [ -n "$WT_LINES" ]; then
   fi
 fi
 
-# (d) swarm-contract size: a lone writer agent grinding an enumerated multi-part
-# prompt. Only fires with exactly one writer (a real multi-writer swarm is the
-# point) and no escape comment. 3+ enumerated concerns is the grinding shape.
+# (d) swarm-contract size: a single agent grinding an enumerated multi-part
+# prompt. Two triggers, either fires the same pin (d1 checked first so a
+# single-writer script reports the writer-specific guidance):
+#   d1: exactly ONE writer agent (a real multi-writer swarm is the point) with 3+
+#       enumerated concerns and no escape. Covers the build+gate shape (one
+#       writer trailed by a lone reviewer), so it can fire with 2+ total agents.
+#   d2: the script's TOTAL agent() count is 1 and that sole agent enumerates 3+
+#       concerns and is unescaped, whether or not it is a writer.
+# D_KIND names the shape for the report; the guidance is otherwise identical.
+D_MARK=0
+D_KIND=""
 if [ "$WRITER_COUNT" -eq 1 ] && [ "$D_WRITER_ESC" -eq 0 ] && [ "$D_WRITER_MARK" -ge 3 ]; then
-  add_reason "(d) agent-task-sizing pin: the script's single writer agent enumerates ${D_WRITER_MARK} separate concerns in one prompt ((1)/(2)/... or 1./2./...). One agent grinding a multi-part task is the named anti-pattern (decisions.md 2026-07-10). Shard it into a swarm of single-leaf agents (each its own worktree) plus an integrator, with a check per leaf; or add // size:single-leaf-approved on the call line if this genuinely is one focused leaf."
+  D_MARK=$D_WRITER_MARK
+  D_KIND="single writer agent"
+elif [ "$AGENT_IDX" -eq 1 ] && [ "$LAST_ESC" -eq 0 ] && [ "$LAST_MARK" -ge 3 ]; then
+  D_MARK=$LAST_MARK
+  D_KIND="only agent"
+fi
+if [ -n "$D_KIND" ]; then
+  add_reason "(d) agent-task-sizing pin: the script's ${D_KIND} enumerates ${D_MARK} separate concerns in one prompt ((1)/(2)/... or 1./2./...). One agent grinding a multi-part task is the named anti-pattern (decisions.md 2026-07-10 swarm contract, which covers ALL work, not just writers). Shard it into a swarm of single-leaf agents (each its own worktree) plus an integrator, with a check per leaf; or add // size:single-leaf-approved on the call line if this genuinely is one focused leaf."
 fi
 
 if [ -n "$REASONS" ]; then
