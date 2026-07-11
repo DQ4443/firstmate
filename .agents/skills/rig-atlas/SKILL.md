@@ -101,6 +101,8 @@ python3 .agents/skills/rig-atlas/scripts/generate-atlas.py --repo-root "$PWD" --
 
 The setup script verifies the pinned source digest, exact classifications, generator roster, complete source modules, Appendix D coverage, and sanitizer redaction before writing runtime files.
 It extracts and explicitly adapts only the sanctioned include-both bodies.
+It also extracts the Appendix E Python body byte for byte into the ignored `state/rig/assemble_replication.py` target and records the pinned source hash, source lines, and generator hash in `state/rig/assemble-replication.integrity.json`.
+That source generator is read-only reference input and has no executable bit because its portable sanitizer tail is redacted.
 
 ## The generated-doc discipline
 

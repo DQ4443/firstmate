@@ -15,6 +15,7 @@ PINNED_SHA256 = "134eb182731726ae9305d6a7a74d8a767bfb7f042201e953536ceec507f19f7
 SPINE = ["pdw", "build", "scout", "explore", "websearch", "lavish", "oat", "submit", "rig-atlas"]
 ROLES = ["planner", "implementer", "refute-reviewer"]
 REDACTION = "# [portable-twin sanitize pass redacted in this edition: its swap/drop lists"
+GENERATOR_FENCE = "`" * 12
 EXCLUDED_BOTH = [
     "source-withheld-exclude-01", "source-withheld-exclude-02", "source-withheld-exclude-03",
     "source-withheld-exclude-04", "source-withheld-exclude-05", "source-withheld-exclude-06",
@@ -120,6 +121,32 @@ def leak_scan(text: str) -> list[str]:
     return [name for name, pattern in LEAK_PATTERNS.items() if pattern.search(text)]
 
 
+def embedded_generator(text: str) -> tuple[bytes, str]:
+    appendix = text.find("## Appendix E \u2014 this document's generator (self-contained regen)")
+    if appendix < 0:
+        raise ValueError("source generator appendix is missing")
+    opening = f"{GENERATOR_FENCE}python\n"
+    start = text.find(opening, appendix)
+    if start < 0:
+        raise ValueError("source generator opening fence is missing")
+    body_start = start + len(opening)
+    closing = f"\n{GENERATOR_FENCE}"
+    end = text.find(closing, body_start)
+    if end < 0:
+        raise ValueError("source generator closing fence is missing")
+    body = (text[body_start:end] + "\n").encode("utf-8")
+    decoded = body.decode("utf-8")
+    if REDACTION not in decoded or "portable twin needs the unredacted generator" not in decoded:
+        raise ValueError("embedded generator does not preserve the sanitizer redaction")
+    try:
+        ast.parse(decoded, filename="assemble_replication.py")
+    except SyntaxError as error:
+        raise ValueError(f"embedded generator is not valid Python: {error}") from error
+    start_line = text.count("\n", 0, body_start) + 1
+    end_line = start_line + decoded.count("\n") - 1
+    return body, f"{start_line}-{end_line}"
+
+
 def inspect(source: Path) -> tuple[dict[str, object], dict[str, str], str]:
     raw = source.read_bytes()
     text = raw.decode("utf-8")
@@ -153,6 +180,12 @@ def inspect(source: Path) -> tuple[dict[str, object], dict[str, str], str]:
         errors.append("exclude-both count assertion is missing or changed")
     if REDACTION not in text or "portable twin needs the unredacted generator" not in text:
         errors.append("portable sanitizer redaction marker is missing or changed")
+    try:
+        generator, generator_range = embedded_generator(text)
+    except ValueError as error:
+        errors.append(str(error))
+        generator = b""
+        generator_range = "unavailable"
     appendix = text.find("## Appendix A")
     if appendix < 0:
         errors.append("source atlas main sections are missing")
@@ -172,6 +205,8 @@ def inspect(source: Path) -> tuple[dict[str, object], dict[str, str], str]:
         "spine_skills": skills,
         "roles": roles,
         "portable_sanitizer": "redacted",
+        "embedded_generator_sha256": sha_bytes(generator),
+        "embedded_generator_source_lines": generator_range,
         "substitution_rules": [f"{old} -> {new}" for old, new in SUBSTITUTIONS] + ["/skill -> $skill"],
         "errors": errors,
     }
@@ -180,7 +215,7 @@ def inspect(source: Path) -> tuple[dict[str, object], dict[str, str], str]:
     return inventory, bodies, main_prose
 
 
-def write_runtime(state_dir: Path, inventory: dict[str, object], bodies: dict[str, str]) -> None:
+def write_runtime(state_dir: Path, inventory: dict[str, object], bodies: dict[str, str], source: Path) -> None:
     if inventory["errors"]:
         raise SystemExit("source audit failed; runtime was not written")
     memory_dir = state_dir / "portable-memory"
@@ -207,6 +242,26 @@ def write_runtime(state_dir: Path, inventory: dict[str, object], bodies: dict[st
     canonical = json.dumps(runtime_inventory, sort_keys=True, separators=(",", ":")).encode()
     runtime_inventory["runtime_integrity_sha256"] = sha_bytes(canonical)
     (state_dir / "source-inventory.json").write_text(json.dumps(runtime_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    generator, source_lines = embedded_generator(source.read_text(encoding="utf-8"))
+    generator_path = state_dir / "assemble_replication.py"
+    if generator_path.exists():
+        generator_path.chmod(0o600)
+    generator_path.write_bytes(generator)
+    generator_path.chmod(0o444)
+    generator_integrity = {
+        "executable": False,
+        "extraction": "exact Appendix E fenced Python body from the pinned source",
+        "generator_sha256": sha_bytes(generator),
+        "portable_sanitizer": "redacted",
+        "reference_only": True,
+        "source_line_range": source_lines,
+        "source_sha256": runtime_inventory["source_sha256"],
+        "target": "assemble_replication.py",
+    }
+    (state_dir / "assemble-replication.integrity.json").write_text(
+        json.dumps(generator_integrity, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     status = {
         "portable_twin": "BLOCKED",
         "reason": "The portable sanitizer contract is redacted in the supplied source.",
@@ -215,14 +270,52 @@ def write_runtime(state_dir: Path, inventory: dict[str, object], bodies: dict[st
     (state_dir / "portable-status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def verify_runtime(state_dir: Path, source: Path) -> None:
+    inventory, _, _ = inspect(source)
+    if inventory["errors"]:
+        raise ValueError("source audit failed")
+    expected, source_lines = embedded_generator(source.read_text(encoding="utf-8"))
+    generator_path = state_dir / "assemble_replication.py"
+    integrity_path = state_dir / "assemble-replication.integrity.json"
+    if not generator_path.is_file() or not integrity_path.is_file():
+        raise ValueError("embedded generator or its integrity record is missing")
+    if generator_path.read_bytes() != expected:
+        raise ValueError("embedded generator differs from the pinned source extraction")
+    if generator_path.stat().st_mode & 0o111:
+        raise ValueError("redacted embedded generator must remain non-executable")
+    expected_integrity = {
+        "executable": False,
+        "extraction": "exact Appendix E fenced Python body from the pinned source",
+        "generator_sha256": sha_bytes(expected),
+        "portable_sanitizer": "redacted",
+        "reference_only": True,
+        "source_line_range": source_lines,
+        "source_sha256": inventory["source_sha256"],
+        "target": "assemble_replication.py",
+    }
+    actual_integrity = json.loads(integrity_path.read_text(encoding="utf-8"))
+    if actual_integrity != expected_integrity:
+        raise ValueError("embedded generator integrity record is invalid")
+    status = json.loads((state_dir / "portable-status.json").read_text(encoding="utf-8"))
+    if status.get("portable_twin") != "BLOCKED":
+        raise ValueError("portable twin status is not fail-closed")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("--setup", type=Path)
+    parser.add_argument("--verify-setup", type=Path)
     args = parser.parse_args()
     inventory, bodies, _ = inspect(args.source)
     if args.setup:
-        write_runtime(args.setup, inventory, bodies)
+        write_runtime(args.setup, inventory, bodies, args.source)
+    if args.verify_setup:
+        try:
+            verify_runtime(args.verify_setup, args.source)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 2
     print(json.dumps(inventory, indent=2, sort_keys=True))
     return 1 if inventory["errors"] else 0
 

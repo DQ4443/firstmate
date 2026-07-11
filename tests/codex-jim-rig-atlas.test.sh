@@ -30,10 +30,18 @@ assert len(data["roles"]) == 3
 assert data["portable_sanitizer"] == "redacted"
 assert data["errors"] == []
 assert data["integrity_sha256"]
+assert data["embedded_generator_sha256"]
+assert data["embedded_generator_source_lines"] == "3063-3504"
 PY
 
 python3 "$scripts/source-audit.py" "$source_file" --setup "$tmp/state" >"$tmp/setup.json"
 [ "$(find "$tmp/state/portable-memory" -type f -name '*.md' | wc -l | tr -d ' ')" = 47 ] || fail "portable extraction count"
+[ -f "$tmp/state/assemble_replication.py" ] || fail "embedded runtime generator missing"
+[ -f "$tmp/state/assemble-replication.integrity.json" ] || fail "embedded generator integrity missing"
+sed -n '3063,3504p' "$source_file" >"$tmp/expected-assemble-replication.py"
+cmp "$tmp/expected-assemble-replication.py" "$tmp/state/assemble_replication.py" || fail "embedded generator is not the exact pinned source body"
+PYTHONPYCACHEPREFIX="$tmp/pycache" python3 -m py_compile "$tmp/state/assemble_replication.py"
+python3 "$scripts/source-audit.py" "$source_file" --verify-setup "$tmp/state" >"$tmp/verify-setup.json"
 python3 - "$tmp/state" <<'PY'
 import json
 import pathlib
@@ -42,6 +50,15 @@ import sys
 
 state = pathlib.Path(sys.argv[1])
 inventory = json.loads((state / "source-inventory.json").read_text())
+generator = state / "assemble_replication.py"
+generator_integrity = json.loads((state / "assemble-replication.integrity.json").read_text())
+assert generator_integrity["source_sha256"] == "134eb182731726ae9305d6a7a74d8a767bfb7f042201e953536ceec507f19f7c"
+assert generator_integrity["source_line_range"] == "3063-3504"
+assert generator_integrity["generator_sha256"] == inventory["embedded_generator_sha256"]
+assert generator_integrity["portable_sanitizer"] == "redacted"
+assert generator_integrity["reference_only"] is True
+assert generator_integrity["executable"] is False
+assert generator.stat().st_mode & 0o111 == 0
 names = {path.name for path in (state / "portable-memory").glob("*.md")}
 assert names == {record["adapted_name"] for record in inventory["adapted_bodies"].values()}
 assert not names & set(inventory["full_only"])
@@ -54,6 +71,20 @@ for name, record in inventory["adapted_bodies"].items():
     assert not re.search(r"(?<![\w$])/(pdw|build|scout|explore|websearch|lavish|oat|submit|rig-atlas)\b", body)
 assert json.loads((state / "portable-status.json").read_text())["portable_twin"] == "BLOCKED"
 PY
+
+chmod u+w "$tmp/state/assemble_replication.py"
+printf '\n# TAMPER\n' >>"$tmp/state/assemble_replication.py"
+chmod 444 "$tmp/state/assemble_replication.py"
+if python3 "$scripts/source-audit.py" "$source_file" --verify-setup "$tmp/state" >"$tmp/generator-tamper.out" 2>&1; then
+  fail "embedded generator tamper passed verification"
+fi
+python3 "$scripts/source-audit.py" "$source_file" --setup "$tmp/state" >"$tmp/setup-restored.json"
+jq '.generator_sha256 = "bad"' "$tmp/state/assemble-replication.integrity.json" >"$tmp/bad-generator-integrity.json"
+mv "$tmp/bad-generator-integrity.json" "$tmp/state/assemble-replication.integrity.json"
+if python3 "$scripts/source-audit.py" "$source_file" --verify-setup "$tmp/state" >"$tmp/generator-integrity-tamper.out" 2>&1; then
+  fail "embedded generator integrity tamper passed verification"
+fi
+python3 "$scripts/source-audit.py" "$source_file" --setup "$tmp/state" >"$tmp/setup-restored-again.json"
 
 fixture="$tmp/repo"
 mkdir -p "$fixture/.agents/skills" "$fixture/.codex/agents" "$fixture/.codex/hooks"
