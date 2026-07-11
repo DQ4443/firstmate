@@ -28,6 +28,7 @@ The parent task owns the workflow topology and funnels because a worker must not
 ## Exact target layout
 
 The nine repo-local skills live at `.agents/skills/<name>/SKILL.md`.
+The only workflow transport adapter lives with its owner at `.agents/skills/pdw/scripts/report-back.sh`.
 The eight source graders live beside their skills as `.agents/skills/<name>/evals.md`, with no invented `oat/evals.md` because Jim's source has none.
 The Lavish progressive-disclosure files live at `.agents/skills/lavish/references/decision-zone.md` and `.agents/skills/lavish/references/nav-sidebar.md`.
 The thin Codex role definitions live at `.codex/agents/planner.toml`, `.codex/agents/implementer.toml`, and `.codex/agents/refute-reviewer.toml`.
@@ -35,10 +36,14 @@ The hook scripts live at `.codex/hooks/git-guard.py`, `.codex/hooks/session-titl
 The repo-local Codex hook declaration lives at `.codex/hooks.json` only after its schema and project-scope behavior are proven against the installed harness.
 The ignored live build ledgers live at `state/build-loops/<branch>.json`.
 The ignored live submit canary lives at `state/submit-canary.json`.
-The generated inventory lives at `.agents/rig/rig-atlas.md`, and its only sanctioned twin lives at `.agents/rig/rig-atlas-portable.md`.
-The source-named generator lives at `.agents/rig/assemble_replication.py` and writes both atlas files in one run.
-Portable include-both memories from Appendix D live verbatim after token adaptation at `.agents/rig/portable-memory/<source-basename>.md`.
+The gitignored local rig root is `state/rig/`, preserving Jim's uncommitted notes boundary.
+The generated inventory target is `state/rig/rig-atlas.md`, and its only sanctioned twin target is `state/rig/rig-atlas-portable.md`.
+The exact embedded generator input lives at `state/rig/assemble_replication.py`.
+Portable include-both memories from Appendix D live verbatim after token adaptation at `state/rig/portable-memory/<source-basename>.md`.
 The generator records the include-both, full-only, and exclude-both classifications, but it does not copy project-private full-only or excluded content into this repo.
+Lines 3,501-3,503 state that the portable sanitizer is redacted from this edition, so `rig-atlas-portable.md` regeneration is BLOCKED until David supplies the unredacted sanitizer.
+The embedded generator may regenerate only `rig-atlas.md`, and any attempt to synthesize or guess the portable sanitizer must fail closed.
+The repository tracks only the skills, evals, role source, hook source, and this translation document, while `state/rig/` and Lavish runtime output stay untracked.
 No `.claude` artifact is a target of this port.
 No `.agents/skills-spine` duplicate is permitted.
 
@@ -52,6 +57,13 @@ S/M/L/XL describes workflow shape and stays separate from worker reasoning effor
 Explicit `/pdw` never degrades to one untracked agent.
 The Codex implementation uses one parent task with parallel native subagents for inspectable lanes and explicit `codex exec` for workers whose launch settings must be enforced.
 The target files are `.agents/skills/pdw/SKILL.md` and `.agents/skills/pdw/evals.md`.
+The `pdw` grader requires evidence of the requested model and effort, the effective model and effort, and whether the selected launch path enforced either value.
+The `pdw` grader requires distinct descriptive names for every lane and rejects idle watching when another independent wave can run.
+The `pdw` grader enforces the topology ceilings of shared-machine contention, disjoint ownership or separate worktrees, and a width that the funnel can faithfully weigh.
+The `pdw` grader rejects concurrent writers without explicit file ownership and rejects a writer that returns a dirty worktree or no commit SHA.
+The `pdw` grader requires a funnel between panels, verbatim constraint carriers, and explicit UNVERIFIED labels for degenerate or missing lane output.
+The `pdw` grader requires significant multi-stage output to close through Lavish with a short task summary, while a small single-wave result may return directly.
+The acceptance test runs one lane with an unenforceable requested effort, one junk lane, two disjoint writers, and one deliberately serialized dependency, then checks every grader verdict and the final Lavish closure.
 
 ### build
 
@@ -80,6 +92,12 @@ The target files are `.agents/skills/build/SKILL.md` and `.agents/skills/build/e
 It launches `explore` and `websearch` concurrently, then runs ideation, aggregation, razor, cheap experiments, and a Lavish decision page.
 Multi-subject work keeps one workflow per subject plus convergence.
 The target files are `.agents/skills/scout/SKILL.md` and `.agents/skills/scout/evals.md`.
+The `scout` grader allows reasoning to cull only redundancy and YAGNI, while every other surviving candidate receives the cheapest settling test.
+The `scout` grader requires cheap local experiments to run now and label their results MEASURED.
+The `scout` grader requires expensive external experiments to remain unlaunched until explicit approval and a live cost-watch plan exist.
+The `scout` grader requires each subject to receive its own concurrent explore and websearch shape plus one global convergence, never one lone probe per subject or one mega-workflow.
+The `scout` grader requires a candidate-producing or experiment-running scout to end in Lavish, while a genuinely small single-wave scout reports its verdict directly.
+The acceptance test feeds one redundant candidate, one YAGNI candidate, one uncertain cheap candidate, one expensive candidate, and two subjects, then verifies the culls, MEASURED experiment, held external gate, concurrent subject shape, and report mode.
 
 ### explore
 
@@ -132,9 +150,10 @@ The target files are `.agents/skills/submit/SKILL.md` and `.agents/skills/submit
 It classifies every memory as include-both, full-only, or exclude-both before regeneration.
 Include-both means general doctrine copied into both editions, full-only means project-bound doctrine retained only outside the portable repo copy, and exclude-both means project state, personal profile, superseded rules, or credential-shaped content copied nowhere.
 One secret or private line excludes the whole file because included memories are otherwise verbatim.
-It regenerates `rig-atlas.md` and `rig-atlas-portable.md` with `assemble_replication.py` in one run, then updates the existing Lavish system-study page last.
+The supplied `assemble_replication.py` may regenerate `state/rig/rig-atlas.md`, but portable-twin generation and the final Lavish system-study update remain BLOCKED until the unredacted sanitizer is available and passes its leak scan.
 It documents live files and never becomes a second source of their contracts.
-The target files are `.agents/skills/rig-atlas/SKILL.md`, `.agents/skills/rig-atlas/evals.md`, `.agents/rig/assemble_replication.py`, `.agents/rig/rig-atlas.md`, `.agents/rig/rig-atlas-portable.md`, and `.agents/rig/portable-memory/`.
+The tracked target files are `.agents/skills/rig-atlas/SKILL.md` and `.agents/skills/rig-atlas/evals.md`.
+The ignored live targets are `state/rig/assemble_replication.py`, `state/rig/rig-atlas.md`, `state/rig/rig-atlas-portable.md`, and `state/rig/portable-memory/`.
 
 ## Replication and operating contract map
 
@@ -172,13 +191,14 @@ The target is the existing Lavish mirror and `david-warm` components, and the te
 ## Curated memory map
 
 Appendix D at lines 1,678-3,055 is source material, not optional background.
-Every portable memory heading in that range maps by basename to `.agents/rig/portable-memory/<source-basename>.md` after placeholder and harness-token adaptation.
+Every portable memory heading in that range maps by basename to `state/rig/portable-memory/<source-basename>.md` after placeholder and harness-token adaptation.
 The include-both set is durable doctrine and remains in both generated atlas editions.
 The full-only set is recorded as classification metadata but its project-bound contents are not copied into the portable repo target.
 The exclude-both set is recorded as classification metadata and its contents are copied nowhere.
 Any file containing a credential, secret, private identifier, or personal-profile line is excluded as a whole file rather than redacted line by line.
 The generator omits the derived `MEMORY.md` index and rebuilds the memory appendix from the curated files.
-The memory acceptance test enumerates every Appendix D heading, verifies a matching include-both target and hash after declared substitutions, verifies no unclassified file remains, and scans both atlas editions and the repo target for excluded tokens.
+The memory acceptance test enumerates every Appendix D heading, verifies a matching include-both target and hash after declared substitutions, verifies no unclassified file remains, and scans the full atlas and local memory target for excluded tokens.
+The portable edition gets the same scan only after the unredacted sanitizer is supplied, and its absence blocks rather than skips the portable-twin gate.
 The classification acceptance test uses the source counts of 47 include-both, 47 full-only, and 41 exclude-both as reconciliation expectations while allowing the portable source to omit full-only and excluded bodies.
 
 ## Role map
@@ -199,12 +219,15 @@ The implementation must prove an exact `codex exec` command and config carrier i
 | `Workflow` | One root Codex task owns Map, parallel `collaboration.spawn_agent` lanes, Review, funnels, and Synthesize, because Codex has no atomic Workflow call. | The desktop shows every lane, independent lanes overlap in time, rejected lane output is named UNVERIFIED, and only the parent synthesis reaches the return task. |
 | `Agent` | `collaboration.spawn_agent` is the inspectable default, while an externally launched `codex exec` worker is allowed only after its role and setting carrier is proven. | The native wrapper signature is recorded, the external smoke test proves the exact model, effort, sandbox, worktree, role instructions, and clean commit, and unsupported controls remain labeled unavailable. |
 | `Skill` | Codex loads the repo-local `.agents/skills/<name>/SKILL.md` through explicit skill invocation or trigger matching. | A fresh Codex task discovers each skill, an explicit invocation loads the intended file, and no `.claude` or `.agents/skills-spine` copy wins. |
+| `AskUserQuestion` | Codex asks one direct concise question in the final response, or uses `request_user_input` only when that tool is available in the active mode. | A blocking-choice test produces one answerable final question, and a mode without `request_user_input` never claims or attempts the unavailable tool. |
+| `ToolSearch` | The parent inspects `ALL_TOOLS` for the required capability and then calls the matching official or installed tool. | A lazy-tool test finds the named capability from `ALL_TOOLS`, invokes it successfully, and fails plainly when no matching tool exists. |
+| `WebSearch` and `WebFetch` | Codex uses `web__run` with `search_query` followed by `open`, while OpenAI product questions use the official OpenAI documentation connector first. | A web-recon test returns dated direct-source links, opens the supporting pages, and uses only official OpenAI sources for an OpenAI product claim. |
 | `Task` | The root Codex task is the tracked run, and named collaboration subagents are its visible cells. | The desktop activity view shows the root and cells, the parent can steer or interrupt a named cell, and the final return aggregates once. |
 | `Artifact` | Existing `lavish-axi <html-file>` opens or resumes the stable living page built from David-warm components. | The same file reopens at the same Lavish URL, the browser screenshot is read, and round history survives a redeploy. |
 | `Monitor` | A Codex recurring automation owns durable polling and carries the loop count, caps, condition, and `NEXT_STEP` in its prompt. | A short-interval test wakes the correct task after a state change, remains silent without a transition, and preserves the payload after app restart. |
 | `ScheduleWakeup` | A one-shot Codex automation wakes the owning task at the requested time with the full resume payload. | A two-minute test fires once, names the correct task and phase, and does not fire again. |
 | `CronCreate` | A recurring Codex automation owns calendar-shaped repetition. | A bounded test fires on two scheduled intervals, records both runs, and stops cleanly when disabled. |
-| `PushNotification` | One message to the injected Command Center return task is the notification carrier, surfaced by the Codex app when the thread tool is available. | A checkpoint test delivers the artifact URL and exact `ready for your move` text once, and an unavailable thread tool is reported instead of faked. |
+| `PushNotification` | The top-level parent calls dynamic `send_message_to_thread` when that exact tool is present, while `.agents/skills/pdw/scripts/report-back.sh` prepares, queues, and acknowledges the stable report receipt. | A checkpoint test with the native tool receives the artifact URL and exact `ready for your move` text once, while a catalog without the tool records queued rather than delivered. |
 | `allowed-tools` | Codex skill text declares required capabilities, while role TOML sandbox and approval settings provide the enforceable boundary available to that launch path. | The parity audit maps every required tool, runs a forbidden-write probe for read-only roles, and records any missing per-tool allow-list enforcement as unsupported. |
 | Skill frontmatter | Codex `SKILL.md` keeps supported `name` and `description` fields and removes or adapts Claude-only keys only in the adaptation diff. | A fresh-task discovery test loads every skill without parser warnings and the source-to-adaptation audit accounts for every removed key. |
 
@@ -240,13 +263,34 @@ Unsupported effort levels use the nearest supported fallback and record it witho
 Every top-level brief receives `return_thread_id` and `return_host_id`.
 Each native subagent returns to its immediate parent, and the top-level parent aggregates once to the supplied Command Center destination.
 The return carries status, summary, command evidence, artifacts, branch, worktree, last commit SHA, requested and effective effort, rationale, identifiers, and `NEXT_STEP`.
-Completion is not valid until that one report succeeds or the existing Command Center delivery mechanism queues its retry.
-No new reporting state machine is part of this port.
+Completion is not valid until that one report succeeds or the minimal PDW report-back adapter durably queues its retry.
+When a retry is queued, the completion delivery status is `queued`, never `delivered`.
+The adapter is a narrow transport carrier inside `pdw`, not a separate reporting framework.
+
+## Command Center return carrier
+
+The primary carrier is the Codex desktop dynamic `send_message_to_thread` tool with `threadId`, optional `hostId`, `prompt`, optional `model`, and optional `thinking`.
+Codex app 26.709 exposes that tool, but this task's catalog does not.
+The tool returns only `threadId` and supplies no idempotency or retry guarantee.
+The parent inspects the live tool catalog and calls `send_message_to_thread` directly only when the exact tool is present.
+The shell adapter cannot call or impersonate the dynamic tool.
+The only permitted adapter is `.agents/skills/pdw/scripts/report-back.sh`, which owns receipt preparation, durable queueing, and acknowledgment only.
+Before a send, the adapter derives a stable report key and checks `state/report-delivery/sent/<key>.json` for duplicate suppression.
+When the native tool is absent or its call fails, the adapter atomically writes `state/report-delivery/retry/<key>.json` and reports delivery status `queued`.
+After the native tool returns success, the parent calls the adapter's acknowledgment path, which atomically records `state/report-delivery/sent/<key>.json` and removes or moves the matching retry record.
+The documented `codex exec resume <SESSION_ID> <PROMPT>` command is a local-only fallback when `return_host_id=local` and cannot satisfy non-local host routing.
+The local fallback also lacks the native tool's host field and remains `AVAILABLE_BUT_UNVERIFIED_IN_CURRENT_SANDBOX` because the probe hit a read-only Codex state database before transport.
+Any non-local host is unsupported when the native tool is absent until an explicit remote address mapping exists.
+Every child reports only to its parent, and the top-level parent prepares and delivers the aggregated structured return once.
+Adapter tests cover preparation, duplicate suppression, failure queueing, retry acknowledgment, missing destination, and parent aggregation.
+A live E2E in a task where the native dynamic tool is exposed is the activation gate, and no delivery claim may exceed the queued state before that gate passes.
 
 ## Acceptance gates
 
 - A source extraction test verifies the SHA, all nine skill headings, all eight eval headings, both Lavish reference headings, all three role headings, all four hook headings, the generator, and the canonical adaptation copy at lines 3,406-3,416.
 - A layout test rejects `.claude` targets, `.agents/skills-spine`, missing target files, an invented `oat/evals.md`, or any abandoned custom runtime and schema file.
+- A notes-boundary test proves `state/rig/`, `state/build-loops/`, `state/submit-canary.json`, and Lavish runtime pages are ignored, and rejects any tracked generated atlas, generator output, portable memory, ledger, or canary.
+- A portable-sanitizer test confirms lines 3,501-3,503 are redacted, marks `state/rig/rig-atlas-portable.md` BLOCKED, and fails closed until the unredacted sanitizer produces a zero-leak result.
 - A fresh-session simulation traces every mandated action from only the installed text and rejects any missing tool or undefined cross-reference.
 - A contradiction test checks that every skill and eval agree, `pdw` is the only owner of topology and bare-agent rules, `oat` is the style boundary, and `explore` and `websearch` stay separate.
 - A role-routing test proves native task-team visibility, proves custom-role TOML can carry model, reasoning effort, sandbox, and instructions, and records that this session's collaboration wrapper cannot select that role.
@@ -256,7 +300,8 @@ No new reporting state machine is part of this port.
 - A build-loop test proves intent, concurrent entry recon, checkpoint publication, move recon, plan plus TDD, parallel implementation, E-ladder validation, per-round commit, repeat, same-page close, HOLD, and explicit `/submit` handoff.
 - A Lavish test renders the page, reads the screenshot, checks David-warm component identity, typed decision input, dynamic sidebar, append-only round history, and stable same-file delivery through `lavish-axi`.
 - A submit test proves CodeRabbit substitution, human-gated PR creation, re-panel at round 4, HOLD at round 16, no merge, and same-page closing report.
-- A return-routing test proves child-to-parent aggregation, one top-level Command Center report, requested and effective status preservation, duplicate suppression by the existing delivery path, and a durable retry on failure.
+- A return-routing test proves child-to-parent aggregation, one top-level Command Center report, requested and effective status preservation, duplicate suppression by `report-back.sh`, direct parent ownership of the native tool call, and a durable retry on failure.
+- A live transport activation test in a task exposing `send_message_to_thread` must deliver and acknowledge one report before the carrier can claim native delivery.
 - The final end-to-end test runs a small `/build` task through a visible task team, produces committed worktree evidence, waits at the first checkpoint, resumes through validation, closes the same page, holds for `/submit`, and reports once to the injected return task.
 
 ## Source coverage checklist
@@ -273,5 +318,5 @@ No new reporting state machine is part of this port.
 - [x] `rig-atlas/SKILL.md` is covered from lines 1,222-1,313 and `rig-atlas/evals.md` from lines 1,314-1,352.
 - [x] `planner.md` is covered from lines 1,356-1,373, `implementer.md` from lines 1,374-1,392, and `refute-reviewer.md` from lines 1,393-1,417.
 - [x] The hook declaration is covered from lines 1,421-1,467, `git-guard.py` from lines 1,470-1,589, `session-title.sh` from lines 1,590-1,630, `session-rename-nudge.sh` from lines 1,631-1,660, and `pre-commit-install.sh` from lines 1,661-1,677.
-- [x] Appendix D is covered from lines 1,678-3,055, and its extraction check expects all 47 include-both memory files under `.agents/rig/portable-memory/`.
+- [x] Appendix D is covered from lines 1,678-3,055, and its extraction check expects all 47 include-both memory files under `state/rig/portable-memory/`.
 - [x] The self-contained generator is covered from lines 3,057-3,505 and the canonical adaptation duplicate is covered from lines 3,406-3,416.
