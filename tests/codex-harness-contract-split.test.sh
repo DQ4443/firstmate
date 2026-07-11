@@ -37,6 +37,8 @@ for skill in build pdw scout explore websearch lavish oat submit rig-atlas; do
 done
 echo "ok - all nine Codex modules are discoverable"
 
+# Literal backticks in contract sentences are intentional.
+# shellcheck disable=SC2016
 for required in \
   'Never merge Kronos product code without David saying to merge it in so many words.' \
   'Never send an external message' \
@@ -46,20 +48,59 @@ for required in \
   'bin/fm-item-agent.sh start <item-id> <agent-id> [rest]' \
   'bin/fm-board-reply.sh <item-id> "<outcome>" [--done|--your-court]' \
   'gpt-5.6-sol' \
+  'The Command Center defaults to `gpt-5.6-sol` at High effort.' \
   'A user-specified model or effort always wins.' \
   'Remaining quota never causes a downgrade.' \
+  'Evidence outranks claims.' \
   'unavailable_to_pin_in_native_subagent_api' \
+  'Never claim a requested control was enforced without process evidence.' \
   'requested_status' \
   'effective_status' \
   'return_thread_id' \
   'return_host_id' \
   'send_message_to_thread' \
+  '.agents/skills/pdw/scripts/launch-worker.sh' \
   '.agents/skills/pdw/scripts/report-back.sh' \
+  'Use a Codex automation for a scheduled wake, recurring monitor, or calendar-shaped obligation.' \
   'new trusted Codex task' \
   'Existing tasks do not inherit that contract change.'; do
   grep -Fq "$required" "$agents" || fail "missing contract rule: $required"
 done
 echo "ok - authority, board, model, return, and reload rules are pinned"
+
+python3 - "$agents" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+expected = {"build", "pdw", "scout", "explore", "websearch", "lavish", "oat", "submit", "rig-atlas"}
+
+def valid(value):
+    modules = set(re.findall(r"\$([a-z][a-z0-9-]*)", value))
+    return (
+        modules == expected
+        and "The Command Center defaults to `gpt-5.6-sol` at High effort." in value
+        and "Evidence outranks claims." in value
+        and ".agents/skills/pdw/scripts/launch-worker.sh" in value
+        and "Use a Codex automation for a scheduled wake, recurring monitor, or calendar-shaped obligation." in value
+        and "Never claim a requested control was enforced without process evidence." in value
+        and "sleeping shell" not in value.lower()
+    )
+
+assert valid(text)
+mutations = {
+    "tenth module": text + "\nUse $tenth for extra orchestration.\n",
+    "low command center": text.replace("gpt-5.6-sol` at High effort", "gpt-5.6-sol` at Low effort", 1),
+    "reversed evidence": text.replace("Evidence outranks claims.", "Claims outrank evidence.", 1),
+    "launcher drift": text.replace(".agents/skills/pdw/scripts/launch-worker.sh", ".agents/skills/pdw/scripts/other-launcher.sh", 1),
+    "sleeping shell": text.replace("Use a Codex automation for a scheduled wake, recurring monitor, or calendar-shaped obligation.", "Use a sleeping shell for scheduled waits.", 1),
+    "false enforcement": text.replace("Never claim a requested control was enforced without process evidence.", "Assume requested controls were enforced.", 1),
+}
+for label, mutated in mutations.items():
+    assert not valid(mutated), label
+PY
+echo "ok - escaped module, model, evidence, launcher, automation, and enforcement mutations are rejected"
 
 cp "$agents" "$tmp/agents.md"
 cp "$claude" "$tmp/claude.md"
