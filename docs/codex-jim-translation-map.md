@@ -274,15 +274,25 @@ Codex app 26.709 exposes that tool, but this task's catalog does not.
 The tool returns only `threadId` and supplies no idempotency or retry guarantee.
 The parent inspects the live tool catalog and calls `send_message_to_thread` directly only when the exact tool is present.
 The shell adapter cannot call or impersonate the dynamic tool.
-The only permitted adapter is `.agents/skills/pdw/scripts/report-back.sh`, which owns receipt preparation, durable queueing, and acknowledgment only.
-Before a send, the adapter derives a stable report key and checks `state/report-delivery/sent/<key>.json` for duplicate suppression.
-When the native tool is absent or its call fails, the adapter atomically writes `state/report-delivery/retry/<key>.json` and reports delivery status `queued`.
-After the native tool returns success, the parent calls the adapter's acknowledgment path, which atomically records `state/report-delivery/sent/<key>.json` and removes or moves the matching retry record.
+The carrier provides at-least-once delivery and never claims exactly-once delivery.
+The only permitted adapter is `.agents/skills/pdw/scripts/report-back.sh`, which owns `prepare`, `claim`, `drain`, `ack`, and `receive` state transitions but never calls the native tool.
+Every delivered prompt includes the stable line `REPORT_KEY: <key>`.
+`prepare` derives the stable report key, checks `state/report-delivery/sent/<key>.json`, and atomically writes `state/report-delivery/pending/<key>.json` for an immediate native attempt or `state/report-delivery/retry/<key>.json` when delivery must queue.
+`claim` atomically leases one retry by moving it to `state/report-delivery/inflight/<key>.json` with an incremented attempt count and claim timestamp.
+The root calls the native tool for the claimed or pending payload and leaves all transport calls outside the shell adapter.
+`ack` atomically records `state/report-delivery/sent/<key>.json` after native success and removes the matching pending or inflight record.
+`drain` first returns stale inflight claims to retry, then atomically claims and returns no more than the configured batch of payloads for the root to send.
+An inflight claim is stale only after the configured claim TTL has elapsed.
+`receive` atomically records `state/report-delivery/received/<key>.json` before receiver side effects.
+A repeated `REPORT_KEY` returns `duplicate-suppressed` and causes no repeated receiver side effects.
+The operator-owned `state/report-delivery/config.json` supplies `retry_max_attempts`, `claim_ttl_seconds`, and `drain_batch_size`, and the adapter rejects missing or invalid values rather than hiding unowned literals in code.
+When a claim reaches the configured retry maximum, the adapter atomically records `state/report-delivery/exhausted/<key>.json` and returns no further send payload for that key.
+If the sender crashes after native success but before `ack`, the stale claim returns to retry and may deliver again, which is why receiver deduplication is mandatory and exactly-once is not claimed.
 The documented `codex exec resume <SESSION_ID> <PROMPT>` command is a local-only fallback when `return_host_id=local` and cannot satisfy non-local host routing.
 The local fallback also lacks the native tool's host field and remains `AVAILABLE_BUT_UNVERIFIED_IN_CURRENT_SANDBOX` because the probe hit a read-only Codex state database before transport.
 Any non-local host is unsupported when the native tool is absent until an explicit remote address mapping exists.
-Every child reports only to its parent, and the top-level parent prepares and delivers the aggregated structured return once.
-Adapter tests cover preparation, duplicate suppression, failure queueing, retry acknowledgment, missing destination, and parent aggregation.
+Every child reports only to its parent, and the top-level parent prepares one aggregated structured return whose transport may attempt delivery more than once.
+Adapter tests cover preparation, missing destination, claim, drain, acknowledgment, failure queueing, retry, bounded attempts, stale-claim recovery, sender crash after native success before acknowledgment, receiver duplicate suppression, and parent aggregation.
 A live E2E in a task where the native dynamic tool is exposed is the activation gate, and no delivery claim may exceed the queued state before that gate passes.
 
 ## Acceptance gates
@@ -300,7 +310,9 @@ A live E2E in a task where the native dynamic tool is exposed is the activation 
 - A build-loop test proves intent, concurrent entry recon, checkpoint publication, move recon, plan plus TDD, parallel implementation, E-ladder validation, per-round commit, repeat, same-page close, HOLD, and explicit `/submit` handoff.
 - A Lavish test renders the page, reads the screenshot, checks David-warm component identity, typed decision input, dynamic sidebar, append-only round history, and stable same-file delivery through `lavish-axi`.
 - A submit test proves CodeRabbit substitution, human-gated PR creation, re-panel at round 4, HOLD at round 16, no merge, and same-page closing report.
-- A return-routing test proves child-to-parent aggregation, one top-level Command Center report, requested and effective status preservation, duplicate suppression by `report-back.sh`, direct parent ownership of the native tool call, and a durable retry on failure.
+- A return-routing test proves child-to-parent aggregation, one top-level report payload with at-least-once transport, requested and effective status preservation, direct parent ownership of the native tool call, stable `REPORT_KEY` inclusion, receiver duplicate suppression, and a durable retry on failure.
+- A crash-window test delivers natively, omits sender `ack`, expires the configurable lease, drains the retried payload, and verifies `receive` suppresses repeated receiver side effects.
+- A retry-control test proves configured batch bounds, configured maximum attempts, stale claim recovery after the configured TTL, and refusal of missing or invalid configuration.
 - A live transport activation test in a task exposing `send_message_to_thread` must deliver and acknowledge one report before the carrier can claim native delivery.
 - The final end-to-end test runs a small `/build` task through a visible task team, produces committed worktree evidence, waits at the first checkpoint, resumes through validation, closes the same page, holds for `/submit`, and reports once to the injected return task.
 
