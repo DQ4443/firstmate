@@ -1,20 +1,20 @@
-# Evals for /explore
+# Evals for $explore
 
 Run isolated grader agents, use binary checks, and target at least 90 percent across three runs.
 
 ## Should trigger
 
-1. `/explore how does the auth gate decide allow versus deny across the viewer?`.
+1. `$explore how does the auth gate decide allow versus deny across the viewer?`.
 2. `Dig into how the connection-pool lease code is structured and why it is shaped that way.`.
 3. `What do we already have on other branches or worktrees for request sharding?`.
-4. A `/build` move recon asking whether the repository already contains something to adopt.
-5. The local half of a `/scout` research question.
+4. A `$build` move recon asking whether the repository already contains something to adopt.
+5. The local half of a `$scout` research question.
 
 ## Should not trigger
 
 1. `Where is compute_layout defined?`, which is a direct search.
-2. `What is the current state of the art for agent-run replay?`, which belongs to `/websearch`.
-3. `Research whether X is worth building.`, which belongs to `/scout` because it needs filtering and experiments.
+2. `What is the current state of the art for agent-run replay?`, which belongs to `$websearch`.
+3. `Research whether X is worth building.`, which belongs to `$scout` because it needs filtering and experiments.
 
 ## Binary output checks
 
@@ -27,4 +27,4 @@ Run isolated grader agents, use binary checks, and target at least 90 percent ac
 - [ ] A multi-subject request used one task team per subject concurrently followed by convergence instead of one mega-team or one lone probe per subject.
 - [ ] No cell performed a web search.
 - [ ] Explore created no Lavish page.
-- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming unavailable enforcement.
+- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable.

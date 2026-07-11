@@ -3,26 +3,26 @@ name: scout
 description: Fan-out research from a problem statement to a small validated candidate set by running the local explore and outward websearch halves concurrently, then ideating, filtering, testing cheap candidates, and reporting the decision in Lavish.
 ---
 
-# /scout
+# $scout
 
 Use this skill for questions such as how to solve a problem, what already exists, or whether an idea is worth building before design begins.
-Use `/explore` alone for a local lookup that needs breadth, `/websearch` alone for an ecosystem question that needs breadth, and direct read or search tools for a single known fact.
-Inside `/build`, reserve this full scout for a high-complexity move that needs ideation, filtering, and experiments.
-Routine issue recon uses `/explore` and `/websearch` concurrently without the rest of this pipeline.
+Use `$explore` alone for a local lookup that needs breadth, `$websearch` alone for an ecosystem question that needs breadth, and direct read or search tools for a single known fact.
+Inside `$build`, reserve this full scout for a high-complexity move that needs ideation, filtering, and experiments.
+Routine issue recon uses `$explore` and `$websearch` concurrently without the rest of this pipeline.
 
 ## Calibration
 
-Read `/pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, lane ownership, funnels, structured returns, effort routing, and parent return rules.
+Read `$pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, lane ownership, funnels, structured returns, effort routing, and parent return rules.
 The top-level parent owns this pipeline and every native subagent is a leaf that returns only to its immediate parent.
-Each `/explore` and `/websearch` half owns its angle-design step and chooses two to five genuinely different angles from its subject's complexity and nature.
+Each `$explore` and `$websearch` half owns its angle-design step and chooses two to five genuinely different angles from its subject's complexity and nature.
 The scout parent must not choose or prescribe an angle template for either half.
 When several subjects need research, give each subject its own task team and run those teams concurrently before one global convergence pass.
 Fan-out buys breadth across independent probes and does not speed up a dependent build, measure, and revise chain.
-Run independent halves, subjects, and lanes concurrently whenever the topology and ownership rules in `/pdw` permit it.
+Run independent halves, subjects, and lanes concurrently whenever the topology and ownership rules in `$pdw` permit it.
 
 ## The pipeline
 
-1. Load `/explore` and `/websearch`, then dispatch both halves concurrently for every subject.
+1. Load `$explore` and `$websearch`, then dispatch both halves concurrently for every subject.
 2. Accept one funneled local situation brief and one funneled sourced brief from each subject.
 3. Run an ideation panel whose independent proposals use different framings and are grounded in both briefs.
 4. Aggregate and deduplicate the recon and proposals into a numbered candidate set.
@@ -48,7 +48,7 @@ Require upfront judgment, explicit human approval, and a live cost watch before 
 
 ## Return
 
-Every child return follows `/pdw` and includes its requested effort, effective effort, rationale, evidence, and `NEXT_STEP` for the immediate parent.
-The scout parent's structured return must carry `NEXT_STEP: invoke /lavish decision page before reporting` whenever the significant-result rule requires a page.
-After the pipeline completes, invoke `/lavish` before sending the significant result to the caller.
+Every child return follows `$pdw` and includes its requested effort, effective effort, rationale, evidence, and `NEXT_STEP` for the immediate parent.
+The scout parent's structured return must carry `NEXT_STEP: invoke $lavish decision page before reporting` whenever the significant-result rule requires a page.
+After the pipeline completes, invoke `$lavish` before sending the significant result to the caller.
 The top-level task aggregates once to its injected return destination and no child reports directly to the Command Center.

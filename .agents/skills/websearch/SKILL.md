@@ -3,16 +3,16 @@ name: websearch
 description: Outward web recon that dynamically chooses two to five angles, runs them concurrently as an inspectable task team, and funnels dated cited findings into one sourced brief.
 ---
 
-# /websearch
+# $websearch
 
 Use this skill for questions about what exists outside this machine, current practice, standard tools, known failures, or recent changes.
-Use one inline web search for a single fact, `/explore` for local repository questions, and `/scout` when the work also needs ideation, filtering, and experiments.
+Use one inline web search for a single fact, `$explore` for local repository questions, and `$scout` when the work also needs ideation, filtering, and experiments.
 The scope includes official documentation, changelogs, standard tools to adopt, papers, benchmarks, issues, pull requests, and community failure reports.
 The deliverable is one funneled sourced brief whose load-bearing claims include a direct URL, a publication or last-updated date, and a `reported` or `verified` label.
 
 ## Shape
 
-Read `/pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, funnels, structured returns, effort routing, and parent return rules.
+Read `$pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, funnels, structured returns, effort routing, and parent return rules.
 The top-level parent owns the task team, and every native subagent is a leaf that returns only to its immediate parent.
 Use one task team per subject.
 Run separate subject teams concurrently and converge afterward when the question spans several products, vendors, or libraries.
@@ -52,5 +52,5 @@ Do not answer from model memory when the claim can be checked with current sourc
 ## Anti-patterns
 
 Do not inspect local repository implementation inside a websearch cell.
-Do not mint a Lavish page because pages belong to the calling `/scout` or `/build` flow.
-Every dispatch and child return records requested effort, effective effort, and a one-line rationale under `/pdw`.
+Do not mint a Lavish page because pages belong to the calling `$scout` or `$build` flow.
+Every dispatch and child return records requested effort, effective effort, and a one-line rationale under `$pdw`.

@@ -31,31 +31,31 @@ def validate_markers(name: str, text: str) -> bool:
 
 REQUIRED_TRIGGERS = {
     "scout": [
-            "/scout research ways to improve our agentic workflow",
+            "$scout research ways to improve our agentic workflow",
             "What already exists for deterministic agent-run replay, and is it worth building?",
             "How should we solve the connection-pool leak? Map the options first.",
             "Is X still useful now that Y exists?",
-            "A `/build` entry question that genuinely asks what should be built.",
+            "A `$build` entry question that genuinely asks what should be built.",
             "Where is the auth gate implemented?",
             "Implement the fix we already agreed on.",
             "Summarize this paper I pasted.",
     ],
     "explore": [
-            "/explore how does the auth gate decide allow versus deny across the viewer?",
+            "$explore how does the auth gate decide allow versus deny across the viewer?",
             "Dig into how the connection-pool lease code is structured and why it is shaped that way.",
             "What do we already have on other branches or worktrees for request sharding?",
-            "A `/build` move recon asking whether the repository already contains something to adopt.",
-            "The local half of a `/scout` research question.",
+            "A `$build` move recon asking whether the repository already contains something to adopt.",
+            "The local half of a `$scout` research question.",
             "Where is compute_layout defined?",
             "What is the current state of the art for agent-run replay?",
             "Research whether X is worth building.",
     ],
     "websearch": [
-            "/websearch what is the current state of the art for deterministic agent-run replay?",
+            "$websearch what is the current state of the art for deterministic agent-run replay?",
             "Is there a standard tool to adopt for workspace snapshotting instead of hand-rolling one?",
             "What failures do people hit when pinning transitive dependencies in a monorepo?",
             "What changed in Playwright MCP in the last three months?",
-            "A `/build` move recon asking for the standard pattern and known pitfalls.",
+            "A `$build` move recon asking for the standard pattern and known pitfalls.",
             "What version of ruff does our CI use?",
             "What is the capital of France?",
             "Research whether X is worth building.",
@@ -68,9 +68,20 @@ def validate_triggers(name: str, text: str) -> bool:
 
 
 def validate_scout_angle_ownership(text: str) -> bool:
-    ownership = "Each `/explore` and `/websearch` half owns its angle-design step and chooses two to five"
+    ownership = "Each `$explore` and `$websearch` half owns its angle-design step and chooses two to five"
     nonownership = "The scout parent must not choose or prescribe an angle template for either half."
     return ownership in text and nonownership in text and "The scout parent must choose" not in text
+
+
+def validate_invocation_tokens(text: str) -> bool:
+    forbidden = ("/pdw", "/build", "/scout", "/explore", "/websearch", "/lavish")
+    return not any(token in text for token in forbidden)
+
+
+def validate_enforcement_rule(text: str) -> bool:
+    correct = "without claiming enforcement when unavailable"
+    reversed_rule = "without claiming unavailable enforcement"
+    return correct in text and reversed_rule not in text
 
 
 skills = {}
@@ -82,6 +93,9 @@ for skill in ("scout", "explore", "websearch"):
     evals[skill] = eval_path.read_text()
     assert validate_markers(skill, skills[skill]), f"{skill} source module order"
     assert validate_triggers(skill, evals[skill]), f"{skill} trigger boundaries"
+    assert validate_invocation_tokens(skills[skill]), f"{skill} skill invocation carrier"
+    assert validate_invocation_tokens(evals[skill]), f"{skill} eval invocation carrier"
+    assert validate_enforcement_rule(evals[skill]), f"{skill} enforcement rule"
     assert "every native subagent is a leaf that returns only to its immediate parent" in skills[skill]
     assert "requested effort, effective effort" in skills[skill]
     assert "reject degenerate upstream outputs" in skills[skill]
@@ -104,8 +118,22 @@ for skill, text in evals.items():
         deleted = text.replace(trigger, "", 1)
         assert not validate_triggers(skill, deleted), f"{skill} trigger deletion escaped: {trigger}"
 
+for skill, text in skills.items():
+    slash_mutation = text.replace("$pdw", "/pdw", 1)
+    assert not validate_invocation_tokens(slash_mutation), f"{skill} slash invocation mutation escaped"
+
+for skill, text in evals.items():
+    trigger_mutation = text.replace(f"${skill}", f"/{skill}", 1)
+    assert not validate_invocation_tokens(trigger_mutation), f"{skill} slash trigger mutation escaped"
+    enforcement_mutation = text.replace(
+        "without claiming enforcement when unavailable",
+        "without claiming unavailable enforcement",
+        1,
+    )
+    assert not validate_enforcement_rule(enforcement_mutation), f"{skill} enforcement reversal escaped"
+
 scout = skills["scout"]
-ownership = "Each `/explore` and `/websearch` half owns its angle-design step and chooses two to five"
+ownership = "Each `$explore` and `$websearch` half owns its angle-design step and chooses two to five"
 assert validate_scout_angle_ownership(scout)
 assert not validate_scout_angle_ownership(scout.replace(ownership, "", 1)), "angle ownership deletion escaped"
 reversed_ownership = scout.replace("must not choose", "must choose", 1)
@@ -113,7 +141,7 @@ assert not validate_scout_angle_ownership(reversed_ownership), "angle ownership 
 
 assert "label its result `MEASURED`" in scout
 assert "Flag and justify expensive external experiments without launching them" in scout
-assert "NEXT_STEP: invoke /lavish decision page before reporting" in scout
+assert "NEXT_STEP: invoke $lavish decision page before reporting" in scout
 assert "`file:line` anchor" in skills["explore"]
 assert "direct URL, a publication or last-updated date, and a `reported` or `verified` label" in skills["websearch"]
 

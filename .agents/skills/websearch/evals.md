@@ -1,20 +1,20 @@
-# Evals for /websearch
+# Evals for $websearch
 
 Run isolated grader agents, use binary checks, and target at least 90 percent across three runs.
 
 ## Should trigger
 
-1. `/websearch what is the current state of the art for deterministic agent-run replay?`.
+1. `$websearch what is the current state of the art for deterministic agent-run replay?`.
 2. `Is there a standard tool to adopt for workspace snapshotting instead of hand-rolling one?`.
 3. `What failures do people hit when pinning transitive dependencies in a monorepo?`.
 4. `What changed in Playwright MCP in the last three months?`.
-5. A `/build` move recon asking for the standard pattern and known pitfalls.
+5. A `$build` move recon asking for the standard pattern and known pitfalls.
 
 ## Should not trigger
 
 1. `What version of ruff does our CI use?`, which is local recon or a direct read.
 2. `What is the capital of France?`, which is one inline web search.
-3. `Research whether X is worth building.`, which belongs to `/scout` because it needs filtering and experiments.
+3. `Research whether X is worth building.`, which belongs to `$scout` because it needs filtering and experiments.
 
 ## Binary output checks
 
@@ -29,4 +29,4 @@ Run isolated grader agents, use binary checks, and target at least 90 percent ac
 - [ ] A multi-subject request used one task team per subject concurrently followed by convergence instead of one mega-team or one lone probe per subject.
 - [ ] No cell inspected local repository implementation.
 - [ ] Websearch created no Lavish page.
-- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming unavailable enforcement.
+- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable.

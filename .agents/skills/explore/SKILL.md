@@ -3,17 +3,17 @@ name: explore
 description: Local read-only recon that dynamically chooses two to five angles, runs them concurrently as an inspectable task team, and funnels anchored findings into one situation brief.
 ---
 
-# /explore
+# $explore
 
 Use this skill for questions about what exists on this machine, where it lives, how it works, or why it is shaped that way.
-Use direct read or search tools for a single known-file lookup, `/websearch` for an ecosystem question, and `/scout` when the work also needs ideation, filtering, and experiments.
+Use direct read or search tools for a single known-file lookup, `$websearch` for an ecosystem question, and `$scout` when the work also needs ideation, filtering, and experiments.
 The scope includes the current repository, other branches and worktrees, git history, configurations, run artifacts, and local notes.
 The deliverable is one funneled situation brief with facts, `file:line` anchors, surprises, contradictions, and open unknowns.
 Cells are read-only and never edit project files.
 
 ## Shape
 
-Read `/pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, funnels, structured returns, effort routing, and parent return rules.
+Read `$pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, funnels, structured returns, effort routing, and parent return rules.
 The top-level parent owns the task team, and every native subagent is a leaf that returns only to its immediate parent.
 Use one task team per subject.
 Run separate subject teams concurrently and converge afterward when the question spans several subjects.
@@ -44,6 +44,6 @@ Surface contradictions between cells instead of averaging them away.
 ## Anti-patterns
 
 Do not search the web inside an explore cell.
-Do not mint a Lavish page because pages belong to the calling `/scout` or `/build` flow.
+Do not mint a Lavish page because pages belong to the calling `$scout` or `$build` flow.
 Do not use a writing lane for local recon.
-Every dispatch and child return records requested effort, effective effort, and a one-line rationale under `/pdw`.
+Every dispatch and child return records requested effort, effective effort, and a one-line rationale under `$pdw`.
