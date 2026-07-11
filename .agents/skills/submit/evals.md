@@ -1,20 +1,20 @@
-# Evals for /submit
+# Evals for $submit
 
 Run isolated grader agents with binary checks and require at least 90 percent over three runs.
 
 ## Should trigger (positive)
 
-1. `Run the push and pull-request pipeline we use.`
-2. `Ship the auth-refactor branch through panel, approved push, pull request, and green checks.`
-3. `/submit branch fix/foo in worktree bar with this title hint.`
-4. `The change is validated, drive it to an open green pull request.`
-5. `Run the legacy commit-push-pull-request flow on this.`
+1. `ok do that please, execute the same push PR pipeline that we always use`
+2. `ship the auth-refactor branch - panel, approved push, PR, babysit it to green`
+3. `$submit branch fix/foo in worktree bar, title fix: [<work-repo>] ...`
+4. `the change is validated, drive it to an open green PR`
+5. `run the commit-push-pr flow on this`
 
 ## Should NOT trigger (negative)
 
-1. `Commit this locally so we can revert later.`, because a checkpoint commit is not submission.
-2. `Is the pull request green yet?`, because that is one status lookup.
-3. `Merge pull request 42.`, because `/submit` never merges.
+1. `commit this locally so we can revert later`, because a checkpoint commit is not submission.
+2. `is the PR green yet?`, because that is one status lookup.
+3. `merge #<n>`, because `$submit` never merges.
 
 ## Binary output checks
 
@@ -38,5 +38,5 @@ Run isolated grader agents with binary checks and require at least 90 percent ov
 - [ ] Loop 16 stopped on HOLD with the failing state, attempts, and leading hypothesis.
 - [ ] The same Lavish workstream page closed in report mode with the final pipeline diagram, evidence, findings, pull-request state, review pointers, and remaining merge decision.
 - [ ] The stable Lavish URL returned with a short task summary.
-- [ ] The pull request remained open and `/submit` did not merge.
+- [ ] The pull request remained open and `$submit` did not merge.
 - [ ] Every subsequent push, outward message, review reply, or review-thread resolution remained human-gated.

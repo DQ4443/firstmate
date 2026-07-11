@@ -3,7 +3,7 @@ name: submit
 description: Run the pull request tail after a change has been implemented and validated. Sync the real merge diff, review it adversarially, hold for explicit push and pull-request approval, babysit the open pull request, and close through Lavish without merging.
 ---
 
-# /submit: sync, adversarial panel, push, open pull request, babysit to green, closing report
+# $submit: sync, adversarial panel, push, open pull request, babysit to green, closing report
 
 Invariant triggers are pointers, not restatements.
 The panel is one PDW in step 1.
@@ -13,10 +13,10 @@ Every monitor or wake payload carries the loop count, both caps, and the closing
 The pull request stays open under Constraints.
 
 Precondition: do not start until the change is implemented and confirmed against the evidence bar.
-When arriving from `/build`, the loop must have exited as Done or an approved scope-creep cut, its spillover must be recorded, and final validation must be green.
-Finish validation first when that precondition is not met because `/submit` is the pull request tail and not the build tail.
+When arriving from `$build`, the loop must have exited as Done or an approved scope-creep cut, its spillover must be recorded, and final validation must be green.
+Finish validation first when that precondition is not met because `$submit` is the pull request tail and not the build tail.
 
-Invoking `/submit` requests this pipeline but does not authorize an outward action.
+Invoking `$submit` requests this pipeline but does not authorize an outward action.
 The human must explicitly approve the push and pull-request opening at step 2 after seeing the drafted title and body.
 Merge requires a separate explicit human decision after this skill finishes.
 
@@ -31,8 +31,8 @@ If the sync changed a touched file, rerun its affected tests before the panel.
 
 ### 1. Pre-push adversarial panel: model and persona matrix, difficulty-gated
 
-Run the review as one `/pdw` owned by the top-level task.
-Apply `/pdw` worktree, funnel, structured-return, effort-routing, and parent-return rules without restating their contracts here.
+Run the review as one `$pdw` owned by the top-level task.
+Apply `$pdw` worktree, funnel, structured-return, effort-routing, and parent-return rules without restating their contracts here.
 
 Read and update `state/submit-canary.json` at panel time and close time.
 The file has exactly `pr`, `panel_missed`, `drip_rounds`, `note`, and `matrix_recall` fields.
@@ -92,7 +92,7 @@ Leave the pull request open.
 
 Done means continuous integration is green on the current head SHA, CodeRabbit has no unresolved blocking finding on that SHA, and the closing report is published.
 Use one owning monitor or Codex automation as the wake carrier instead of foreground watching.
-Every monitor or wake payload records the current loop count, re-panel threshold 4, pause threshold 16, and `NEXT_STEP: on green invoke /lavish report mode`.
+Every monitor or wake payload records the current loop count, re-panel threshold 4, pause threshold 16, and `NEXT_STEP: on green invoke $lavish report mode`.
 Notify only when the pull request becomes ready for the merge decision, loop 4 triggers a re-panel, loop 16 triggers HOLD, a hard continuous-integration failure appears, or a new CodeRabbit finding arrives.
 Work on another independent task while the loop waits.
 
@@ -114,20 +114,20 @@ At loop 16, stop.
 Publish a concise HOLD note with the failing state, what was tried, and the leading hypothesis.
 Do not keep polling or fixing without a new human decision.
 
-### 6. Closing report through /lavish report mode
+### 6. Closing report through $lavish report mode
 
 When the pull request is green and CodeRabbit-clean, or when step 5 produces a HOLD note, update the workstream's existing Lavish page in report mode.
 Lead after the short summary with a rendered diagram of the final pipeline as it now stands and highlight the parts this pull request changed.
 Then include the per-change summary, panel and CodeRabbit findings with their resolution, recorded validation evidence, pull-request link and status, and the risk-tiered human review pointer.
 End with next steps and the explicit remaining merge decision.
 Send the stable Lavish URL with a short task summary through the injected top-level return route.
-The page is the merge decision surface, and `/submit` still does not merge.
+The page is the merge decision surface, and `$submit` still does not merge.
 
 ## Constraints
 
 - Leave the pull request open.
 - Pull-request opening requires explicit human approval after the title and body are drafted.
-- Merge requires a separate explicit human decision and is never performed by `/submit`.
+- Merge requires a separate explicit human decision and is never performed by `$submit`.
 - Give the opened pull request a risk rating and point to the exact high-risk hunks worth human review.
 - State which hunks the panel, local Codex review, and CodeRabbit already covered.
 - Draft every outward message or review reply for human approval before sending it.
