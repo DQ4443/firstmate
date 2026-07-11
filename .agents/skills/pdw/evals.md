@@ -1,4 +1,4 @@
-# Evals for /pdw
+# Evals for $pdw
 
 Run isolated grader agents with binary checks and require at least 90 percent over three runs.
 
@@ -18,18 +18,18 @@ Run isolated grader agents with binary checks and require at least 90 percent ov
 
 ## Binary output checks
 
-- [ ] An explicit `/pdw` produced one root task with named cells and a funnel, not untracked bare work.
-- [ ] Implement, fix, and verify work used the full top-level shape unless a one-line S-tier small-diff downgrade was declared.
+- [ ] An explicit `$pdw` produced one root task with named cells and a funnel, never untracked bare work and never a small-diff degradation.
+- [ ] Implement, fix, and verify work used the full top-level Map, Implement, Review, and Synthesize shape.
 - [ ] Every independent launch fired in one wave within the declared S, M, L, or XL tier and the stated contention, merge-safety, and synthesis ceilings.
 - [ ] Concurrent writers had disjoint ownership or separate worktrees with an explicit integration dependency.
 - [ ] Every writer returned a clean worktree and a commit SHA.
-- [ ] Every dispatch and return recorded requested and effective model and effort, its routing rationale, and enforcement availability.
+- [ ] Every dispatch and return recorded requested, selected, and effective model and effort, its routing rationale, and enforcement availability.
 - [ ] No native subagent claim said model or effort was enforced without evidence.
 - [ ] User overrides won, quota caused no downgrade, unsupported effort recorded a fallback, and Ultra had at least two explicit independent lanes.
 - [ ] Every panel had a funnel and re-emitted its constraints.
 - [ ] Funnels flagged degenerate or missing output as `UNVERIFIED` instead of silently consuming it.
 - [ ] Every lane had a distinct descriptive name.
 - [ ] Waiting work used the owning monitor or automation while another independent wave proceeded.
-- [ ] Significant multi-stage output closed through `/lavish` with a short task summary.
+- [ ] Significant multi-stage output closed through `$lavish` with a short task summary.
 - [ ] Child returns went only to the parent and one aggregated top-level report preserved requested and effective status before it was acknowledged or durably queued.
 - [ ] Every structured return included `NEXT_STEP`.

@@ -103,8 +103,8 @@ case "$command" in
       (.return_thread_id | type == "string" and length > 0) and
       (.return_host_id | type == "string" and length > 0) and
       (.status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
-      (.requested_status | type == "string" and length > 0) and
-      (.effective_status | type == "string" and length > 0) and
+      (.requested_status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
+      (.effective_status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
       (.summary | type == "string" and length > 0) and
       (.commands | type == "array") and
       (.artifacts | type == "array") and
@@ -114,7 +114,7 @@ case "$command" in
       (.requested_model | type == "string" and length > 0) and
       (.effective_model | type == "string" and length > 0) and
       (.requested_effort | IN("light", "medium", "high", "max", "ultra")) and
-      (.effective_effort | type == "string" and length > 0) and
+      (.effective_effort | IN("light", "medium", "high", "max", "ultra", "unavailable_to_pin_in_native_subagent_api", "unverified_from_process_output")) and
       (.routing_rationale | type == "string" and length > 0) and
       (.identifiers | type == "object") and
       (.child_returns | type == "array") and
@@ -135,6 +135,18 @@ case "$command" in
       jq -n --arg key "$key" '{status: "already-acknowledged", report_key: $key}'
       exit 0
     fi
+    if [[ -f "$state_dir/exhausted/$key.json" ]]; then
+      unlock
+      jq -n --arg key "$key" '{status: "already-exhausted", report_key: $key}'
+      exit 0
+    fi
+    for existing_state in pending retry inflight; do
+      if [[ -f "$state_dir/$existing_state/$key.json" ]]; then
+        unlock
+        jq -n --arg key "$key" --arg state "$existing_state" '{status: ("already-" + $state), report_key: $key}'
+        exit 0
+      fi
+    done
     envelope=$(mktemp "$state_dir/tmp/prepare.XXXXXX")
     jq -n \
       --arg report_key "$key" \
@@ -175,6 +187,11 @@ case "$command" in
     (($# == 0)) || { printf 'drain takes no arguments\n' >&2; exit 2; }
     lock
     current=$(now_epoch)
+    for pending in "$state_dir"/pending/*.json; do
+      [[ -e "$pending" ]] || continue
+      key=$(basename "$pending" .json)
+      mv "$pending" "$state_dir/retry/$key.json"
+    done
     for inflight in "$state_dir"/inflight/*.json; do
       [[ -e "$inflight" ]] || continue
       claimed_at=$(jq -r '.claimed_at_epoch // 0' "$inflight")

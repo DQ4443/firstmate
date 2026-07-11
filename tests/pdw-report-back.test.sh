@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ADAPTER="$ROOT/.agents/skills/pdw/scripts/report-back.sh"
+PDW_SKILL="$ROOT/.agents/skills/pdw/SKILL.md"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/pdw-report.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 STATE="$TMP/state"
@@ -87,6 +88,26 @@ jq -e 'length == 0' <<<"$exhausted" >/dev/null
 [[ -f "$STATE/exhausted/$key2.json" ]]
 printf 'ok - configured retry maximum exhausts the report\n'
 
+resurrected=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-2.json" --queue)
+jq -e '.status == "already-exhausted"' <<<"$resurrected" >/dev/null
+[[ ! -e "$STATE/retry/$key2.json" && ! -e "$STATE/pending/$key2.json" ]]
+printf 'ok - exhausted report cannot be resurrected by prepare\n'
+
+write_report "$TMP/report-3.json" task-3
+pending=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-3.json")
+key3=$(jq -r '.report_key' <<<"$pending")
+drained_pending=$($ADAPTER --state-dir "$STATE" drain)
+jq -e --arg key "$key3" 'length == 1 and .[0].report_key == $key' <<<"$drained_pending" >/dev/null
+printf 'ok - drain turns an unacknowledged native-send pending report into retry work\n'
+
+write_report "$TMP/banana.json" task-banana
+jq '.effective_effort = "banana"' "$TMP/banana.json" >"$TMP/invalid-effort.json"
+if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid-effort.json" >/dev/null 2>&1; then
+  printf 'not ok - unknown effective effort was accepted\n' >&2
+  exit 1
+fi
+printf 'ok - unknown effective effort is rejected\n'
+
 mv "$STATE/config.json" "$STATE/config.saved"
 if $ADAPTER --state-dir "$STATE" drain >/dev/null 2>&1; then
   printf 'not ok - missing config was accepted\n' >&2
@@ -95,10 +116,14 @@ fi
 printf 'ok - missing config fails closed\n'
 
 mv "$STATE/config.saved" "$STATE/config.json"
-write_report "$TMP/missing-destination.json" task-3
+write_report "$TMP/missing-destination.json" task-4
 jq 'del(.return_thread_id)' "$TMP/missing-destination.json" >"$TMP/invalid.json"
 if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid.json" >/dev/null 2>&1; then
   printf 'not ok - missing return destination was accepted\n' >&2
   exit 1
 fi
 printf 'ok - missing return destination is rejected\n'
+
+grep -Fq 'on every later owning-task wake while delivery remains incomplete' "$PDW_SKILL"
+grep -Fq 'report-back.sh drain' "$PDW_SKILL"
+printf 'ok - owning-task wake contract drives durable retries without a new runtime\n'
