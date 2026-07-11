@@ -20,7 +20,8 @@ state_dir="$repo_root/state/rig"
 
 mkdir -p "$state_dir"
 python3 "$script_dir/source-audit.py" "$1" --setup "$state_dir"
-python3 "$script_dir/generate-atlas.py" --repo-root "$repo_root" --state-dir "$state_dir"
+python3 "$script_dir/generate-atlas.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1"
+python3 "$script_dir/generate-atlas.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1" --verify
 
 echo "full_atlas=$state_dir/rig-atlas.md"
 echo "portable_twin=BLOCKED"

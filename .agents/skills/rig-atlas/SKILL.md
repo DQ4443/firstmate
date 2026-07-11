@@ -12,7 +12,7 @@ Use this skill for the workflow rig, not product code or a single skill edit.
 The deliverable is one generated full document at `state/rig/rig-atlas.md`.
 It is never hand-edited.
 The only sanctioned twin is `state/rig/rig-atlas-portable.md`.
-Portable generation is blocked until Jim supplies the unredacted sanitizer omitted from the company-repo-agnostic source.
+Portable generation is blocked until the source author supplies the unredacted sanitizer omitted from the company-repo-agnostic source.
 Never infer, approximate, or replace that sanitizer.
 
 Runtime material under `state/rig/` is ignored and never committed.
@@ -28,13 +28,44 @@ Scour exactly five subjects.
 4. State and notes conventions, recording layout, schema, and purpose without copying live task contents.
 5. The memory layer, classifying every candidate into include-both, full-only, or exclude-both before any body is read into an edition.
 
-The source classification baseline is 47 include-both, 47 full-only, and 41 exclude-both.
+The source classification baseline is 47 include-both, 47 full-only, and 41 individually enumerated opaque exclude-both slots whose filenames and bodies the portable source withholds.
 The portable source includes bodies only for the 47 include-both files.
 Never copy full-only or excluded bodies from another installation.
 
 The generator inventory is nine spine skills named `pdw`, `build`, `scout`, `explore`, `websearch`, `lavish`, `oat`, `submit`, and `rig-atlas`.
 It also inventories three role definitions named `planner`, `implementer`, and `refute-reviewer`, harness hooks and configuration, references, curated memory metadata, and the generator itself.
 Domain skills stay in the live inventory and out of the spine appendix.
+
+## The docs you refresh
+
+Refresh one complete generated document at `state/rig/rig-atlas.md`.
+It preserves the source-shaped current-state atlas, all five replication sections, and Appendices A through E.
+Appendix A contains all nine live spine skills, evals, and references.
+Appendix B contains all three live Codex role TOMLs.
+Appendix C contains live Codex harness configuration and hooks that actually exist.
+Appendix D contains all 47 re-derived and adapted include-both bodies plus explicit full-only and exclude-both classifications.
+Appendix E contains the tracked generator.
+Missing any spine `SKILL.md` or role `.toml` blocks generation.
+
+The generated integrity record at `state/rig/rig-atlas.integrity.json` owns the output hash and every input hash.
+Run the generator with `--verify` after generation and before delivery.
+
+## Memory surface
+
+The source audit re-derives classification and every adapted body directly from the pinned source on each run.
+It never trusts `state/rig/source-inventory.json` as authority.
+Each include-both body records its source hash, adapted hash, and exact human or harness substitutions.
+The leak scan rejects source human names, source harness names, source run-system names, source review-bot names, and slash-form skill carriers.
+Full-only and exclude-both bodies are never copied.
+The 41 excluded identities are source-withheld opaque slots and are never guessed.
+
+## Calibration
+
+This is an inventory, not open-ended research.
+Use the scout fan-out and funnel shape without a razor or experiment stage.
+Five subjects mean five independent PDWs launched in parallel, followed by one convergence PDW.
+Choose each surface's read-cell count dynamically from live size and complexity.
+Read the current atlas, integrity record, and generator before inventory so the run produces a drift list rather than a blind rewrite.
 
 ## Pipeline
 
@@ -61,25 +92,29 @@ Run the source audit and portable include-both extraction with:
 .agents/skills/rig-atlas/scripts/setup-runtime.sh "/absolute/path/to/message (4).txt"
 ```
 
-Generate the full live atlas with:
+Generate and verify the full live atlas with:
 
 ```sh
-python3 .agents/skills/rig-atlas/scripts/generate-atlas.py --repo-root "$PWD"
+python3 .agents/skills/rig-atlas/scripts/generate-atlas.py --repo-root "$PWD" --source "/absolute/path/to/message (4).txt"
+python3 .agents/skills/rig-atlas/scripts/generate-atlas.py --repo-root "$PWD" --source "/absolute/path/to/message (4).txt" --verify
 ```
 
-The setup script verifies the pinned source digest, exact classifications, generator roster, Appendix D coverage, and sanitizer redaction before writing runtime files.
-It extracts only the sanctioned include-both bodies.
+The setup script verifies the pinned source digest, exact classifications, generator roster, complete source modules, Appendix D coverage, and sanitizer redaction before writing runtime files.
+It extracts and explicitly adapts only the sanctioned include-both bodies.
 
-## Live-document discipline
+## The generated-doc discipline
 
 The full atlas is a context drop for an agent reader.
 Use dense tables and lists, present-tense mechanisms, literal paths, and no motivational narrative.
 Record optional surfaces as absent unless verified.
 Record conventions rather than task contents.
-Re-run the generator after any live source change, even when the prose inventory did not change.
+Re-run the generator and `--verify` after any live source change, even when the prose inventory did not change.
+Never accept a hand-edited atlas, altered integrity record, stale adapted memory, partial skill suite, or wrong role suffix.
 The convergence return carries `NEXT_STEP: regenerate the full rig atlas, then update the existing system-study surface last`.
 
-## Forbidden outcomes
+Native subagent returns record `requested_effort` from the route and `effective_effort: unavailable_to_pin_in_native_subagent_api` unless an enforcing launcher supplies evidence.
+
+## Anti-patterns
 
 - A hand-edited generated atlas.
 - More than one full atlas.
