@@ -22,8 +22,8 @@ payload() {
   local command=$2
   jq -nc \
     --arg cwd "$cwd" \
-    --arg cmd "$command" \
-    '{session_id:"schema-fixture",transcript_path:"/tmp/transcript.jsonl",cwd:$cwd,hook_event_name:"PreToolUse",permission_mode:"never",tool_name:"unified_exec",tool_input:{cmd:$cmd},tool_use_id:"call-fixture"}'
+    --arg command "$command" \
+    '{session_id:"schema-fixture",transcript_path:"/tmp/transcript.jsonl",cwd:$cwd,hook_event_name:"PreToolUse",permission_mode:"never",tool_name:"Bash",tool_input:{command:$command},tool_use_id:"call-fixture"}'
 }
 
 run_guard() {
@@ -61,8 +61,12 @@ run_guard 2 "$TMP/repo" 'git push origin --delete main'
 run_guard 2 "$TMP" "cd '$TMP/repo' && git push origin main"
 run_guard 2 "$TMP" "git -C '$TMP/repo' push --all origin"
 run_guard 2 "$TMP/repo" "bash -c 'git push origin main'"
+run_guard 2 "$TMP/repo" "bash -lc 'git push origin main'"
+run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
+run_guard 2 "$TMP/repo" "eval -- 'git push origin master'"
+run_guard 2 "$TMP/repo" "bash -lc 'eval -- \"zsh -lc '\"'\"'git push origin main'\"'\"'\"'"
 
 git -C "$TMP/repo" switch -c feature >/dev/null 2>&1
 printf 'feature\n' >>"$TMP/repo/file.txt"
@@ -88,9 +92,21 @@ touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr create --title test'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed'
 run_guard 2 "$TMP/repo" 'gh pr create --title second'
+run_guard 2 "$TMP/repo" 'gh pr ready 42'
 touch "$sentinel"
-run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr create --title two'
-[[ -e "$sentinel" ]] || fail 'ambiguous multiple-create command consumed the sentinel'
+run_guard 0 "$TMP/repo" 'gh pr ready 42'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh pr ready'
+run_guard 2 "$TMP/repo" 'gh-axi pr ready 42'
+touch "$sentinel"
+run_guard 0 "$TMP/repo" 'gh-axi pr ready 42'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh-axi pr ready'
+run_guard 2 "$TMP/repo" 'npx -y gh-axi pr create --title house-cli'
+touch "$sentinel"
+run_guard 0 "$TMP/repo" 'npx -y gh-axi pr ready 42'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by npx gh-axi pr ready'
+touch "$sentinel"
+run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr ready 42'
+[[ -e "$sentinel" ]] || fail 'ambiguous multiple-action command consumed the sentinel'
 rm -f "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr view 42'
 
@@ -100,7 +116,7 @@ export CODEX_SUBMIT_SENTINEL="$custom_sentinel"
 run_guard 0 "$TMP/repo" 'gh-axi pr create --title configured'
 unset CODEX_SUBMIT_SENTINEL
 [[ ! -e "$custom_sentinel" ]] || fail 'configured submit sentinel was not consumed'
-pass 'pull-request sentinel is project-local, one-shot, and cannot authorize two creates'
+pass 'pull-request sentinel is project-local, one-shot, and cannot authorize two actions'
 
 set +e
 printf '{not-json' | python3 "$GUARD" >/dev/null 2>&1
@@ -108,18 +124,24 @@ invalid_status=$?
 set -e
 [[ "$invalid_status" -eq 0 ]] || fail 'malformed hook input did not fail open'
 
-legacy=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{command:"git push origin main"}}')
+compatibility=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:"git push origin main"}}')
 set +e
-legacy_output=$(printf '%s\n' "$legacy" | python3 "$GUARD" 2>&1)
-legacy_status=$?
+compatibility_output=$(printf '%s\n' "$compatibility" | python3 "$GUARD" 2>&1)
+compatibility_status=$?
 set -e
-[[ "$legacy_status" -eq 2 && "$legacy_output" == BLOCKED:* ]] || fail 'legacy command compatibility input failed'
-pass 'actual Codex cmd payload and legacy command payload are both handled'
+[[ "$compatibility_status" -eq 2 && "$compatibility_output" == BLOCKED:* ]] || fail 'unified-exec cmd compatibility input failed'
+canonical_priority=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{command:"git status --short",cmd:"git push origin main"}}')
+set +e
+printf '%s\n' "$canonical_priority" | python3 "$GUARD" >/dev/null 2>&1
+canonical_priority_status=$?
+set -e
+[[ "$canonical_priority_status" -eq 0 ]] || fail 'compatibility cmd overrode canonical command input'
+pass 'canonical Codex command payload and secondary unified-exec cmd payload are both handled'
 
 jq -e '
   (.hooks | keys == ["PreToolUse"]) and
   (.hooks.PreToolUse | length == 1) and
-  (.hooks.PreToolUse[0].matcher == "unified_exec") and
+  (.hooks.PreToolUse[0].matcher == "Bash") and
   (.hooks.PreToolUse[0].hooks[0].type == "command") and
   (.hooks.PreToolUse[0].hooks[0].command == "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/git-guard.py\"") and
   (.hooks.PreToolUse[0].hooks[0].timeout == 10)

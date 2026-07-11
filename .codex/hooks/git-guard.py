@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Guard Codex shell calls against the repository's gated git operations.
 
-Codex PreToolUse sends the unified shell command in ``tool_input.cmd``.
-The legacy ``tool_input.command`` field is accepted as a compatibility input.
+Codex PreToolUse sends Bash commands in ``tool_input.command``.
+The desktop unified-exec ``tool_input.cmd`` field is accepted secondarily.
 Malformed input and local inspection failures are fail-open, matching Jim's guard.
 An intentional policy rejection exits 2 and writes its reason to stderr.
 
@@ -30,6 +30,12 @@ GENERATED_ATTRIBUTION = re.compile(
     re.IGNORECASE,
 )
 SHELL_SEPARATORS = {";", "&", "&&", "|", "||"}
+SHELL_NAMES = {"bash", "sh", "zsh"}
+MAX_SHELL_DEPTH = 32
+
+
+class ShellInspectionLimit(Exception):
+    """Raised when nested shell inspection reaches its fail-closed limit."""
 
 
 def git(cwd: Path, *args: str) -> tuple[int, str]:
@@ -52,7 +58,40 @@ def block(message: str) -> int:
     return 2
 
 
+def nested_shell_commands(segment: list[str]) -> Iterable[str]:
+    for index, token in enumerate(segment):
+        if Path(token).name not in SHELL_NAMES:
+            continue
+        cursor = index + 1
+        command_index: int | None = None
+        while cursor < len(segment):
+            option = segment[cursor]
+            if option == "--":
+                cursor += 1
+                continue
+            if option.startswith("-") and "c" in option[1:]:
+                command_index = cursor + 1
+                break
+            if option.startswith("-"):
+                cursor += 1
+                continue
+            break
+        if command_index is not None and command_index < len(segment):
+            yield segment[command_index]
+
+    for index, token in enumerate(segment):
+        if token != "eval":
+            continue
+        cursor = index + 1
+        if cursor < len(segment) and segment[cursor] == "--":
+            cursor += 1
+        if cursor < len(segment):
+            yield " ".join(segment[cursor:])
+
+
 def shell_segments(command: str, depth: int = 0) -> list[list[str]]:
+    if depth > MAX_SHELL_DEPTH:
+        raise ShellInspectionLimit
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -67,18 +106,11 @@ def shell_segments(command: str, depth: int = 0) -> list[list[str]]:
         current.append(token)
     if current:
         segments.append(current)
-    if depth >= 3:
-        return segments
-
     expanded: list[list[str]] = []
     for segment in segments:
         expanded.append(segment)
-        for index, token in enumerate(segment):
-            if Path(token).name in {"bash", "sh", "zsh"}:
-                if index + 2 < len(segment) and segment[index + 1] == "-c":
-                    expanded.extend(shell_segments(segment[index + 2], depth + 1))
-            if token == "eval" and index + 1 < len(segment):
-                expanded.extend(shell_segments(segment[index + 1], depth + 1))
+        for nested in nested_shell_commands(segment):
+            expanded.extend(shell_segments(nested, depth + 1))
     return expanded
 
 
@@ -207,13 +239,13 @@ def is_pushed_head(repo: Path) -> bool:
     return ancestor == 0
 
 
-def pr_create_count(tokens: list[str]) -> int:
+def pr_action_count(tokens: list[str]) -> int:
     count = 0
     for index, token in enumerate(tokens):
         if Path(token).name not in {"gh", "gh-axi"}:
             continue
         for cursor in range(index + 1, len(tokens) - 1):
-            if tokens[cursor] == "pr" and tokens[cursor + 1] == "create":
+            if tokens[cursor] == "pr" and tokens[cursor + 1] in {"create", "ready"}:
                 count += 1
                 break
     return count
@@ -234,7 +266,7 @@ def default_sentinel(repo: Path) -> Path:
 def check(command: str, cwd: Path) -> int:
     segments = shell_segments(command)
     active_cwd = cwd
-    pr_creates: list[Path] = []
+    pr_actions: list[Path] = []
 
     for tokens in segments:
         if len(tokens) >= 2 and tokens[0] == "cd":
@@ -242,7 +274,7 @@ def check(command: str, cwd: Path) -> int:
             if len(tokens) == 2:
                 continue
 
-        pr_creates.extend([active_cwd] * pr_create_count(tokens))
+        pr_actions.extend([active_cwd] * pr_action_count(tokens))
 
         for verb, arguments, repo in git_actions(tokens, active_cwd):
             if verb == "push" and push_updates_protected(arguments, repo):
@@ -260,13 +292,13 @@ def check(command: str, cwd: Path) -> int:
                 if is_pushed_head(repo):
                     return block("HEAD is already on its upstream; make a follow-up commit")
 
-    if len(pr_creates) > 1:
-        return block("one submit sentinel authorizes exactly one pull-request creation command")
-    if pr_creates:
-        sentinel = default_sentinel(pr_creates[0])
+    if len(pr_actions) > 1:
+        return block("one submit sentinel authorizes exactly one pull-request action")
+    if pr_actions:
+        sentinel = default_sentinel(pr_actions[0])
         if not sentinel.exists():
             return block(
-                "pull-request creation requires explicit approval and the one-shot submit sentinel"
+                "pull-request creation or readiness requires explicit approval and the one-shot submit sentinel"
             )
         try:
             sentinel.unlink()
@@ -284,11 +316,13 @@ def main() -> int:
 
     try:
         tool_input = payload.get("tool_input") or {}
-        command = tool_input.get("cmd") or tool_input.get("command") or ""
+        command = tool_input.get("command") or tool_input.get("cmd") or ""
         cwd = Path(payload.get("cwd") or os.getcwd())
         if not isinstance(command, str) or not command:
             return 0
         return check(command, cwd)
+    except ShellInspectionLimit:
+        return block("nested shell command exceeded the safe inspection depth")
     except Exception:
         return 0
 
