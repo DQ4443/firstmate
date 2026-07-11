@@ -49,6 +49,7 @@ Require upfront judgment, explicit human approval, and a live cost watch before 
 ## Return
 
 Every child return follows `$pdw` and includes its requested effort, effective effort, rationale, evidence, and `NEXT_STEP` for the immediate parent.
+When the native subagent API cannot pin effort, every dispatch and return records exactly `effective_effort: unavailable_to_pin_in_native_subagent_api`.
 The scout parent's structured return must carry `NEXT_STEP: invoke $lavish decision page before reporting` whenever the significant-result rule requires a page.
 After the pipeline completes, invoke `$lavish` before sending the significant result to the caller.
 The top-level task aggregates once to its injected return destination and no child reports directly to the Command Center.

@@ -47,3 +47,4 @@ Do not search the web inside an explore cell.
 Do not mint a Lavish page because pages belong to the calling `$scout` or `$build` flow.
 Do not use a writing lane for local recon.
 Every dispatch and child return records requested effort, effective effort, and a one-line rationale under `$pdw`.
+When the native subagent API cannot pin effort, every dispatch and return records exactly `effective_effort: unavailable_to_pin_in_native_subagent_api`.

@@ -29,4 +29,4 @@ Run isolated grader agents, use binary checks, and target at least 90 percent ac
 - [ ] A multi-subject request used one task team per subject concurrently followed by convergence instead of one mega-team or one lone probe per subject.
 - [ ] No cell inspected local repository implementation.
 - [ ] Websearch created no Lavish page.
-- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable.
+- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable, using exactly `effective_effort: unavailable_to_pin_in_native_subagent_api` when the native API could not pin effort.

@@ -30,4 +30,4 @@ Run isolated grader agents, use binary checks, and target at least 90 percent ac
 - [ ] Cheap local experiments ran and were labeled `MEASURED`, while expensive external experiments stayed gated on explicit human approval.
 - [ ] A significant scout ended on the existing Lavish decision page, while a small result returned directly with its verdict first.
 - [ ] The structured return carried `NEXT_STEP: invoke $lavish decision page before reporting` when a page was required, and `$lavish` ran before reporting.
-- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable.
+- [ ] Every dispatch and return recorded requested effort, effective effort, and one-line routing rationale without claiming enforcement when unavailable, using exactly `effective_effort: unavailable_to_pin_in_native_subagent_api` when the native API could not pin effort.
