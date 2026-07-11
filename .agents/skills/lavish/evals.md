@@ -20,7 +20,7 @@ Run isolated binary graders three times and target at least 90 percent.
 
 - [ ] Oat and the configured canonical David-warm component source were read before page construction.
 - [ ] The canonical source resolved from `DAVID_WARM_COMPONENT_FILE` or the repo-relative default, and absence blocked page creation.
-- [ ] Decision-zone, dynamic-sidebar, and executable-Mermaid components were copied byte-for-byte from their canonical `COPY VERBATIM` blocks.
+- [ ] Decision-zone and dynamic-sidebar components were copied byte-for-byte from their canonical `COPY VERBATIM` blocks.
 - [ ] Every used David-warm component was copied verbatim, with no second palette or restyled component.
 - [ ] The required decision-zone reference was read before building a decision zone.
 - [ ] The required nav-sidebar reference was read before building a checkpoint rail.
@@ -39,6 +39,6 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] The sidebar has exactly Main, Rounds, and Decisions and is built dynamically from page sections.
 - [ ] The rail scrolls independently when long and switches to a toggle overlay below the paired breakpoint.
 - [ ] UI claims embed the decisive capture or carry `UNVERIFIED`.
-- [ ] The workstream keeps one stable HTML path and resumes the same `lavish-axi` session after updates.
+- [ ] The workstream keeps one stable HTML path and claims session resume only after a real open, update, and reopen prove the same session identity.
 - [ ] No `lavish-axi share`, `ht-ml.app`, external send, or other outward action occurred.
 - [ ] A new page was created only for a genuinely new direction.

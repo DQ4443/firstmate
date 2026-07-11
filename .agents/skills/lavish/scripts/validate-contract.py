@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Lavish and Oat invariants targeted by hostile mutations."""
+"""Validate Lavish and Oat contract invariants targeted by hostile mutations."""
 
 from __future__ import annotations
 
@@ -15,32 +15,29 @@ def require(text: str, value: str, label: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lavish", required=True, type=Path)
-    parser.add_argument("--evals", required=True, type=Path)
-    parser.add_argument("--oat", required=True, type=Path)
+    for name in ("lavish", "evals", "oat", "decision", "sidebar"):
+        parser.add_argument(f"--{name}", required=True, type=Path)
     args = parser.parse_args()
-    lavish = args.lavish.read_text(encoding="utf-8")
-    evals = args.evals.read_text(encoding="utf-8")
-    oat = args.oat.read_text(encoding="utf-8")
+    texts = {name: getattr(args, name).read_text(encoding="utf-8") for name in ("lavish", "evals", "oat", "decision", "sidebar")}
+    lavish, evals, oat = texts["lavish"], texts["evals"], texts["oat"]
     try:
-        order = [
-            lavish.index("Read `.agents/skills/oat/SKILL.md`"),
-            lavish.index("Read `.agents/skills/lavish/references/decision-zone.md`"),
-            lavish.index("Read `.agents/skills/lavish/references/nav-sidebar.md`"),
-            lavish.index("Build the self-contained page"),
-            lavish.index("Render the HTML in a real browser"),
-        ]
+        order = [lavish.index("Read `.agents/skills/oat/SKILL.md`"), lavish.index("Read `.agents/skills/lavish/references/decision-zone.md`"), lavish.index("Read `.agents/skills/lavish/references/nav-sidebar.md`"), lavish.index("Build the self-contained page"), lavish.index("Render the HTML in a real browser")]
         if order != sorted(order):
             raise ValueError("module order changed")
         require(evals, "$lavish discuss the dashboard design here", "$lavish trigger")
-        require(lavish, "Use stable page-scoped IDs `D1`, `D2`, and later.", "D1 identifier rule")
-        require(lavish, "Every block ends with a free-text note input wired into the reply bar.", "decision notes")
-        require(lavish, "The first content section after the short summary is a rendered diagram", "report-first diagram")
-        require(lavish, "Each round appends a section and preserves all prior round content.", "append-only history")
-        require(lavish, "Do not run `lavish-axi share`", "outbound share gate")
-        require(lavish, "do not send the file externally without David's explicit word", "outbound send gate")
-        require(oat, "Pages with directed graphs copy `COPY VERBATIM: EXECUTABLE MERMAID` verbatim.", "canonical executable Mermaid component")
-    except (ValueError, OSError) as error:
+        require(lavish, "The Recommended option is first and preselected.", "Recommended-first rule")
+        require(lavish, "Every short-answer question gets a real textarea wired into the reply bar.", "textarea rule")
+        require(lavish, "Keep one stable file path per workstream.", "stable path rule")
+        require(lavish, "Each round appends a section and preserves all prior round content.", "append-only update rule")
+        require(lavish, "Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.", "real resume evidence gate")
+        require(oat, "only source of visual tokens and components", "sole style owner")
+        require(texts["decision"], "arbitrary page-scoped `Dn`, `On`, and `Qn`", "arbitrary identifier support")
+        require(texts["decision"], "DAVID_WARM_COMPONENT_FILE", "configured decision source")
+        require(texts["sidebar"], "DAVID_WARM_COMPONENT_FILE", "configured sidebar source")
+        require(texts["sidebar"], "Build round links at load time", "dynamic sidebar reference")
+        if "COPY VERBATIM: EXECUTABLE MERMAID" in oat:
+            raise ValueError("unverified executable Mermaid claim")
+    except (OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     print("contract=PASS")

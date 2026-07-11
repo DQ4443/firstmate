@@ -21,7 +21,7 @@ Decision pages copy `COPY VERBATIM: DECISION ZONE` verbatim.
 
 Checkpoint pages copy `COPY VERBATIM: DYNAMIC SIDEBAR` verbatim.
 
-Pages with directed graphs copy `COPY VERBATIM: EXECUTABLE MERMAID` verbatim.
+Pages with directed graphs copy `COPY VERBATIM: MERMAID LIGHT THEME` verbatim.
 
 Do not restyle a copied component and do not add a second palette.
 
@@ -66,7 +66,9 @@ A diagram whose labels cannot be read without browser zoom fails QA.
 
 ## Directed acyclic graphs use Mermaid
 
-Copy the `COPY VERBATIM: EXECUTABLE MERMAID` component from the configured canonical file verbatim.
+Copy the `COPY VERBATIM: MERMAID LIGHT THEME` component from the configured canonical file verbatim.
+
+Do not claim browser execution until a real browser renders the diagram and the screenshot is read.
 
 Use a vertical flow when it keeps the path compact and readable.
 
@@ -123,7 +125,7 @@ State the scale, unit, and source next to every chart.
 3. Read the screenshot and inspect overflow, overlap, clipping, typography, diagram labels, table width, and fixed controls.
 4. Exercise every interactive control, including decision selection, typed replies, tabs, overlays, and Copy fallbacks.
 5. Fix each error-severity issue and render again.
-6. Open or resume the stable page with `lavish-axi <html-file>`.
+6. Open the stable page with `lavish-axi <html-file>` and record real session identity before claiming resume.
 7. Use `lavish-axi poll <html-file>` only for the active local review loop.
 8. Do not share, export to a public host, or send externally without David's explicit word.
 

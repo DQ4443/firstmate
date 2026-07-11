@@ -6,7 +6,9 @@ The group order and status semantics live in `../SKILL.md`.
 
 This file owns the rail geometry and dynamic behavior.
 
-Visible styling must come from components and tokens copied verbatim from `data/operating-model/components/david-warm.html`.
+Resolve the canonical source from `DAVID_WARM_COMPONENT_FILE`, defaulting to `data/operating-model/components/david-warm.html` relative to the repository root.
+
+Visible styling must come from components and tokens copied verbatim from that resolved file.
 
 ## Rail geometry
 

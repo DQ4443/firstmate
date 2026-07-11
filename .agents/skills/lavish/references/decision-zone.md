@@ -6,7 +6,9 @@ The behavioral rules for when a decision exists, D-numbering, Recommended-first 
 
 This file owns the structure and JavaScript behavior.
 
-All visual classes must use components and tokens copied verbatim from `data/operating-model/components/david-warm.html`.
+Resolve the canonical source from `DAVID_WARM_COMPONENT_FILE`, defaulting to `data/operating-model/components/david-warm.html` relative to the repository root.
+
+All visual classes must use components and tokens copied verbatim from that resolved file.
 
 ## Structure
 
@@ -14,7 +16,7 @@ Use a `.dz` wrapper.
 
 Inside it, use a sticky `.tabbar` with one button per open decision, plus Decided log and Questions or Standing tabs.
 
-Each open-decision button uses `data-tab="dN"` and contains the decision ID, title, and a current-selection badge with ID `b-dN`.
+Each open-decision button uses a page-scoped `data-tab` value and contains the decision ID, title, and a current-selection badge using `data-badge-for`.
 
 Each `.tab` pane contains the four-row context table, `.opt` cards, and one `.dnote` input.
 
@@ -28,7 +30,9 @@ Do not reimplement their CSS in the page.
 
 ## JavaScript behavior
 
-Use an immediately invoked function with `sel`, `notes`, and `qa` state.
+Use the canonical generic behavior, which discovers arbitrary page-scoped `Dn`, `On`, and `Qn` values from data attributes.
+
+Do not hardcode D1, D2, O1, O2, or Q1 into the behavior.
 
 The `compose()` function builds a live string such as `D1: O1 (note) | D2: O1+O3 | Q1: text`.
 
@@ -44,7 +48,7 @@ The Copy button first tries `navigator.clipboard.writeText`.
 
 On rejection or unavailability, it tries `document.execCommand('copy')` on a temporary textarea.
 
-If that also fails, it selects the reply text and tells the reader to press Command-C.
+If that also fails, it selects the reply text and exposes the visible instruction to press Command-C.
 
 A bare promise success handler without rejection handling fails this contract.
 

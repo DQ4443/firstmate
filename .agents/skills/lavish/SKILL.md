@@ -11,7 +11,7 @@ description: Render a plan, decision review, closing report, or build checkpoint
 - Read `.agents/skills/lavish/references/decision-zone.md` before building any decision zone.
 - Read `.agents/skills/lavish/references/nav-sidebar.md` before building a checkpoint sidebar.
 - Render the page and inspect the screenshot before presenting it.
-- Keep one stable file path per workstream so `lavish-axi` resumes the same page.
+- Keep one stable file path per workstream.
 - Retire decided tabs into the Decided log.
 - Badge every landed or evidence claim with the level rendered by the canonical David-warm evidence component.
 
@@ -23,7 +23,7 @@ Oat owns the style boundary and resolves the canonical component file from `DAVI
 
 If that file is absent, page creation is blocked.
 
-If it lacks the decision-zone, dynamic-sidebar, or executable-Mermaid component, install them into that canonical file only after the separately reviewed source change is authorized.
+If it lacks the decision-zone or dynamic-sidebar component, install them into that canonical file only after the separately reviewed source change is authorized.
 
 Use `.agents/skills/lavish/scripts/install-components.py "${DAVID_WARM_COMPONENT_FILE:-data/operating-model/components/david-warm.html}"`.
 
@@ -33,7 +33,9 @@ A page that copies the source rig's palette, invents a second component system, 
 
 Every Lavish page is a self-contained HTML file under a stable workstream path, normally `.lavish/<workstream>.html`.
 
-Run `lavish-axi <html-file>` to open or resume the local review surface.
+Run `lavish-axi <html-file>` to open the local review surface.
+
+Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.
 
 Run `lavish-axi poll <html-file>` when David is actively reviewing it so annotations and layout warnings return to the owning task.
 
@@ -45,7 +47,7 @@ The Copy button must try `navigator.clipboard.writeText`, fall back to `document
 
 Keep one living page per workstream.
 
-When a round lands or a tracked follow-up resolves, update the same file, keep its title stable, append the result, refresh the short summary, and resume the same Lavish session.
+When a round lands or a tracked follow-up resolves, update the same file, keep its title stable, append the result, and refresh the short summary.
 
 Create a new page only for a genuinely new direction.
 
@@ -59,7 +61,7 @@ Create a new page only for a genuinely new direction.
 6. Render the HTML in a real browser and inspect the screenshot for overflow, overlap, clipped controls, unreadable diagrams, and reply composition.
 7. Exercise option selection, typed answers, tab changes, and the full Copy fallback.
 8. Fix every error-severity layout or interaction defect and render again.
-9. Open or resume the page with `lavish-axi <html-file>`.
+9. Open the page with `lavish-axi <html-file>` and record real session identity before claiming resume.
 10. Ask only the open questions already rendered on the page.
 11. Update the same page as decisions land and move decided blocks into the Decided log.
 
