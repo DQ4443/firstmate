@@ -62,6 +62,8 @@ run_guard 2 "$TMP" "cd '$TMP/repo' && git push origin main"
 run_guard 2 "$TMP" "git -C '$TMP/repo' push --all origin"
 run_guard 2 "$TMP/repo" "bash -c 'git push origin main'"
 run_guard 2 "$TMP/repo" "bash -lc 'git push origin main'"
+run_guard 2 "$TMP/repo" "bash -O extglob -c 'git push origin main'"
+run_guard 2 "$TMP/repo" "bash -o posix -c 'git push origin main'"
 run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
@@ -74,14 +76,28 @@ git -C "$TMP/repo" commit -am feature >/dev/null
 run_guard 0 "$TMP/repo" 'git push origin feature'
 run_guard 0 "$TMP/repo" 'git push origin main:feature-copy'
 run_guard 2 "$TMP/repo" 'git push origin feature:refs/heads/main'
+run_guard 2 "$TMP/repo" 'git push origin refs/heads/*:refs/heads/*'
+run_guard 2 "$TMP/repo" 'git push origin feature:refs/heads/m*'
+run_guard 0 "$TMP/repo" 'git push origin refs/heads/feature*:refs/heads/release/*'
 run_guard 0 "$TMP/repo" 'git commit --amend --no-edit'
 
 git -C "$TMP/repo" push -u origin feature >/dev/null 2>&1
+git -C "$TMP/repo" config --add remote.origin.push HEAD:refs/heads/main
+run_guard 2 "$TMP/repo" 'git push origin'
+run_guard 2 "$TMP/repo" 'git push'
+git -C "$TMP/repo" config --unset-all remote.origin.push
+git -C "$TMP/repo" config --add remote.origin.push HEAD:refs/heads/release
+run_guard 0 "$TMP/repo" 'git push origin'
+git -C "$TMP/repo" config --unset-all remote.origin.push
 run_guard 2 "$TMP/repo" 'git commit --amend --no-edit'
 run_guard 2 "$TMP/repo" 'git commit -m "fix" -m "Co-Authored-By: Bot <bot@example.com>"'
 run_guard 2 "$TMP/repo" 'git commit -m "Generated-by automation"'
 printf 'subject\n\nGenerated with Codex\n' >"$TMP/repo/message.txt"
 run_guard 2 "$TMP/repo" 'git commit -F message.txt'
+run_guard 2 "$TMP/repo" 'git commit -F -'
+run_guard 2 "$TMP/repo" 'git commit -F-'
+run_guard 2 "$TMP/repo" 'git commit --file=-'
+run_guard 2 "$TMP/repo" 'git commit --file /dev/stdin'
 run_guard 0 "$TMP/repo" 'git commit -m "ordinary message"'
 pass 'push, attribution, and pushed-amend policies resist adversarial command shapes'
 
@@ -101,9 +117,10 @@ touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh-axi pr ready 42'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh-axi pr ready'
 run_guard 2 "$TMP/repo" 'npx -y gh-axi pr create --title house-cli'
+run_guard 2 "$TMP/repo" 'npx -y gh-axi@latest pr create --title versioned-house-cli'
 touch "$sentinel"
-run_guard 0 "$TMP/repo" 'npx -y gh-axi pr ready 42'
-[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by npx gh-axi pr ready'
+run_guard 0 "$TMP/repo" 'npx -y gh-axi@1.2.3 pr ready 42'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by versioned npx gh-axi pr ready'
 touch "$sentinel"
 run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr ready 42'
 [[ -e "$sentinel" ]] || fail 'ambiguous multiple-action command consumed the sentinel'
@@ -137,6 +154,30 @@ canonical_priority_status=$?
 set -e
 [[ "$canonical_priority_status" -eq 0 ]] || fail 'compatibility cmd overrode canonical command input'
 pass 'canonical Codex command payload and secondary unified-exec cmd payload are both handled'
+
+GUARD="$GUARD" REPO="$TMP/repo" python3 - <<'PY'
+import json
+import os
+import subprocess
+import time
+
+command = "eval -- " * 80 + "git status --short"
+payload = json.dumps({"cwd": os.environ["REPO"], "tool_input": {"command": command}})
+started = time.monotonic()
+result = subprocess.run(
+    ["python3", os.environ["GUARD"]],
+    input=payload,
+    capture_output=True,
+    text=True,
+    timeout=2,
+    check=False,
+)
+elapsed = time.monotonic() - started
+assert result.returncode == 2, result
+assert "safe inspection depth" in result.stderr, result.stderr
+assert elapsed < 2, elapsed
+print(f"PASS: nested eval inspection failed closed in {elapsed:.3f}s")
+PY
 
 jq -e '
   (.hooks | keys == ["PreToolUse"]) and

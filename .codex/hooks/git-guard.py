@@ -14,6 +14,8 @@ when an operator needs a different portable location.
 
 from __future__ import annotations
 
+from collections import deque
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -31,7 +33,10 @@ GENERATED_ATTRIBUTION = re.compile(
 )
 SHELL_SEPARATORS = {";", "&", "&&", "|", "||"}
 SHELL_NAMES = {"bash", "sh", "zsh"}
+SHELL_OPTIONS_WITH_VALUES = {"-O", "+O", "-o", "+o", "--init-file", "--rcfile"}
 MAX_SHELL_DEPTH = 32
+MAX_INSPECTION_BYTES = 1_000_000
+INSPECTION_BUDGET_FACTOR = 40
 
 
 class ShellInspectionLimit(Exception):
@@ -58,40 +63,7 @@ def block(message: str) -> int:
     return 2
 
 
-def nested_shell_commands(segment: list[str]) -> Iterable[str]:
-    for index, token in enumerate(segment):
-        if Path(token).name not in SHELL_NAMES:
-            continue
-        cursor = index + 1
-        command_index: int | None = None
-        while cursor < len(segment):
-            option = segment[cursor]
-            if option == "--":
-                cursor += 1
-                continue
-            if option.startswith("-") and "c" in option[1:]:
-                command_index = cursor + 1
-                break
-            if option.startswith("-"):
-                cursor += 1
-                continue
-            break
-        if command_index is not None and command_index < len(segment):
-            yield segment[command_index]
-
-    for index, token in enumerate(segment):
-        if token != "eval":
-            continue
-        cursor = index + 1
-        if cursor < len(segment) and segment[cursor] == "--":
-            cursor += 1
-        if cursor < len(segment):
-            yield " ".join(segment[cursor:])
-
-
-def shell_segments(command: str, depth: int = 0) -> list[list[str]]:
-    if depth > MAX_SHELL_DEPTH:
-        raise ShellInspectionLimit
+def split_shell_segments(command: str) -> list[list[str]]:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -106,11 +78,72 @@ def shell_segments(command: str, depth: int = 0) -> list[list[str]]:
         current.append(token)
     if current:
         segments.append(current)
+    return segments
+
+
+def nested_shell_command(segment: list[str]) -> str | None:
+    wrapper_index: int | None = None
+    wrapper_name = ""
+    for index, token in enumerate(segment):
+        name = Path(token).name
+        if name in SHELL_NAMES or token == "eval":
+            wrapper_index = index
+            wrapper_name = name if name in SHELL_NAMES else token
+            break
+    if wrapper_index is None:
+        return None
+
+    cursor = wrapper_index + 1
+    if wrapper_name == "eval":
+        if cursor < len(segment) and segment[cursor] == "--":
+            cursor += 1
+        return " ".join(segment[cursor:]) if cursor < len(segment) else None
+
+    while cursor < len(segment):
+        option = segment[cursor]
+        if option in SHELL_OPTIONS_WITH_VALUES:
+            cursor += 2
+            continue
+        if option == "--":
+            return None
+        if option.startswith("--"):
+            cursor += 1
+            continue
+        if option.startswith(("-", "+")):
+            flags = option[1:]
+            if "c" in flags:
+                return segment[cursor + 1] if cursor + 1 < len(segment) else None
+            cursor += 1
+            continue
+        return None
+    return None
+
+
+def shell_segments(command: str) -> list[list[str]]:
+    queue: deque[tuple[str, int]] = deque([(command, 0)])
+    seen: set[str] = set()
     expanded: list[list[str]] = []
-    for segment in segments:
-        expanded.append(segment)
-        for nested in nested_shell_commands(segment):
-            expanded.extend(shell_segments(nested, depth + 1))
+    inspected = 0
+    budget = min(
+        MAX_INSPECTION_BYTES,
+        max(4096, len(command) * INSPECTION_BUDGET_FACTOR),
+    )
+    while queue:
+        current, depth = queue.popleft()
+        if current in seen:
+            continue
+        if depth > MAX_SHELL_DEPTH:
+            raise ShellInspectionLimit
+        seen.add(current)
+        segments = split_shell_segments(current)
+        inspected += len(current) + sum(len(segment) for segment in segments)
+        if inspected > budget:
+            raise ShellInspectionLimit
+        expanded.extend(segments)
+        for segment in segments:
+            nested = nested_shell_command(segment)
+            if nested:
+                queue.append((nested, depth + 1))
     return expanded
 
 
@@ -198,9 +231,47 @@ def push_positionals(arguments: list[str]) -> tuple[list[str], bool]:
 def ref_targets_protected(refspec: str, on_protected_branch: bool) -> bool:
     refspec = refspec.lstrip("+")
     target = refspec.rsplit(":", 1)[-1]
+    protected_targets = {
+        "main",
+        "master",
+        "refs/heads/main",
+        "refs/heads/master",
+    }
+    if any(fnmatch.fnmatchcase(protected, target) for protected in protected_targets):
+        return True
     if target.startswith("refs/heads/"):
         target = target.removeprefix("refs/heads/")
     return target in BLOCKED_BRANCHES or (target == "HEAD" and on_protected_branch)
+
+
+def configured_push_refspecs(repo: Path, remote: str | None) -> list[str]:
+    selected = remote
+    if not selected:
+        branch = current_branch(repo)
+        keys = []
+        if branch:
+            keys.append(f"branch.{branch}.pushRemote")
+        keys.append("remote.pushDefault")
+        if branch:
+            keys.append(f"branch.{branch}.remote")
+        for key in keys:
+            status, value = git(repo, "config", "--get", key)
+            if status == 0 and value and value != ".":
+                selected = value
+                break
+    if not selected:
+        status, remotes = git(repo, "remote")
+        names = remotes.splitlines() if status == 0 else []
+        if len(names) == 1:
+            selected = names[0]
+    if selected:
+        status, values = git(repo, "config", "--get-all", f"remote.{selected}.push")
+        return values.splitlines() if status == 0 and values else []
+
+    status, values = git(repo, "config", "--get-regexp", r"^remote\..*\.push$")
+    if status != 0:
+        return []
+    return [line.split(None, 1)[1] for line in values.splitlines() if len(line.split(None, 1)) == 2]
 
 
 def push_updates_protected(arguments: list[str], repo: Path) -> bool:
@@ -209,26 +280,34 @@ def push_updates_protected(arguments: list[str], repo: Path) -> bool:
     positionals, broad_push = push_positionals(arguments)
     if broad_push:
         return True
+    remote = positionals[0] if positionals else None
     refspecs = positionals[1:] if positionals else []
     if not refspecs:
-        return on_protected
+        refspecs = configured_push_refspecs(repo, remote)
+        return on_protected or any(
+            ref_targets_protected(refspec, on_protected) for refspec in refspecs
+        )
     return any(ref_targets_protected(refspec, on_protected) for refspec in refspecs)
 
 
-def message_file(arguments: list[str], repo: Path) -> str:
+def message_file(arguments: list[str], repo: Path) -> tuple[str, bool]:
     for index, token in enumerate(arguments):
         value = ""
         if token in {"-F", "--file"} and index + 1 < len(arguments):
             value = arguments[index + 1]
+        elif token.startswith("-F") and len(token) > 2:
+            value = token[2:]
         elif token.startswith("--file="):
             value = token.split("=", 1)[1]
         if not value:
             continue
+        if value in {"-", "/dev/stdin", "/dev/fd/0"}:
+            return "", True
         try:
-            return resolved_path(repo, value).read_text(encoding="utf-8")
+            return resolved_path(repo, value).read_text(encoding="utf-8"), False
         except (OSError, UnicodeError):
-            return ""
-    return ""
+            return "", False
+    return "", False
 
 
 def is_pushed_head(repo: Path) -> bool:
@@ -239,10 +318,17 @@ def is_pushed_head(repo: Path) -> bool:
     return ancestor == 0
 
 
+def normalized_executable(token: str) -> str:
+    name = Path(token).name
+    if name.startswith("gh-axi@"):
+        return "gh-axi"
+    return name
+
+
 def pr_action_count(tokens: list[str]) -> int:
     count = 0
     for index, token in enumerate(tokens):
-        if Path(token).name not in {"gh", "gh-axi"}:
+        if normalized_executable(token) not in {"gh", "gh-axi"}:
             continue
         for cursor in range(index + 1, len(tokens) - 1):
             if tokens[cursor] == "pr" and tokens[cursor + 1] in {"create", "ready"}:
@@ -284,7 +370,9 @@ def check(command: str, cwd: Path) -> int:
                 continue
 
             command_text = " ".join(arguments)
-            file_text = message_file(arguments, repo)
+            file_text, stdin_message = message_file(arguments, repo)
+            if stdin_message:
+                return block("stdin-sourced commit messages cannot be inspected safely")
             if GENERATED_ATTRIBUTION.search(command_text) or GENERATED_ATTRIBUTION.search(file_text):
                 return block("commit messages may not contain co-author or generated-by attribution")
 
