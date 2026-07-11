@@ -5,7 +5,11 @@ description: The single style-owner boundary for every David-facing Lavish plan,
 
 # oat, the house style boundary
 
-Every David-facing HTML page uses `data/operating-model/components/david-warm.html` as its only source of visual tokens and components.
+Every David-facing HTML page uses the path in `DAVID_WARM_COMPONENT_FILE` as its only source of visual tokens and components.
+
+When the variable is unset, resolve `data/operating-model/components/david-warm.html` relative to the repository root.
+
+If the resolved file is absent, stop because page creation is blocked.
 
 Read that file completely before writing the page.
 
@@ -13,9 +17,17 @@ Copy each required component from its `COPY VERBATIM` marker through its matchin
 
 Change only human text inside the copied structure.
 
+Decision pages copy `COPY VERBATIM: DECISION ZONE` verbatim.
+
+Checkpoint pages copy `COPY VERBATIM: DYNAMIC SIDEBAR` verbatim.
+
+Pages with directed graphs copy `COPY VERBATIM: EXECUTABLE MERMAID` verbatim.
+
 Do not restyle a copied component and do not add a second palette.
 
-If a component is missing, add it to David-warm first in a separately reviewed change, then copy it into the page.
+If a component is missing, run `.agents/skills/lavish/scripts/install-components.py "${DAVID_WARM_COMPONENT_FILE:-data/operating-model/components/david-warm.html}"` against a reviewable copy or the authorized canonical file, review that source change, then copy it into the page.
+
+The installer must never target an unverified substrate.
 
 ## Canonical component source
 
@@ -54,7 +66,7 @@ A diagram whose labels cannot be read without browser zoom fails QA.
 
 ## Directed acyclic graphs use Mermaid
 
-Copy the Mermaid light-theme component from `data/operating-model/components/david-warm.html` verbatim.
+Copy the `COPY VERBATIM: EXECUTABLE MERMAID` component from the configured canonical file verbatim.
 
 Use a vertical flow when it keeps the path compact and readable.
 
@@ -66,21 +78,9 @@ Use a full soft border around groups rather than a sharp default cluster box.
 
 Keep the logical width within the page and split a large graph into several smaller diagrams when the funnel would be hard to read.
 
-Set Mermaid flowchart `wrappingWidth` to 700, use a basis curve, and leave enough node and rank spacing for labels to clear their edges.
+Use the canonical component's basis curve, measured font, and theme values without local overrides.
 
-Set the top-level Mermaid `fontFamily` as well as the theme variable because layout-time measurement must use the same font as rendering.
-
-Pad bold labels only when browser QA proves Mermaid clips their measured width.
-
-Render Mermaid to a local PNG when the target viewer cannot execute Mermaid safely.
-
-Use this local render shape after writing `d.mmd` and a small font-enforcement CSS file:
-
-```bash
-npx -y -p @mermaid-js/mermaid-cli mmdc -i d.mmd -o d.png -b '#FFFFFF' -s 2 -w 1800 --cssFile david-warm-mermaid.css
-```
-
-The 1800-pixel viewport prevents Mermaid's default viewport from silently shrinking the whole diagram before the 2x scale is applied.
+Pad labels or render a local image only when browser QA proves the executable component cannot present the graph readably.
 
 Read the rendered image and fix clipped labels, wrong fonts, overlap, stray edges, and unreadable scaling.
 

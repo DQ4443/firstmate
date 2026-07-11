@@ -19,7 +19,13 @@ description: Render a plan, decision review, closing report, or build checkpoint
 
 Read `.agents/skills/oat/SKILL.md` completely.
 
-Oat owns the style boundary and points to `data/operating-model/components/david-warm.html` as the only component source for David-facing HTML.
+Oat owns the style boundary and resolves the canonical component file from `DAVID_WARM_COMPONENT_FILE`, defaulting to `data/operating-model/components/david-warm.html` relative to the repository root.
+
+If that file is absent, page creation is blocked.
+
+If it lacks the decision-zone, dynamic-sidebar, or executable-Mermaid component, install them into that canonical file only after the separately reviewed source change is authorized.
+
+Use `.agents/skills/lavish/scripts/install-components.py "${DAVID_WARM_COMPONENT_FILE:-data/operating-model/components/david-warm.html}"`.
 
 A page that copies the source rig's palette, invents a second component system, or restyles a David-warm component is a defect.
 
@@ -45,7 +51,7 @@ Create a new page only for a genuinely new direction.
 
 ## Procedure
 
-1. Read Oat and the canonical David-warm component source.
+1. Read Oat and the configured canonical David-warm component source.
 2. Gather enough evidence to render facts rather than a speculative plan.
 3. For a decision page, read `references/decision-zone.md` before writing the zone.
 4. For a checkpoint page, also read `references/nav-sidebar.md` before writing the rail.
@@ -133,7 +139,7 @@ Use a table with risk, likelihood, blast radius, and undo path.
 
 ## Style boundary
 
-All visual tokens, components, Mermaid theme variables, evidence badges, and footer treatment come from `data/operating-model/components/david-warm.html` verbatim.
+All visual tokens, components, Mermaid theme variables, evidence badges, and footer treatment come from the configured canonical David-warm component file verbatim.
 
 Do not fork those rules inside this skill.
 

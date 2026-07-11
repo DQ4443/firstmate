@@ -18,7 +18,9 @@ Run isolated binary graders three times and target at least 90 percent.
 
 ## Binary output checks
 
-- [ ] Oat and the canonical David-warm component source were read before page construction.
+- [ ] Oat and the configured canonical David-warm component source were read before page construction.
+- [ ] The canonical source resolved from `DAVID_WARM_COMPONENT_FILE` or the repo-relative default, and absence blocked page creation.
+- [ ] Decision-zone, dynamic-sidebar, and executable-Mermaid components were copied byte-for-byte from their canonical `COPY VERBATIM` blocks.
 - [ ] Every used David-warm component was copied verbatim, with no second palette or restyled component.
 - [ ] The required decision-zone reference was read before building a decision zone.
 - [ ] The required nav-sidebar reference was read before building a checkpoint rail.
