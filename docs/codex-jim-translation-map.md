@@ -9,7 +9,7 @@ The abandoned custom runtime, submit state machine, authorization schema, review
 The source is `/Users/dq4443/Downloads/message (4).txt`.
 Its SHA-256 is `134eb182731726ae9305d6a7a74d8a767bfb7f042201e953536ceec507f19f7c`.
 The file has 3,510 lines and is state-stamped 2026-07-10.
-The atlas and system model are at lines 1-192, the verbatim skill suite begins at line 248, the roles begin at line 1,356, the hooks begin at line 1,418, and the self-contained generator begins at line 3,057.
+The atlas and system model are at lines 1-192, the verbatim skill suite begins at line 248, the roles begin at line 1,356, the hooks begin at line 1,418, the curated portable memories occupy lines 1,678-3,055, and the self-contained generator occupies lines 3,057-3,505.
 The clean canonical adaptation copy at lines 3,406-3,416 governs path swaps, project-specific deletions, submit substitutions, generic modules, human naming, and eval substitutions.
 The same adaptation text appears earlier in the generated document, so the lines 3,406-3,416 copy is the comparison anchor.
 
@@ -20,8 +20,9 @@ Codex substitutions replace harness mechanisms only.
 David's requested effort routing, Command Center return routing, worktree rule, CodeRabbit choice, and existing visual system are explicit deltas inside that architecture.
 No atomic Codex equivalent exists for one Claude Workflow call.
 Codex native task teams are inspectable in the desktop app and are the default way to express Jim's workflow cells.
-Native subagent spawn cannot pin a per-worker model, reasoning effort, tool fence, or worktree isolation.
-An explicit `codex exec` launch is the enforceable fallback when a worker needs a pinned model or effort, a restricted launch contract, or an isolated writing worktree.
+Codex custom roles can use a `config_file` to carry model, reasoning effort, sandbox, and role instructions.
+This session's `collaboration.spawn_agent` wrapper exposes only `task_name`, `message`, and `fork_turns`, so it cannot select one of those custom roles or prove that its controls took effect.
+An explicit `codex exec` launch is the intended fallback when launch settings must be enforced, but no role-loader command is approved until the external-launch acceptance test proves its exact config carrier and effective settings.
 The parent task owns the workflow topology and funnels because a worker must not create a competing orchestration layer.
 
 ## Exact target layout
@@ -32,7 +33,12 @@ The Lavish progressive-disclosure files live at `.agents/skills/lavish/reference
 The thin Codex role definitions live at `.codex/agents/planner.toml`, `.codex/agents/implementer.toml`, and `.codex/agents/refute-reviewer.toml`.
 The hook scripts live at `.codex/hooks/git-guard.py`, `.codex/hooks/session-title.sh`, `.codex/hooks/session-rename-nudge.sh`, and `.codex/hooks/pre-commit-install.sh`.
 The repo-local Codex hook declaration lives at `.codex/hooks.json` only after its schema and project-scope behavior are proven against the installed harness.
-The generated inventory lives at `.agents/rig/rig-atlas.md`, its portable twin lives at `.agents/rig/rig-atlas-neutral.md`, and its generator lives at `.agents/skills/rig-atlas/generate.py`.
+The ignored live build ledgers live at `state/build-loops/<branch>.json`.
+The ignored live submit canary lives at `state/submit-canary.json`.
+The generated inventory lives at `.agents/rig/rig-atlas.md`, and its only sanctioned twin lives at `.agents/rig/rig-atlas-portable.md`.
+The source-named generator lives at `.agents/rig/assemble_replication.py` and writes both atlas files in one run.
+Portable include-both memories from Appendix D live verbatim after token adaptation at `.agents/rig/portable-memory/<source-basename>.md`.
+The generator records the include-both, full-only, and exclude-both classifications, but it does not copy project-private full-only or excluded content into this repo.
 No `.claude` artifact is a target of this port.
 No `.agents/skills-spine` duplicate is permitted.
 
@@ -50,8 +56,19 @@ The target files are `.agents/skills/pdw/SKILL.md` and `.agents/skills/pdw/evals
 ### build
 
 `build` keeps intent, entry recon, checkpoint, parallel local and web move recon, plan plus TDD, implementation team, E-ladder validation, commit, and repeat.
+The ledger at `state/build-loops/<branch>.json` starts with `round`, `intent`, `tier`, `mode`, `branch` or `branches`, `base`, `worktree`, `stacked_on`, `landed`, `spillover`, `verdict`, `next`, `decisions`, `proof`, `scout_artifact`, `loop_artifact`, `blockers`, `r4_gate`, and `preregistered_before_after`.
+The `preregistered_before_after` record carries `baseline_arm`, `treatment_arm`, `metrics_rule`, and `seats_note`, and each decision carries `id`, `state`, `when`, `what`, and `by`.
 Every round commits before the next checkpoint.
 The checkpoint page preserves append-only round history at the same Lavish path.
+Round 1 always waits because it is the plan-approval gate.
+ACTIVE waits at every checkpoint, while PASSIVE takes the Recommended move and continues until termination-ready.
+Every checkpoint in either mode publishes the page and sends one notification, with the artifact URL and `ready for your move` when David has a new move to choose.
+The standing mode-flip question defaults to staying in the current mode and changes only the next rounds.
+PASSIVE still pauses on DONE or scope-creep proposals, a blocker only David can clear, spend outside the authorized intent, and outward actions.
+DONE and scope-creep are the only automatic cut triggers, with no cost-budget or wall-clock kill.
+Move recon runs after the choice and before planning, and issue recon runs after failed validation before the next suggestion.
+Validation requires E2 plus E3 for feature completion, adds E4 for downstream-influence claims, caps laptop-only artifacts at E1, requires mutation checks for key fixes, and requires a recorded screenshot that the reviewer read for UI work.
+Every round return carries `NEXT_STEP: publish /lavish checkpoint -> stop-check`, and final validation carries the same-page closing update and HOLD instruction.
 Exit remains final validation, same-page closing update, HOLD, and `/submit` only after explicit go.
 The trivial passive hatch and the spike or pure-visual-UI observation hatch remain exactly as Jim defined them.
 Explicit `/build` never degrades to one untracked agent.
@@ -94,18 +111,75 @@ The target file is `.agents/skills/oat/SKILL.md`.
 
 ### submit
 
-`submit` keeps sync, one adversarial panel, commit, push, open PR, babysit, re-panel at round 4, HOLD at round 16, and the same Lavish closing page.
-CodeRabbit replaces ReviewBot.
+`submit` keeps sync, difficulty-gated adversarial review, commit, push, open PR, babysit, re-panel at round 4, HOLD at round 16, and the same Lavish closing page.
+Mechanical diffs receive one strong reviewer, while subjective, multi-file, or logic diffs receive three to six distinct model and refutation lenses over the whole diff.
+Every blocking finding must carry a runnable failing test, replay, or mutation, and a finding without one is speculative and cannot gate.
+Panel cells return structured defect, repro reference, severity, and confidence records that are deduplicated and ranked through a pairwise tournament fold.
+CodeRabbit replaces ReviewBot as the post-push canary and review source.
+The persisted `state/submit-canary.json` preserves Jim's `pr`, `panel_missed`, `drip_rounds`, `note`, and `matrix_recall` fields and updates them at panel time and close time.
+Two real CodeRabbit misses on one PR, or at least three drip rounds on two consecutive PRs, switches later PRs to one strong reviewer and flags the matrix for redesign.
+A local Codex code review runs as the second automated lens at High effort, or Max for a hard diff, and its findings are deduplicated against the panel.
+Every confirmed panel, local Codex review, or CodeRabbit issue is fixed before proceeding, and any non-trivial fix triggers another panel.
+The babysitting carrier records the current loop, re-panel threshold 4, pause threshold 16, and closing-report `NEXT_STEP` in every monitor or wake payload.
+Four continuous failing loops trigger a new difficulty-gated panel over the current diff, and loop 16 stops with the failing state, attempts, and leading hypothesis.
 Opening a PR and merging remain human-gated, and `/submit` never merges.
 The guard and submit sentinel remain paired if the guard is proven and installed.
 The target files are `.agents/skills/submit/SKILL.md` and `.agents/skills/submit/evals.md`.
 
 ### rig-atlas
 
-`rig-atlas` inventories the skill suite and evals, Codex harness configuration and hooks, role definitions, notes conventions, and curated memory policy.
-It regenerates one atlas and one portable twin, then updates the existing Lavish system-study page last.
+`rig-atlas` inventories the skill suite and evals, Codex harness configuration and hooks, role definitions, notes conventions, and the curated memory files.
+It classifies every memory as include-both, full-only, or exclude-both before regeneration.
+Include-both means general doctrine copied into both editions, full-only means project-bound doctrine retained only outside the portable repo copy, and exclude-both means project state, personal profile, superseded rules, or credential-shaped content copied nowhere.
+One secret or private line excludes the whole file because included memories are otherwise verbatim.
+It regenerates `rig-atlas.md` and `rig-atlas-portable.md` with `assemble_replication.py` in one run, then updates the existing Lavish system-study page last.
 It documents live files and never becomes a second source of their contracts.
-The target files are `.agents/skills/rig-atlas/SKILL.md`, `.agents/skills/rig-atlas/evals.md`, `.agents/skills/rig-atlas/generate.py`, `.agents/rig/rig-atlas.md`, and `.agents/rig/rig-atlas-neutral.md`.
+The target files are `.agents/skills/rig-atlas/SKILL.md`, `.agents/skills/rig-atlas/evals.md`, `.agents/rig/assemble_replication.py`, `.agents/rig/rig-atlas.md`, `.agents/rig/rig-atlas-portable.md`, and `.agents/rig/portable-memory/`.
+
+## Replication and operating contract map
+
+The section 2 install order remains directory skeleton, verbatim skill and eval copy, curated portable-memory copy, role copy, hook copy, adaptation, verification, and generator installation.
+The implementation must write the source text verbatim first and apply the line 3,406-3,416 adaptation second so an adaptation diff can be audited against the source.
+The target is the repo-local layout named in this document, and the test rejects a target that was synthesized without a preserved source-to-adaptation diff.
+Existing skill edits hot-reload on the next invocation, while a new top-level skill directory requires a new Codex task or verified harness reload.
+The target is each `.agents/skills/<name>/` directory, and the test opens a fresh task for the first invocation of every newly added skill.
+Every body-mandated tool must have an available Codex equivalent and must match any declared capability list.
+The target is every `SKILL.md` and role definition, and the parity test fails on an unavailable tool, undeclared required tool, or unsupported mechanism stated as available.
+Decision pages keep page-scoped `D1`, `D2`, and later IDs, put the Recommended option first and preselect it, give every decision a free-text note, give every short-answer question a real textarea, and begin result pages with definitions.
+The target is `.agents/skills/lavish/SKILL.md` plus its two references, and the rendered-page test exercises selection, typing, reply composition, and two-page decision disambiguation.
+The default is to decide and state why, while asking only for spend, direction, irreversible action, or a case with no clear recommendation.
+Round 1, PR opening, scope-cut, and merge gates remain explicit exceptions.
+The target is `build`, `lavish`, and `submit`, and the test rejects a passive scope cut, a skipped round-1 wait, or an ungated outward action.
+Before changing deliberately written code, the worker asks whether the behavior is intentional and pairs any change with evidence.
+An execute instruction authorizes only the agreed plan, while a question about a better design produces analysis and a recommendation without starting a new design branch.
+The target is the planner and implementer brief contract, and the authorization-fence test presents both prompts and verifies only the first can lead to writes.
+Validation refutes claims, challenges the measuring oracle, measures all real inputs against an invariant, and runs the cheapest decisive experiment before recommending a change.
+E0 is ASSUMED and must be labeled or omitted.
+E1 is RAN with traces and never permits the word works, and laptop-only artifacts cap here.
+E2 is WORKS-unit with tests plus mutation.
+E3 is WORKS-live with live output that exhibits the effect and human-visible evidence.
+E4 is CAUSES with a preregistered control and stated sample count whenever causality is claimed.
+E5 is REFUTE-SURVIVED after an adversarial panel fails to kill the claim, and it is required for ship language, closing-report headlines, and submit boundaries.
+Feature completion requires E2 and E3, side claims inherit the same bar, and an E5 panel attacks the claims ledger as well as the diff.
+The target is `build`, `submit`, `lavish`, and their evals, and the evidence test rejects a claim whose badge lacks the required artifact.
+Every operator-tunable threshold, limit, retry, model ID, or breadth control becomes configuration with the current literal as its default.
+The target is every implemented module, and the review test rejects a new hardcoded operating knob.
+One living artifact is kept per workstream at one stable path and URL.
+Checkpoint history is append-only with round, move, chosen-by, landed, evidence, and verdict, while prior rounds may compress to rows without disappearing.
+Decision state remains open, decided, or SUPERSEDED with a link to the replacement, and only a genuinely new direction creates a new artifact.
+The target is the existing Lavish mirror and `david-warm` components, and the test reconstructs a multi-round PASSIVE run from the final single page.
+
+## Curated memory map
+
+Appendix D at lines 1,678-3,055 is source material, not optional background.
+Every portable memory heading in that range maps by basename to `.agents/rig/portable-memory/<source-basename>.md` after placeholder and harness-token adaptation.
+The include-both set is durable doctrine and remains in both generated atlas editions.
+The full-only set is recorded as classification metadata but its project-bound contents are not copied into the portable repo target.
+The exclude-both set is recorded as classification metadata and its contents are copied nowhere.
+Any file containing a credential, secret, private identifier, or personal-profile line is excluded as a whole file rather than redacted line by line.
+The generator omits the derived `MEMORY.md` index and rebuilds the memory appendix from the curated files.
+The memory acceptance test enumerates every Appendix D heading, verifies a matching include-both target and hash after declared substitutions, verifies no unclassified file remains, and scans both atlas editions and the repo target for excluded tokens.
+The classification acceptance test uses the source counts of 47 include-both, 47 full-only, and 41 exclude-both as reconciliation expectations while allowing the portable source to omit full-only and excluded bodies.
 
 ## Role map
 
@@ -113,8 +187,26 @@ The planner remains a divergent, read-only mapper that returns ordered file-leve
 The implementer remains a convergent executor for one reviewed plan leaf and returns the minimal change plus targeted evidence.
 The refute reviewer remains source-read-only, begins from not proven, accepts findings only with a concrete anchor or reproduction, and retains the defect-signature memory policy only if Codex can support it without inventing a new runtime.
 Firstmate's repo rule overrides Jim for writers, so every writing worker receives its own worktree under the target repo's `.claude/worktrees/` and commits before return.
-Native task teams use these role policies in their briefs because native role files cannot mechanically fence tools or pin worker models.
-Explicit `codex exec` loads the matching role file when mechanical launch control is required.
+Codex custom-role registration can point `config_file` at these TOML files so they carry model, reasoning effort, sandbox, and role instructions when the harness actually selects that role.
+This session's collaboration wrapper cannot select a custom role, so native task-team lanes receive the role policy in their briefs and record the effective controls as unavailable to verify.
+No external loader is assumed.
+The implementation must prove an exact `codex exec` command and config carrier in an isolated smoke test before claiming that an external worker loaded a role or enforced its settings.
+
+## Claude to Codex carrier table
+
+| Claude carrier | Exact Codex substitute | Acceptance test |
+| --- | --- | --- |
+| `Workflow` | One root Codex task owns Map, parallel `collaboration.spawn_agent` lanes, Review, funnels, and Synthesize, because Codex has no atomic Workflow call. | The desktop shows every lane, independent lanes overlap in time, rejected lane output is named UNVERIFIED, and only the parent synthesis reaches the return task. |
+| `Agent` | `collaboration.spawn_agent` is the inspectable default, while an externally launched `codex exec` worker is allowed only after its role and setting carrier is proven. | The native wrapper signature is recorded, the external smoke test proves the exact model, effort, sandbox, worktree, role instructions, and clean commit, and unsupported controls remain labeled unavailable. |
+| `Skill` | Codex loads the repo-local `.agents/skills/<name>/SKILL.md` through explicit skill invocation or trigger matching. | A fresh Codex task discovers each skill, an explicit invocation loads the intended file, and no `.claude` or `.agents/skills-spine` copy wins. |
+| `Task` | The root Codex task is the tracked run, and named collaboration subagents are its visible cells. | The desktop activity view shows the root and cells, the parent can steer or interrupt a named cell, and the final return aggregates once. |
+| `Artifact` | Existing `lavish-axi <html-file>` opens or resumes the stable living page built from David-warm components. | The same file reopens at the same Lavish URL, the browser screenshot is read, and round history survives a redeploy. |
+| `Monitor` | A Codex recurring automation owns durable polling and carries the loop count, caps, condition, and `NEXT_STEP` in its prompt. | A short-interval test wakes the correct task after a state change, remains silent without a transition, and preserves the payload after app restart. |
+| `ScheduleWakeup` | A one-shot Codex automation wakes the owning task at the requested time with the full resume payload. | A two-minute test fires once, names the correct task and phase, and does not fire again. |
+| `CronCreate` | A recurring Codex automation owns calendar-shaped repetition. | A bounded test fires on two scheduled intervals, records both runs, and stops cleanly when disabled. |
+| `PushNotification` | One message to the injected Command Center return task is the notification carrier, surfaced by the Codex app when the thread tool is available. | A checkpoint test delivers the artifact URL and exact `ready for your move` text once, and an unavailable thread tool is reported instead of faked. |
+| `allowed-tools` | Codex skill text declares required capabilities, while role TOML sandbox and approval settings provide the enforceable boundary available to that launch path. | The parity audit maps every required tool, runs a forbidden-write probe for read-only roles, and records any missing per-tool allow-list enforcement as unsupported. |
+| Skill frontmatter | Codex `SKILL.md` keeps supported `name` and `description` fields and removes or adapts Claude-only keys only in the adaptation diff. | A fresh-task discovery test loads every skill without parser warnings and the source-to-adaptation audit accounts for every removed key. |
 
 ## Hook map
 
@@ -143,7 +235,7 @@ A user-specified model or effort always wins.
 Remaining quota never causes a downgrade.
 The deterministic effort router maps Light to mechanical edits and lookups, Medium to routine bounded work, High to debugging, reviews, or consequential implementation, Max to one tightly coupled deep problem, and Ultra only to a large objective with an explicit independent-lane plan.
 Every dispatch brief and structured return records `requested_effort`, `effective_effort`, and a one-line rationale.
-If native spawn cannot enforce the requested setting, `effective_effort` says enforcement is unavailable and the launcher uses explicit `codex exec` when that path supports the setting.
+When the collaboration wrapper cannot select a role that enforces the requested setting, `effective_effort` says enforcement is unavailable and explicit `codex exec` may be used only after the external-launch gate proves the command and effective setting.
 Unsupported effort levels use the nearest supported fallback and record it without silently changing the request.
 Every top-level brief receives `return_thread_id` and `return_host_id`.
 Each native subagent returns to its immediate parent, and the top-level parent aggregates once to the supplied Command Center destination.
@@ -157,8 +249,8 @@ No new reporting state machine is part of this port.
 - A layout test rejects `.claude` targets, `.agents/skills-spine`, missing target files, an invented `oat/evals.md`, or any abandoned custom runtime and schema file.
 - A fresh-session simulation traces every mandated action from only the installed text and rejects any missing tool or undefined cross-reference.
 - A contradiction test checks that every skill and eval agree, `pdw` is the only owner of topology and bare-agent rules, `oat` is the style boundary, and `explore` and `websearch` stay separate.
-- A role-routing test proves native task-team visibility and records the unavailable native model, effort, tool-fence, and isolation controls without claiming enforcement.
-- An external-launch test proves explicit `codex exec` pins the requested supported model and effort, loads the requested role policy, writes only in the assigned worktree, and returns a clean committed SHA.
+- A role-routing test proves native task-team visibility, proves custom-role TOML can carry model, reasoning effort, sandbox, and instructions, and records that this session's collaboration wrapper cannot select that role.
+- An external-launch test must prove the exact `codex exec` command and config carrier pin the requested supported model and effort, load the requested role policy, write only in the assigned worktree, and return a clean committed SHA before that path is used.
 - Effort tests cover every mapping, user override precedence, unsupported fallback, the Ultra parallel-lane gate, requested versus effective values, and the no-quota-downgrade rule.
 - Hook tests prove git-guard blocks each forbidden command and allows ordinary commands, existing Codex hooks survive composition, and unsupported optional events stay uninstalled.
 - A build-loop test proves intent, concurrent entry recon, checkpoint publication, move recon, plan plus TDD, parallel implementation, E-ladder validation, per-round commit, repeat, same-page close, HOLD, and explicit `/submit` handoff.
@@ -181,4 +273,5 @@ No new reporting state machine is part of this port.
 - [x] `rig-atlas/SKILL.md` is covered from lines 1,222-1,313 and `rig-atlas/evals.md` from lines 1,314-1,352.
 - [x] `planner.md` is covered from lines 1,356-1,373, `implementer.md` from lines 1,374-1,392, and `refute-reviewer.md` from lines 1,393-1,417.
 - [x] The hook declaration is covered from lines 1,421-1,467, `git-guard.py` from lines 1,470-1,589, `session-title.sh` from lines 1,590-1,630, `session-rename-nudge.sh` from lines 1,631-1,660, and `pre-commit-install.sh` from lines 1,661-1,677.
-- [x] The self-contained generator is covered from lines 3,057-3,388 and the canonical adaptation duplicate is covered from lines 3,406-3,416.
+- [x] Appendix D is covered from lines 1,678-3,055, and its extraction check expects all 47 include-both memory files under `.agents/rig/portable-memory/`.
+- [x] The self-contained generator is covered from lines 3,057-3,505 and the canonical adaptation duplicate is covered from lines 3,406-3,416.
