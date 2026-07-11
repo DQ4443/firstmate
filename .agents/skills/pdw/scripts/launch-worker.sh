@@ -62,19 +62,51 @@ case "$sandbox" in
   *) printf 'unsupported worker sandbox: %s\n' "$sandbox" >&2; exit 2 ;;
 esac
 
-fallback_applied=false
 case "$effort" in
-  light) codex_effort=low ;;
-  medium) codex_effort=medium ;;
-  high) codex_effort=high ;;
-  max) codex_effort=xhigh ; fallback_applied=true ;;
+  light) requested_codex_effort=low ;;
+  medium) requested_codex_effort=medium ;;
+  high) requested_codex_effort=high ;;
+  max) requested_codex_effort=max ;;
   ultra)
     ((parallel_lanes >= 2)) || { printf 'Ultra requires at least two explicit independent lanes\n' >&2; exit 2; }
-    codex_effort=xhigh
-    fallback_applied=true
+    requested_codex_effort=ultra
     ;;
   *) printf 'unknown requested effort: %s\n' "$effort" >&2; exit 2 ;;
 esac
+
+model_catalog=$(codex debug models 2>/dev/null) || { printf 'installed Codex model catalog is unavailable\n' >&2; exit 2; }
+supported_efforts=$(jq -r --arg model "$model" '.models[] | select(.slug == $model) | .supported_reasoning_levels[].effort' <<<"$model_catalog")
+[[ -n "$supported_efforts" ]] || { printf 'selected model is absent from the installed Codex catalog: %s\n' "$model" >&2; exit 2; }
+if grep -Fxq "$requested_codex_effort" <<<"$supported_efforts"; then
+  codex_effort=$requested_codex_effort
+  fallback_applied=false
+else
+  fallback_applied=true
+  rank() {
+    case "$1" in
+      low) printf '0' ;;
+      medium) printf '1' ;;
+      high) printf '2' ;;
+      xhigh) printf '3' ;;
+      max) printf '4' ;;
+      ultra) printf '5' ;;
+    esac
+  }
+  target_rank=$(rank "$requested_codex_effort")
+  codex_effort=""
+  best_distance=99
+  for candidate in low medium high xhigh max ultra; do
+    grep -Fxq "$candidate" <<<"$supported_efforts" || continue
+    candidate_rank=$(rank "$candidate")
+    distance=$((candidate_rank - target_rank))
+    ((distance < 0)) && distance=$((-distance))
+    if ((distance < best_distance)) || { ((distance == best_distance)) && ((candidate_rank < target_rank)); }; then
+      codex_effort=$candidate
+      best_distance=$distance
+    fi
+  done
+  [[ -n "$codex_effort" ]] || { printf 'selected model has no usable reasoning effort\n' >&2; exit 2; }
+fi
 
 if [[ "$require_commit" == true ]]; then
   [[ -n "$base_sha" ]] || { printf 'base SHA is required with --require-commit\n' >&2; exit 2; }
@@ -118,7 +150,9 @@ fi
 jq -n \
   --arg requested_model "$model" \
   --arg requested_effort "$effort" \
+  --arg requested_codex_effort "$requested_codex_effort" \
   --arg carrier_effort "$codex_effort" \
+  --arg supported_efforts "$supported_efforts" \
   --arg requested_sandbox "$sandbox" \
   --arg role_file "$role_file" \
   --arg worktree "$worktree" \
@@ -132,7 +166,7 @@ jq -n \
   --argjson fallback_applied "$fallback_applied" \
   --argjson worktree_clean "$worktree_clean" \
   --argjson commit_requirement_met "$commit_requirement_met" \
-  '{requested_model: $requested_model, requested_effort: $requested_effort, carrier_effort: $carrier_effort, requested_sandbox: $requested_sandbox, role_file: $role_file, worktree: $worktree, events_file: $events_file, last_message_file: $last_message_file, launch_exit: $launch_exit, fallback_applied: $fallback_applied, effective_model: $effective_model, effective_effort: $effective_effort, effective_sandbox: $effective_sandbox, enforcement_verified: false, worktree_clean: $worktree_clean, commit_requirement_met: $commit_requirement_met, last_commit_sha: $last_commit_sha}' >"$evidence_file"
+  '{requested_model: $requested_model, requested_effort: $requested_effort, requested_codex_effort: $requested_codex_effort, carrier_effort: $carrier_effort, supported_efforts: ($supported_efforts | split("\n")), requested_sandbox: $requested_sandbox, role_file: $role_file, worktree: $worktree, events_file: $events_file, last_message_file: $last_message_file, launch_exit: $launch_exit, fallback_applied: $fallback_applied, effective_model: $effective_model, effective_effort: $effective_effort, effective_sandbox: $effective_sandbox, enforcement_verified: false, worktree_clean: $worktree_clean, commit_requirement_met: $commit_requirement_met, last_commit_sha: $last_commit_sha}' >"$evidence_file"
 
 if ((launch_exit != 0)); then
   printf 'codex exec failed; see %s and %s.stderr\n' "$events_file" "$events_file" >&2

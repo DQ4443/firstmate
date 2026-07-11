@@ -10,8 +10,16 @@ mkdir -p "$FAKEBIN"
 
 printf 'Return the structured result.\n' >"$TMP/prompt.txt"
 
+installed_catalog=$(codex debug models)
+jq -e '[.models[] | select(.slug == "gpt-5.6-sol") | .supported_reasoning_levels[].effort] | (index("max") != null and index("ultra") != null)' <<<"$installed_catalog" >/dev/null
+printf 'ok - installed gpt-5.6-sol catalog advertises Max and Ultra\n'
+
 cat >"$FAKEBIN/codex" <<'SH'
 #!/usr/bin/env bash
+if [[ ${1:-} == debug && ${2:-} == models ]]; then
+  printf '%s\n' '{"models":[{"slug":"test-model","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]},{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}]}'
+  exit 0
+fi
 printf '%s\n' "$@" >"$CAPTURE_ARGS"
 worktree=""
 while (($#)); do
@@ -57,6 +65,24 @@ if "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml"
   exit 1
 fi
 printf 'ok - external launcher enforces the Ultra parallel-lane gate\n'
+
+CAPTURE_ARGS="$TMP/max-args" CAPTURE_LAST="$TMP/max-last.txt" PATH="$FAKEBIN:$PATH" \
+  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/max-events" --last-message-file "$TMP/max-last.txt" --evidence-file "$TMP/max-evidence.json" >/dev/null
+grep -Fxq 'model_reasoning_effort="max"' "$TMP/max-args"
+jq -e '.carrier_effort == "max" and (.fallback_applied | not)' "$TMP/max-evidence.json" >/dev/null
+printf 'ok - gpt-5.6-sol preserves Max from the installed capability set\n'
+
+CAPTURE_ARGS="$TMP/ultra-args" CAPTURE_LAST="$TMP/ultra-last.txt" PATH="$FAKEBIN:$PATH" \
+  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort ultra --parallel-lanes 2 --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/ultra-events" --last-message-file "$TMP/ultra-last.txt" --evidence-file "$TMP/ultra-evidence.json" >/dev/null
+grep -Fxq 'model_reasoning_effort="ultra"' "$TMP/ultra-args"
+jq -e '.carrier_effort == "ultra" and (.fallback_applied | not)' "$TMP/ultra-evidence.json" >/dev/null
+printf 'ok - gpt-5.6-sol preserves Ultra when the parallel-lane gate passes\n'
+
+CAPTURE_ARGS="$TMP/fallback-args" CAPTURE_LAST="$TMP/fallback-last.txt" PATH="$FAKEBIN:$PATH" \
+  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/fallback-events" --last-message-file "$TMP/fallback-last.txt" --evidence-file "$TMP/fallback-evidence.json" >/dev/null
+grep -Fxq 'model_reasoning_effort="xhigh"' "$TMP/fallback-args"
+jq -e '.requested_codex_effort == "max" and .carrier_effort == "xhigh" and .fallback_applied' "$TMP/fallback-evidence.json" >/dev/null
+printf 'ok - unsupported Max records the nearest model-aware fallback\n'
 
 mkdir -p "$TMP/repo/.claude/worktrees/writer"
 git -C "$TMP/repo/.claude/worktrees/writer" init -q
