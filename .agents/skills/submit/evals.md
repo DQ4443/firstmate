@@ -5,7 +5,7 @@ Run isolated grader agents with binary checks and require at least 90 percent ov
 ## Should trigger (positive)
 
 1. `ok do that please, execute the same push PR pipeline that we always use`
-2. `ship the auth-refactor branch - panel, approved push, PR, babysit it to green`
+2. `ship the auth-refactor branch - panel, push, PR, babysit it to green`
 3. `$submit branch fix/foo in worktree bar, title fix: [<work-repo>] ...`
 4. `the change is validated, drive it to an open green PR`
 5. `run the commit-push-pr flow on this`

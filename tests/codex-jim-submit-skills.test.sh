@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 positive_triggers=(
   'ok do that please, execute the same push PR pipeline that we always use'
-  'ship the auth-refactor branch - panel, approved push, PR, babysit it to green'
+  'ship the auth-refactor branch - panel, push, PR, babysit it to green'
   '$submit branch fix/foo in worktree bar, title fix: [<work-repo>] ...'
   'the change is validated, drive it to an open green PR'
   'run the commit-push-pr flow on this'
@@ -100,6 +100,9 @@ verify_skill() {
   contains "$file" 'at least three drip rounds on two consecutive pull requests' || return 1
   contains "$file" 'The human must explicitly approve the push and pull-request opening at step 2' || return 1
   contains "$file" 'Merge requires a separate explicit human decision' || return 1
+  contains "$file" 'When arriving from `$build`, the loop must have exited as Done or an approved scope-creep cut' || return 1
+  contains "$file" 'Run the review as one `$pdw` owned by the top-level task.' || return 1
+  contains "$file" '### 6. Closing report through $lavish report mode' || return 1
 }
 
 verify_evals() {
@@ -151,6 +154,13 @@ if verify_evals "$TMP/evals.md"; then
 fi
 printf 'ok - removing a positive trigger fails the verifier\n'
 
+cp "$EVALS" "$TMP/evals.md"
+sed -i '' 's/panel, push, PR/panel, approved push, PR/' "$TMP/evals.md"
+if verify_evals "$TMP/evals.md"; then
+  fail 'second positive-trigger wording mutation survived'
+fi
+printf 'ok - inserting approved into the exact second trigger fails the verifier\n'
+
 cp "$SKILL" "$TMP/skill.md"
 sed -i '' 's/, and `matrix_recall`//' "$TMP/skill.md"
 if verify_skill "$TMP/skill.md"; then
@@ -185,6 +195,15 @@ if verify_evals "$TMP/evals.md"; then
   fail 'merge-gate mutation survived'
 fi
 printf 'ok - changing the merge gate fails the verifier\n'
+
+for carrier in pdw build lavish; do
+  cp "$SKILL" "$TMP/skill.md"
+  sed -i '' "s/\\\$$carrier/\/$carrier/g" "$TMP/skill.md"
+  if verify_skill "$TMP/skill.md"; then
+    fail "slash-$carrier carrier mutation survived"
+  fi
+  printf 'ok - changing $%s to /%s fails the verifier\n' "$carrier" "$carrier"
+done
 
 if [[ -n ${JIM_SOURCE:-} ]]; then
   [[ -f "$JIM_SOURCE" ]] || fail 'JIM_SOURCE does not exist'
