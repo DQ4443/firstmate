@@ -40,6 +40,9 @@ def main() -> int:
         require(installer, "spec.options.length < 2 || spec.options.length > 4", "two-to-four option gate")
         require(installer, "spec.options.forEach((option, index) =>", "generic option repetition")
         require(installer, "spec.options[0].recommended !== true", "Recommended-first validation")
+        require(installer, '"JIM EVIDENCE BADGES"', "canonical Jim evidence component")
+        require(installer, "E0:'Assumed',E1:'Ran',E2:'Works-unit',E3:'Works-live',E4:'Causes',E5:'Refute-survived'", "Jim evidence semantics")
+        require(installer, "laptopCap:'E1'", "laptop evidence cap")
         require(installer, "input.checked = index === 0;", "Recommended-first checked state")
         require(installer, '<textarea class="qtext" data-question="{{Q_ID}}"', "real question textarea template")
         if installer.count("bindInputs(fragment);") < 2:

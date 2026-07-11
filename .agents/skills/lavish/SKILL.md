@@ -13,7 +13,7 @@ description: Render a plan, decision review, closing report, or build checkpoint
 - Render the page and inspect the screenshot before presenting it.
 - Keep one stable file path per workstream.
 - Retire decided tabs into the Decided log.
-- Badge every landed or evidence claim with the level rendered by the canonical David-warm evidence component.
+- Badge every landed or evidence claim with the level rendered by the canonical `JIM EVIDENCE BADGES` component.
 
 ## Step 0
 
@@ -26,6 +26,7 @@ If that file is absent, page creation is blocked.
 If it lacks the decision-zone or dynamic-sidebar component, install them into that canonical file only after the separately reviewed source change is authorized.
 
 Use `.agents/skills/lavish/scripts/install-components.py "${DAVID_WARM_COMPONENT_FILE:-data/operating-model/components/david-warm.html}"`.
+The installer preserves the legacy David-warm evidence row and adds the separately named canonical `JIM EVIDENCE BADGES` block.
 
 A page that copies the source rig's palette, invents a second component system, or restyles a David-warm component is a defect.
 
@@ -148,6 +149,13 @@ All visual tokens, components, Mermaid theme variables, evidence badges, and foo
 Do not fork those rules inside this skill.
 
 Mockups of an existing product may use that product's design system only inside their framed mockup area.
+
+## Evidence badges
+
+Use only the installed `JIM EVIDENCE BADGES` block for workflow claims.
+E0 is Assumed, E1 is Ran, E2 is Works-unit with mutation evidence, E3 is Works-live, E4 is Causes with a preregistered control and sample count, and E5 is Refute-survived.
+Laptop-only evidence is capped at E1.
+Every side claim earns the same bar as the headline claim or carries its lower level visibly.
 
 ## Report mode
 

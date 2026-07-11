@@ -40,6 +40,9 @@ def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]
         references = skill_dir / "references"
         if references.is_dir():
             skills.extend(sorted(references.glob("*.md")))
+        scripts = skill_dir / "scripts"
+        if scripts.is_dir():
+            skills.extend(sorted(path for path in scripts.rglob("*") if path.is_file()))
     roles: list[Path] = []
     for role in ROLES:
         candidate = root / ".codex" / "agents" / f"{role}.toml"
@@ -53,6 +56,9 @@ def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]
     config = root / ".codex" / "config.toml"
     if config.is_file():
         harness.append(config)
+    hook_declaration = root / ".codex" / "hooks.json"
+    if hook_declaration.is_file():
+        harness.append(hook_declaration)
     hooks = root / ".codex" / "hooks"
     if hooks.is_dir():
         harness.extend(sorted(path for path in hooks.rglob("*") if path.is_file()))

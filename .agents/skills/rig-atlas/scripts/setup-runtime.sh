@@ -23,7 +23,10 @@ python3 "$script_dir/source-audit.py" "$1" --setup "$state_dir"
 python3 "$script_dir/source-audit.py" "$1" --verify-setup "$state_dir"
 python3 "$script_dir/generate-atlas.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1"
 python3 "$script_dir/generate-atlas.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1" --verify
+python3 "$script_dir/adaptation-audit.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1"
+python3 "$script_dir/adaptation-audit.py" --repo-root "$repo_root" --state-dir "$state_dir" --source "$1" --verify
 
 echo "full_atlas=$state_dir/rig-atlas.md"
 echo "embedded_generator=$state_dir/assemble_replication.py"
+echo "source_adaptation=$state_dir/source-adaptation.diff"
 echo "portable_twin=BLOCKED"

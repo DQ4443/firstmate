@@ -84,11 +84,12 @@ grep -Fxq 'model_reasoning_effort="xhigh"' "$TMP/fallback-args"
 jq -e '.requested_codex_effort == "max" and .carrier_effort == "xhigh" and .fallback_applied' "$TMP/fallback-evidence.json" >/dev/null
 printf 'ok - unsupported Max records the nearest model-aware fallback\n'
 
-mkdir -p "$TMP/repo/.claude/worktrees/writer"
-git -C "$TMP/repo/.claude/worktrees/writer" init -q
-printf 'base\n' >"$TMP/repo/.claude/worktrees/writer/base.txt"
-git -C "$TMP/repo/.claude/worktrees/writer" add base.txt
-git -C "$TMP/repo/.claude/worktrees/writer" -c user.name='Launcher Test' -c user.email='launcher@example.invalid' commit -qm base
+git init -q "$TMP/repo"
+printf 'base\n' >"$TMP/repo/base.txt"
+git -C "$TMP/repo" add base.txt
+git -C "$TMP/repo" -c user.name='Launcher Test' -c user.email='launcher@example.invalid' commit -qm base
+mkdir -p "$TMP/repo/.claude/worktrees"
+git -C "$TMP/repo" worktree add -q -b writer-test "$TMP/repo/.claude/worktrees/writer" HEAD
 base_sha=$(git -C "$TMP/repo/.claude/worktrees/writer" rev-parse HEAD)
 CAPTURE_ARGS="$TMP/writer-args" CAPTURE_LAST="$TMP/writer-last.txt" MAKE_COMMIT=1 PATH="$FAKEBIN:$PATH" \
   "$LAUNCHER" \
@@ -103,5 +104,22 @@ CAPTURE_ARGS="$TMP/writer-args" CAPTURE_LAST="$TMP/writer-last.txt" MAKE_COMMIT=
   --evidence-file "$TMP/writer-evidence.json" \
   --require-commit \
   --base-sha "$base_sha" >/dev/null
-jq -e '.worktree_clean and .commit_requirement_met and (.last_commit_sha | length == 40)' "$TMP/writer-evidence.json" >/dev/null
-printf 'ok - writer launcher requires a new clean commit before return\n'
+jq -e --arg base "$base_sha" '.launch_head == $base and .worktree_clean and .commit_requirement_met and .last_commit_sha != .launch_head and (.last_commit_sha | length == 40)' "$TMP/writer-evidence.json" >/dev/null
+git -C "$TMP/repo/.claude/worktrees/writer" merge-base --is-ancestor "$base_sha" "$(jq -r '.last_commit_sha' "$TMP/writer-evidence.json")"
+printf 'ok - writer launcher records immediate HEAD and requires a new clean descendant commit\n'
+
+mkdir -p "$TMP/fake/.claude/worktrees/not-linked"
+git -C "$TMP/fake/.claude/worktrees/not-linked" init -q
+if CAPTURE_ARGS="$TMP/fake-args" CAPTURE_LAST="$TMP/fake-last" PATH="$FAKEBIN:$PATH" \
+  "$LAUNCHER" --worktree "$TMP/fake/.claude/worktrees/not-linked" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort light --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/fake-events" --last-message-file "$TMP/fake-last" --evidence-file "$TMP/fake-evidence" >/dev/null 2>&1; then
+  printf 'not ok - standalone nested repository passed as a linked worktree\n' >&2
+  exit 1
+fi
+printf 'ok - standalone nested repositories are rejected\n'
+
+if CAPTURE_ARGS="$TMP/mismatch-args" CAPTURE_LAST="$TMP/mismatch-last" PATH="$FAKEBIN:$PATH" \
+  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort light --sandbox workspace-write --prompt-file "$TMP/prompt.txt" --events-file "$TMP/mismatch-events" --last-message-file "$TMP/mismatch-last" --evidence-file "$TMP/mismatch-evidence" >/dev/null 2>&1; then
+  printf 'not ok - sandbox mismatch passed role enforcement\n' >&2
+  exit 1
+fi
+printf 'ok - requested sandbox must equal role TOML sandbox_mode\n'

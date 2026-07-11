@@ -103,6 +103,12 @@ for role in planner implementer refute-reviewer; do
 done
 printf 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n' >"$fixture/.codex/config.toml"
 printf '#!/bin/sh\nexit 0\n' >"$fixture/.codex/hooks/guard.sh"
+printf '#!/usr/bin/env python3\nraise SystemExit(0)\n' >"$fixture/.codex/hooks/git-guard.py"
+printf '{"hooks":{"PreToolUse":[]}}\n' >"$fixture/.codex/hooks.json"
+for name in pdw lavish rig-atlas; do
+  mkdir -p "$fixture/.agents/skills/$name/scripts"
+  printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/$name/scripts/load-bearing.sh"
+done
 
 generate() {
   python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
@@ -143,7 +149,34 @@ for name in ("pdw", "build", "scout", "explore", "websearch", "lavish", "oat", "
     assert f".agents/skills/{name}/SKILL.md" in text
 for role in ("planner", "implementer", "refute-reviewer"):
     assert f".codex/agents/{role}.toml" in text
+assert ".codex/hooks.json" in text
+for name in ("pdw", "lavish", "rig-atlas"):
+    assert f".agents/skills/{name}/scripts/load-bearing.sh" in text
 PY
+
+python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" >"$tmp/adaptation.out"
+python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" --verify >"$tmp/adaptation-verify.out"
+python3 - "$tmp/state/source-adaptation.integrity.json" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+targets = data["targets"]
+for name in ("pdw", "build", "scout", "explore", "websearch", "lavish", "oat", "submit", "rig-atlas"):
+    assert f".agents/skills/{name}/SKILL.md" in targets
+for role in ("planner", "implementer", "refute-reviewer"):
+    assert f".codex/agents/{role}.toml" in targets
+assert ".codex/hooks.json" in targets
+assert ".codex/hooks/git-guard.py" in targets
+assert data["source_sha256"] == "134eb182731726ae9305d6a7a74d8a767bfb7f042201e953536ceec507f19f7c"
+assert data["substitutions"]
+PY
+cp "$fixture/.agents/skills/pdw/SKILL.md" "$tmp/pdw-skill.saved"
+printf '\nTARGET DRIFT\n' >>"$fixture/.agents/skills/pdw/SKILL.md"
+if python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" --verify >"$tmp/adaptation-drift.out" 2>&1; then
+  fail "source adaptation verification accepted target drift"
+fi
+cp "$tmp/pdw-skill.saved" "$fixture/.agents/skills/pdw/SKILL.md"
 
 before=$(shasum -a 256 "$tmp/state/rig-atlas.md" | awk '{print $1}')
 printf '{"tampered":true}\n' >"$tmp/state/source-inventory.json"

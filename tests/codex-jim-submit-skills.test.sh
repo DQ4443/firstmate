@@ -36,6 +36,8 @@ eval_rules=(
   'Every confirmed issue was fixed before proceeding, and every non-trivial fix triggered another panel.'
   'The pull-request body used Summary, Debug evidence, Validation, and Risk with recorded proof and exact pass counts.'
   'The human saw the drafted title and body and explicitly approved the outward push and pull-request opening in that moment.'
+  "Evidence used Jim's E0 through E5 meanings, laptop-only evidence never exceeded E1, and side claims earned the headline bar or displayed their own lower level."
+  'No autonomous exception authorized a push, pull-request opening, or merge.'
   'If a proven installed guard required its documented one-shot sentinel, the sentinel was used immediately before pull-request opening, and no sentinel or bypass was invented otherwise.'
   'The babysit stage ran as one owning monitor or Codex automation, with every payload carrying the current loop, threshold 4, threshold 16, and the closing-report `NEXT_STEP`.'
   'Notifications occurred only on the five named transitions.'
@@ -153,7 +155,7 @@ verify_evals() {
 verify_skill "$SKILL" || fail 'submit skill structure or threshold contract is incomplete'
 verify_evals "$EVALS" || fail 'submit eval trigger or gate contract is incomplete'
 printf 'ok - submit structure, trigger head, thresholds, and eval checks are present\n'
-printf 'ok - all five positive triggers, three negative triggers, and 22 binary eval rules are enumerated\n'
+printf 'ok - all five positive triggers, three negative triggers, and 24 binary eval rules are enumerated\n'
 
 if rg -n '[—–]|[⚡⚙🔁📦]|\.claude|Workflow|ReviewBot|PushNotification|ScheduleWakeup|Skill\(' "$SKILL" "$EVALS"; then
   fail 'Claude artifact or banned prose survived adaptation'

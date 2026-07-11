@@ -67,6 +67,8 @@ Ultra requires an explicit plan with at least two independent lanes.
 If the target model does not support the requested level, record the nearest supported fallback without changing the request field.
 
 Every top-level brief includes `return_thread_id` and `return_host_id`.
+Every top-level return includes a stable `report_id` that does not change when its summary or evidence wording is revised.
+The report key derives only from `task_id`, `report_id`, and the injected destination, so retries and revised summaries retain one delivery identity while a distinct report ID creates a distinct delivery.
 Each child returns only to its immediate parent.
 The top-level parent aggregates once and uses the native `send_message_to_thread` tool only when that exact tool exists.
 The shell adapter at `scripts/report-back.sh` prepares and tracks at-least-once transport state but never calls or impersonates the native tool.
@@ -76,18 +78,19 @@ Completion is valid only after acknowledgment or a durable queued retry.
 
 ## Don't to do
 
-| Don't | Do |
-| --- | --- |
-| Put one lone agent over an implementation, fix, or verification. | Use the tracked Map, Implement, Review, and Synthesize shape. |
-| Foreground-watch an external run. | Arm its owning monitor and launch another independent wave. |
-| Launch independent cells serially. | Launch the whole unblocked set concurrently. |
-| Spend deep reasoning on a mechanical edit. | Route it to Light and make the bounded change. |
-| Give several lanes the same vague name. | Give each lane a distinct target and lens. |
-| Ask the human to make a clear reversible call. | Decide and state the one-line reason. |
-| Claim inherited model or effort as effective. | Record requested, selected, and effective controls separately with evidence. |
+| Don't                                                            | Do                                                                           |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Put one lone agent over an implementation, fix, or verification. | Use the tracked Map, Implement, Review, and Synthesize shape.                |
+| Foreground-watch an external run.                                | Arm its owning monitor and launch another independent wave.                  |
+| Launch independent cells serially.                               | Launch the whole unblocked set concurrently.                                 |
+| Spend deep reasoning on a mechanical edit.                       | Route it to Light and make the bounded change.                               |
+| Give several lanes the same vague name.                          | Give each lane a distinct target and lens.                                   |
+| Ask the human to make a clear reversible call.                   | Decide and state the one-line reason.                                        |
+| Claim inherited model or effort as effective.                    | Record requested, selected, and effective controls separately with evidence. |
 
 Every writer owns a separate worktree under the target repository's `.claude/worktrees/` directory.
-Concurrent writers must have disjoint file ownership or separate worktrees and an explicit integration dependency.
+Concurrent writers must have disjoint file ownership.
+Overlapping writers serialize even when their worktrees are isolated.
 Every writer commits explicit paths before return and returns a clean worktree plus its last commit SHA.
 
 ## Sizing

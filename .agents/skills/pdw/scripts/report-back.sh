@@ -137,6 +137,7 @@ case "$command" in
     [[ -f "$report_file" ]] || { printf 'missing report file\n' >&2; exit 2; }
     jq -e '
       (.task_id | type == "string" and length > 0) and
+      (.report_id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")) and
       (.return_thread_id | type == "string" and length > 0) and
       (.return_host_id | type == "string" and length > 0) and
       (.status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
@@ -158,7 +159,8 @@ case "$command" in
       (.NEXT_STEP | type == "string" and length > 0)
     ' "$report_file" >/dev/null || { printf 'invalid structured return\n' >&2; exit 2; }
     canonical=$(jq -Sc . "$report_file")
-    key=$(printf '%s' "$canonical" | shasum -a 256 | awk '{print $1}')
+    stable_identity=$(jq -Sc '{task_id, report_id, return_thread_id, return_host_id}' "$report_file")
+    key=$(printf '%s' "$stable_identity" | shasum -a 256 | awk '{print $1}')
     prompt=$(printf '%s\n\nREPORT_KEY: %s' "$canonical" "$key")
     destination=queued
     target_dir=retry

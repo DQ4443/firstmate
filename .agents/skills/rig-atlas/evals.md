@@ -30,6 +30,9 @@ The target is at least 90 percent across three runs.
 - [ ] Appendix D contained exactly the 47 include-both bodies and no full-only or excluded body.
 - [ ] Every include-both body matched direct source re-derivation after recorded human and harness substitutions and passed the leak scan.
 - [ ] The generator inventory retained nine spine skills and three role definitions.
+- [ ] Atlas integrity covered `.codex/hooks.json` and every script under all nine spine skill directories.
+- [ ] The source-adaptation carrier covered all nine skills and available evals, three roles, hook declaration, guard, and exact declared substitutions with source and target hashes.
+- [ ] Target drift invalidated `source-adaptation.diff` verification instead of passing a spot check.
 - [ ] Missing any required spine `SKILL.md`, missing any role, or changing a role suffix from `.toml` blocked generation.
 - [ ] Domain skills appeared only in the live inventory.
 - [ ] Exactly one generated full atlas existed at `state/rig/rig-atlas.md`.

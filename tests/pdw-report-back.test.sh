@@ -16,7 +16,8 @@ write_config() {
 write_report() {
   local file=$1
   local task_id=$2
-  jq -n --arg task_id "$task_id" '{task_id: $task_id, return_thread_id: "thread-1", return_host_id: "local", status: "COMPLETE", requested_status: "COMPLETE", effective_status: "COMPLETE", summary: "done", commands: [{command: "true", output_tail: ""}], artifacts: [], branch: "codex/test", worktree: "/repo/.claude/worktrees/test", last_commit_sha: "abc123", requested_model: "gpt-5.6-sol", effective_model: "unavailable_to_pin_in_native_subagent_api", requested_effort: "high", effective_effort: "unavailable_to_pin_in_native_subagent_api", routing_rationale: "review", identifiers: {}, child_returns: [{task_id: "child-a", status: "COMPLETE"}, {task_id: "child-b", status: "COMPLETE"}], NEXT_STEP: "independent review"}' >"$file"
+  local report_id=${3:-completion-v1}
+  jq -n --arg task_id "$task_id" --arg report_id "$report_id" '{task_id: $task_id, report_id: $report_id, return_thread_id: "thread-1", return_host_id: "local", status: "COMPLETE", requested_status: "COMPLETE", effective_status: "COMPLETE", summary: "done", commands: [{command: "true", output_tail: ""}], artifacts: [], branch: "codex/test", worktree: "/repo/.claude/worktrees/test", last_commit_sha: "abc123", requested_model: "gpt-5.6-sol", effective_model: "unavailable_to_pin_in_native_subagent_api", requested_effort: "high", effective_effort: "unavailable_to_pin_in_native_subagent_api", routing_rationale: "review", identifiers: {}, child_returns: [{task_id: "child-a", status: "COMPLETE"}, {task_id: "child-b", status: "COMPLETE"}], NEXT_STEP: "independent review"}' >"$file"
 }
 
 write_config
@@ -31,6 +32,20 @@ printf 'ok - prepare writes a stable keyed pending payload\n'
 prepared_again=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report.json")
 [[ $(jq -r '.report_key' <<<"$prepared_again") == "$key" ]]
 printf 'ok - repeated prepare keeps the stable report key\n'
+
+jq '.summary = "revised after final verification"' "$TMP/report.json" >"$TMP/report-revised.json"
+revised=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-revised.json")
+[[ $(jq -r '.report_key' <<<"$revised") == "$key" ]]
+jq -e '.status == "already-pending"' <<<"$revised" >/dev/null
+printf 'ok - revised summaries retain one stable task and report identity\n'
+
+write_report "$TMP/report-distinct.json" task-1 completion-v2
+distinct=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-distinct.json")
+distinct_key=$(jq -r '.report_key' <<<"$distinct")
+[[ "$distinct_key" != "$key" ]]
+$ADAPTER --state-dir "$STATE" claim --key "$distinct_key" >/dev/null
+$ADAPTER --state-dir "$STATE" ack --key "$distinct_key" >/dev/null
+printf 'ok - distinct report IDs create distinct delivery identities\n'
 
 claimed=$($ADAPTER --state-dir "$STATE" claim --key "$key")
 jq -e '.status == "claimed" and .attempts == 1' <<<"$claimed" >/dev/null
@@ -123,6 +138,13 @@ if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid.json" >/dev/null
   exit 1
 fi
 printf 'ok - missing return destination is rejected\n'
+
+jq 'del(.report_id)' "$TMP/missing-destination.json" >"$TMP/missing-report-id.json"
+if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/missing-report-id.json" >/dev/null 2>&1; then
+  printf 'not ok - missing stable report ID was accepted\n' >&2
+  exit 1
+fi
+printf 'ok - missing stable report ID is rejected\n'
 
 lock_file="$STATE/.lock"
 now=$(date +%s)

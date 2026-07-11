@@ -41,6 +41,8 @@ echo "ok - all nine Codex modules are discoverable"
 # shellcheck disable=SC2016
 for required in \
   'Never merge Kronos product code without David saying to merge it in so many words.' \
+  'Push and pull-request opening require the explicit human go inside `$submit` after the reviewed title and body are shown.' \
+  'Every merge remains human-only.' \
   'Never send an external message' \
   'Every writing worker gets a separate git worktree' \
   'Every writing worker commits explicit paths before returning' \
@@ -52,6 +54,10 @@ for required in \
   'A user-specified model or effort always wins.' \
   'Remaining quota never causes a downgrade.' \
   'Evidence outranks claims.' \
+  'E0 is Assumed.' \
+  'E5 is Refute-survived after an adversarial panel fails to kill the claim.' \
+  'Laptop-only evidence is capped at E1.' \
+  'Every side claim must earn the same evidence bar as the headline claim.' \
   'unavailable_to_pin_in_native_subagent_api' \
   'Never claim a requested control was enforced without process evidence.' \
   'requested_status' \

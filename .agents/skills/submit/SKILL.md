@@ -19,6 +19,8 @@ Finish validation first when that precondition is not met because `$submit` is t
 Invoking `$submit` requests this pipeline but does not authorize an outward action.
 The human must explicitly approve the push and pull-request opening at step 2 after seeing the drafted title and body.
 Merge requires a separate explicit human decision after this skill finishes.
+The evidence bar is Jim's E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Causes with a preregistered control and sample count, and E5 Refute-survived.
+Laptop-only evidence is capped at E1, and every side claim must earn the same bar as the headline claim.
 
 ## The loop
 
@@ -127,6 +129,7 @@ The page is the merge decision surface, and `$submit` still does not merge.
 
 - Leave the pull request open.
 - Pull-request opening requires explicit human approval after the title and body are drafted.
+- Push requires that same explicit human approval and has no autonomous exception.
 - Merge requires a separate explicit human decision and is never performed by `$submit`.
 - Give the opened pull request a risk rating and point to the exact high-risk hunks worth human review.
 - State which hunks the panel, local Codex review, and CodeRabbit already covered.

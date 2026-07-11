@@ -53,16 +53,16 @@ A diagram whose labels cannot be read without browser zoom fails QA.
 
 ## Hard rules
 
-| Rule | Required behavior |
-| --- | --- |
-| No accent-edge cards | Emphasis uses a David-warm wash, full soft border, status chip, or heavier text. |
+| Rule                       | Required behavior                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| No accent-edge cards       | Emphasis uses a David-warm wash, full soft border, status chip, or heavier text.                    |
 | Diagrams before text walls | A pipeline, architecture, or flow section starts with a rendered figure and a compact anchor table. |
-| Tables for repeated fields | Repeated structured content uses the canonical table treatment rather than prose repetition. |
-| Color means status | Good, brick, clay, and muted colors follow the semantics already defined in David-warm. |
-| No truncation | Text wraps and wide tables scroll inside their own container. |
-| Short summary | Use at most four standalone lines with one clause each. |
-| Light traces | Logs and commands use the canonical warm-light preformatted block. |
-| Self-contained | Inline local assets into the final HTML and do not rely on remote fonts or scripts. |
+| Tables for repeated fields | Repeated structured content uses the canonical table treatment rather than prose repetition.        |
+| Color means status         | Good, brick, clay, and muted colors follow the semantics already defined in David-warm.             |
+| No truncation              | Text wraps and wide tables scroll inside their own container.                                       |
+| Short summary              | Use at most four standalone lines with one clause each.                                             |
+| Light traces               | Logs and commands use the canonical warm-light preformatted block.                                  |
+| Self-contained             | Inline local assets into the final HTML and do not rely on remote fonts or scripts.                 |
 
 ## Directed acyclic graphs use Mermaid
 

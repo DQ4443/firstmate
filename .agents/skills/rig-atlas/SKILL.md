@@ -47,8 +47,12 @@ Appendix D contains all 47 re-derived and adapted include-both bodies plus expli
 Appendix E contains the tracked generator.
 Missing any spine `SKILL.md` or role `.toml` blocks generation.
 
-The generated integrity record at `state/rig/rig-atlas.integrity.json` owns the output hash and every input hash.
+The generated integrity record at `state/rig/rig-atlas.integrity.json` owns the output hash and every input hash, including `.codex/hooks.json` and every script under the nine spine skill directories.
 Run the generator with `--verify` after generation and before delivery.
+
+The deterministic source-adaptation carrier writes `state/rig/source-adaptation.diff` and `state/rig/source-adaptation.integrity.json`.
+It extracts the pinned source bodies for all nine skills and their available evals, all three roles, the hook declaration, and the load-bearing guard, then records unified diffs, source hashes, target hashes, and every declared substitution.
+Its verifier rejects any target drift.
 
 ## Memory surface
 
@@ -100,6 +104,7 @@ python3 .agents/skills/rig-atlas/scripts/generate-atlas.py --repo-root "$PWD" --
 ```
 
 The setup script verifies the pinned source digest, exact classifications, generator roster, complete source modules, Appendix D coverage, and sanitizer redaction before writing runtime files.
+It also generates and verifies the source-adaptation diff against the live Codex targets.
 It extracts and explicitly adapts only the sanctioned include-both bodies.
 It also extracts the Appendix E Python body byte for byte into the ignored `state/rig/assemble_replication.py` target and records the pinned source hash, source lines, and generator hash in `state/rig/assemble-replication.integrity.json`.
 That source generator is read-only reference input and has no executable bit because its portable sanitizer tail is redacted.

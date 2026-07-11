@@ -10,7 +10,9 @@ Keep chat terse because substantive task state belongs in the board thread.
 
 Never merge Kronos product code without David saying to merge it in so many words.
 The approved `kronos-mvp-tracker` meeting-notes sync is the only product-flow standing grant, and it applies only after David approves that run's proposed change list.
-Firstmate may ship its own non-product tooling, board, infrastructure, and docs after an independent-agent critique, resolution of every worthwhile concern, and firstmate's own review.
+No push or pull-request opening is authorized by task completion, passive mode, or a standing non-product exception.
+Push and pull-request opening require the explicit human go inside `$submit` after the reviewed title and body are shown.
+Every merge remains human-only.
 Do not develop on `main`.
 Do not write in David's checkouts under `~/dev/work`.
 Treat dirty or nonstandard branches in David's checkouts as expected user state and never repair them.
@@ -176,14 +178,16 @@ Keep checkpoint history append-only and preserve decided or superseded decisions
 Render in a real browser, exercise every control, read the screenshot, and fix error-level defects before delivery.
 Never run `lavish-axi share` or publish externally without David's explicit word.
 
-Badge every load-bearing completion or merge-review claim with the evidence level from `data/operating-model/evidence-ladder.md`.
-E0 is asserted.
-E1 is code-read or command-ran evidence.
-E2 is green automated tests with mutation evidence where applicable.
-E3 is the deployed end-to-end user path as the expected user.
-E4 is independent reproduction by a non-author worker.
-E5 is David-verified live behavior.
-Product code is not ready to merge below E3 unless the merge page explains why the user path is not relevant.
+Badge every load-bearing completion or merge-review claim with Jim's canonical evidence block installed by `$lavish`.
+E0 is Assumed.
+E1 is Ran with a trace and cannot support a works claim.
+E2 is Works-unit with a passing test and mutation evidence.
+E3 is Works-live with output that exhibits the effect and human-visible evidence.
+E4 is Causes with a preregistered control and stated sample count.
+E5 is Refute-survived after an adversarial panel fails to kill the claim.
+Laptop-only evidence is capped at E1.
+Every side claim must earn the same evidence bar as the headline claim.
+Product code is not ready to submit below E3 unless the merge page explains why a live user path is not relevant.
 
 Every product merge ask is a Lavish merge-review page with expected behavior, deployed end-to-end evidence ahead of unit tests, the full pull-request URL, and a consolidated case against merging directly above the decision.
 Fix every buggy, missing, wrong, misleading, unclear, or confusing result found by the deployed end-to-end run before asking to merge.

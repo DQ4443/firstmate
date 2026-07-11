@@ -79,6 +79,8 @@ E4 is Causes with a preregistered control and stated sample count.
 E5 is Refute-survived after an adversarial panel fails to kill the claim.
 Feature completion needs E2 and E3, plus E4 for a causal claim.
 Ship language and closing-report headlines need E5.
+Laptop-only evidence is capped at E1.
+Side claims, qualifiers, and supporting comparisons must earn the same bar as the headline claim.
 Measure real output over all real inputs against an invariant.
 Record evidence in the ledger during validation.
 Read the recorded screenshot for any user-interface change.
@@ -124,17 +126,18 @@ Never wire an automated loop to a merge, send, pull-request opening, or other ga
 
 ## Anti-patterns
 
-| Tell | Correction |
-| --- | --- |
-| Coding started before Intent. | Return to Phase 0 and state the proof. |
-| A bug was changed before its real-user reproduction. | Reproduce it before fixing it. |
-| Implementation started before a checkpoint choice. | Round 1 always waits for the choice. |
-| A failing approach repeated without recon. | Run issue recon before the next suggestion. |
-| A simple move received a large scout. | Scale recon to the move. |
-| Rounds accumulated without commits. | Commit every round. |
-| Discovered work disappeared. | Put it in the ledger as spillover. |
-| Validation has no recorded artifact. | Add the trace, screenshot, or log excerpt to the ledger. |
-| A pull request opened after the last round. | Hold for explicit `$submit` approval. |
-| The loop ended only in chat. | Update the same Lavish page with the closing state. |
-| Passive rounds are missing from the page. | Append each round before continuing, subject only to the one-round hatch. |
-| The checkpoint contains manufactured choices. | Show real alternative moves or state the one real move. |
+| Tell                                                 | Correction                                                                |
+| ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| Coding started before Intent.                        | Return to Phase 0 and state the proof.                                    |
+| A bug was changed before its real-user reproduction. | Reproduce it before fixing it.                                            |
+| Implementation started before a checkpoint choice.   | Round 1 always waits for the choice.                                      |
+| A failing approach repeated without recon.           | Run issue recon before the next suggestion.                               |
+| A simple move received a large scout.                | Scale recon to the move.                                                  |
+| Rounds accumulated without commits.                  | Commit every round.                                                       |
+| Discovered work disappeared.                         | Put it in the ledger as spillover.                                        |
+| Validation has no recorded artifact.                 | Add the trace, screenshot, or log excerpt to the ledger.                  |
+| A side claim rides on stronger headline evidence.    | Test or downgrade the side claim to its own earned E-level.               |
+| A pull request opened after the last round.          | Hold for explicit `$submit` approval.                                     |
+| The loop ended only in chat.                         | Update the same Lavish page with the closing state.                       |
+| Passive rounds are missing from the page.            | Append each round before continuing, subject only to the one-round hatch. |
+| The checkpoint contains manufactured choices.        | Show real alternative moves or state the one real move.                   |

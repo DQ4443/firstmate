@@ -30,6 +30,9 @@ ordered(build, ["## Phase 0: Intent", "## Entry Recon", "### 1. Checkpoint", "##
 assert "An explicit `$pdw` always uses the workflow shape and never degrades" in pdw
 assert "may degrade" not in pdw
 assert "genuinely new direction outside the authorized intent" in build
+for evidence_rule in ["E0 is Assumed", "E1 is Ran", "E2 is Works-unit", "E3 is Works-live", "E4 is Causes", "E5 is Refute-survived", "Laptop-only evidence is capped at E1", "Side claims, qualifiers, and supporting comparisons must earn the same bar"]:
+    assert evidence_rule in build, evidence_rule
+assert "Overlapping writers serialize even when their worktrees are isolated." in pdw
 ledger_line = next(line for line in build.splitlines() if line.startswith("Create `state/build-loops/"))
 for field in ["proof", "scout_artifact", "loop_artifact", "blockers", "r4_gate", "preregistered_before_after"]:
     assert f"`{field}`" in ledger_line, field
@@ -39,7 +42,7 @@ PY
 verify_structure "$PDW" "$BUILD"
 printf 'ok - Jim execution module and node order is preserved\n'
 
-for required in requested_effort effective_effort requested_status effective_status routing_rationale return_thread_id return_host_id NEXT_STEP UNVERIFIED; do
+for required in requested_effort effective_effort requested_status effective_status routing_rationale return_thread_id return_host_id report_id NEXT_STEP UNVERIFIED; do
   rg -q "$required" "$PDW" || { printf 'not ok - missing PDW carrier %s\n' "$required" >&2; exit 1; }
 done
 printf 'ok - PDW contains the approved routing and return carriers\n'

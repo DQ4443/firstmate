@@ -54,6 +54,11 @@ for required in worktree role_file model effort sandbox prompt_file events_file 
 done
 [[ -d "$worktree" && "$worktree" == */.claude/worktrees/* ]] || { printf 'worktree must be an existing target-repo .claude/worktrees path\n' >&2; exit 2; }
 git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf 'worktree is not a git worktree\n' >&2; exit 2; }
+worktree=$(cd "$worktree" && pwd -P)
+git_dir=$(git -C "$worktree" rev-parse --path-format=absolute --git-dir)
+common_dir=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)
+[[ "$git_dir" != "$common_dir" && "$git_dir" == "$common_dir"/worktrees/* ]] || { printf 'worktree must be a linked git worktree\n' >&2; exit 2; }
+git -C "$worktree" worktree list --porcelain | awk '/^worktree / {sub(/^worktree /, ""); print}' | grep -Fxq "$worktree" || { printf 'worktree is absent from git worktree metadata\n' >&2; exit 2; }
 [[ -f "$role_file" ]] || { printf 'role file not found\n' >&2; exit 2; }
 [[ -f "$prompt_file" ]] || { printf 'prompt file not found\n' >&2; exit 2; }
 [[ "$parallel_lanes" =~ ^[0-9]+$ ]] || { printf 'parallel lanes must be a non-negative integer\n' >&2; exit 2; }
@@ -61,6 +66,9 @@ case "$sandbox" in
   read-only|workspace-write) ;;
   *) printf 'unsupported worker sandbox: %s\n' "$sandbox" >&2; exit 2 ;;
 esac
+role_sandbox=$(awk -F ' *= *' '/^sandbox_mode *=/ {gsub(/["[:space:]]/, "", $2); print $2; exit}' "$role_file")
+[[ -n "$role_sandbox" ]] || { printf 'role file has no sandbox_mode\n' >&2; exit 2; }
+[[ "$sandbox" == "$role_sandbox" ]] || { printf 'requested sandbox does not match role sandbox_mode\n' >&2; exit 2; }
 
 case "$effort" in
   light) requested_codex_effort=low ;;
@@ -109,8 +117,7 @@ else
 fi
 
 if [[ "$require_commit" == true ]]; then
-  [[ -n "$base_sha" ]] || { printf 'base SHA is required with --require-commit\n' >&2; exit 2; }
-  git -C "$worktree" rev-parse --verify "$base_sha^{commit}" >/dev/null 2>&1 || { printf 'base SHA is not a commit\n' >&2; exit 2; }
+  [[ -z $(git -C "$worktree" status --porcelain) ]] || { printf 'writer worktree must be clean before launch\n' >&2; exit 2; }
 fi
 
 role_instructions=$(awk '
@@ -121,6 +128,12 @@ role_instructions=$(awk '
 [[ -n "$role_instructions" ]] || { printf 'role file has no developer_instructions block\n' >&2; exit 2; }
 role_toml=$(jq -Rn --arg value "$role_instructions" '$value')
 mkdir -p "$(dirname "$events_file")" "$(dirname "$last_message_file")" "$(dirname "$evidence_file")"
+
+launch_head=$(git -C "$worktree" rev-parse HEAD)
+if [[ -n "$base_sha" ]]; then
+  git -C "$worktree" rev-parse --verify "$base_sha^{commit}" >/dev/null 2>&1 || { printf 'base SHA is not a commit\n' >&2; exit 2; }
+  [[ "$base_sha" == "$launch_head" ]] || { printf 'base SHA does not match the immediate pre-launch HEAD\n' >&2; exit 2; }
+fi
 
 set +e
 codex exec \
@@ -142,7 +155,7 @@ worktree_clean=false
 [[ -z $(git -C "$worktree" status --porcelain) ]] && worktree_clean=true
 commit_requirement_met=true
 if [[ "$require_commit" == true ]]; then
-  if [[ "$worktree_clean" != true || "$last_commit_sha" == "$base_sha" ]]; then
+  if [[ "$worktree_clean" != true || "$last_commit_sha" == "$launch_head" ]] || ! git -C "$worktree" merge-base --is-ancestor "$launch_head" "$last_commit_sha"; then
     commit_requirement_met=false
   fi
 fi
@@ -159,6 +172,7 @@ jq -n \
   --arg events_file "$events_file" \
   --arg last_message_file "$last_message_file" \
   --arg last_commit_sha "$last_commit_sha" \
+  --arg launch_head "$launch_head" \
   --arg effective_model "unverified_from_process_output" \
   --arg effective_effort "unverified_from_process_output" \
   --arg effective_sandbox "unverified_from_process_output" \
@@ -166,7 +180,7 @@ jq -n \
   --argjson fallback_applied "$fallback_applied" \
   --argjson worktree_clean "$worktree_clean" \
   --argjson commit_requirement_met "$commit_requirement_met" \
-  '{requested_model: $requested_model, requested_effort: $requested_effort, requested_codex_effort: $requested_codex_effort, carrier_effort: $carrier_effort, supported_efforts: ($supported_efforts | split("\n")), requested_sandbox: $requested_sandbox, role_file: $role_file, worktree: $worktree, events_file: $events_file, last_message_file: $last_message_file, launch_exit: $launch_exit, fallback_applied: $fallback_applied, effective_model: $effective_model, effective_effort: $effective_effort, effective_sandbox: $effective_sandbox, enforcement_verified: false, worktree_clean: $worktree_clean, commit_requirement_met: $commit_requirement_met, last_commit_sha: $last_commit_sha}' >"$evidence_file"
+  '{requested_model: $requested_model, requested_effort: $requested_effort, requested_codex_effort: $requested_codex_effort, carrier_effort: $carrier_effort, supported_efforts: ($supported_efforts | split("\n")), requested_sandbox: $requested_sandbox, role_file: $role_file, worktree: $worktree, events_file: $events_file, last_message_file: $last_message_file, launch_exit: $launch_exit, fallback_applied: $fallback_applied, effective_model: $effective_model, effective_effort: $effective_effort, effective_sandbox: $effective_sandbox, enforcement_verified: false, launch_head: $launch_head, worktree_clean: $worktree_clean, commit_requirement_met: $commit_requirement_met, last_commit_sha: $last_commit_sha}' >"$evidence_file"
 
 if ((launch_exit != 0)); then
   printf 'codex exec failed; see %s and %s.stderr\n' "$events_file" "$events_file" >&2

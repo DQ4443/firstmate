@@ -19,6 +19,27 @@ REQUIRED_MARKERS = (
 )
 
 COMPONENTS = {
+    "JIM EVIDENCE BADGES": r'''<!-- ================= COPY VERBATIM: JIM EVIDENCE BADGES ================= -->
+<style>
+.jim-evidence-badges{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.jim-evidence-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink);font-size:11px}.jim-evidence-badge strong{color:var(--clay-deep)}
+</style>
+<template id="jim-evidence-badge-template"><span class="jim-evidence-badge" data-jim-evidence><strong data-jim-evidence-level></strong><span data-jim-evidence-label></span></span></template>
+<script>
+(() => {
+  const labels = {E0:'Assumed',E1:'Ran',E2:'Works-unit',E3:'Works-live',E4:'Causes',E5:'Refute-survived'};
+  const instantiate = level => {
+    if (!Object.hasOwn(labels, level)) throw new Error('evidence level must be E0 through E5');
+    const template = document.getElementById('jim-evidence-badge-template');
+    if (!template) throw new Error('Jim evidence badge template unavailable');
+    const fragment = template.content.cloneNode(true);
+    fragment.querySelector('[data-jim-evidence-level]').textContent = level;
+    fragment.querySelector('[data-jim-evidence-label]').textContent = labels[level];
+    return fragment;
+  };
+  window.JimEvidenceBadges = {labels,instantiate,laptopCap:'E1'};
+})();
+</script>
+<!-- ================ /COPY VERBATIM: JIM EVIDENCE BADGES ================= -->''',
     "DECISION ZONE": r'''<!-- ==================== COPY VERBATIM: DECISION ZONE ====================== -->
 <style>
 .dz{margin:24px 0 80px}.tabbar{position:sticky;top:0;z-index:4;display:flex;gap:6px;padding:8px;background:var(--bg);border:1px solid var(--line);border-radius:10px}
