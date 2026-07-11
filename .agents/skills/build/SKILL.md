@@ -134,7 +134,7 @@ Never wire an automated loop to a merge, send, pull-request opening, or other ga
 | Rounds accumulated without commits. | Commit every round. |
 | Discovered work disappeared. | Put it in the ledger as spillover. |
 | Validation has no recorded artifact. | Add the trace, screenshot, or log excerpt to the ledger. |
-| A pull request opened after the last round. | Hold for explicit `/submit` approval. |
+| A pull request opened after the last round. | Hold for explicit `$submit` approval. |
 | The loop ended only in chat. | Update the same Lavish page with the closing state. |
 | Passive rounds are missing from the page. | Append each round before continuing, subject only to the one-round hatch. |
 | The checkpoint contains manufactured choices. | Show real alternative moves or state the one real move. |
