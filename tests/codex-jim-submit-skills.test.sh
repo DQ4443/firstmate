@@ -16,10 +16,10 @@ positive_triggers=(
   'run the commit-push-pr flow on this'
 )
 
-negative_triggers=(
-  'commit this locally so we can revert later'
-  'is the PR green yet?'
-  'merge #<n>'
+negative_trigger_lines=(
+  '1. `commit this locally so we can revert later`, because a checkpoint commit is not submission.'
+  '2. `is the PR green yet?`, because that is one status lookup.'
+  '3. `merge #<n>`, because `$submit` never merges.'
 )
 
 eval_rules=(
@@ -107,13 +107,47 @@ verify_skill() {
 
 verify_evals() {
   local file=$1
+  local actual
   local expected
+  local index
   contains "$file" '## Should trigger (positive)' || return 1
   contains "$file" '## Should NOT trigger (negative)' || return 1
-  for expected in "${positive_triggers[@]}" "${negative_triggers[@]}" "${eval_rules[@]}"; do
-    contains "$file" "$expected" || return 1
+  actual=$(awk '
+    /^## Should trigger \(positive\)$/ {inside=1; next}
+    /^## / {if (inside) exit}
+    inside && /^[0-9]+\. / {print}
+  ' "$file")
+  expected=""
+  index=1
+  for line in "${positive_triggers[@]}"; do
+    expected+=$(printf '%s. `%s`\n' "$index" "$line")
+    expected+=$'\n'
+    index=$((index + 1))
   done
-  [[ $(grep -c '^- \[ \]' "$file") -eq 22 ]] || return 1
+  expected=${expected%$'\n'}
+  [[ "$actual" == "$expected" ]] || return 1
+
+  actual=$(awk '
+    /^## Should NOT trigger \(negative\)$/ {inside=1; next}
+    /^## / {if (inside) exit}
+    inside && /^[0-9]+\. / {print}
+  ' "$file")
+  expected=$(printf '%s\n' "${negative_trigger_lines[@]}")
+  expected=${expected%$'\n'}
+  [[ "$actual" == "$expected" ]] || return 1
+
+  actual=$(awk '
+    /^## Binary output checks$/ {inside=1; next}
+    /^## / {if (inside) exit}
+    inside && /^- \[ \] / {print}
+  ' "$file")
+  expected=""
+  for line in "${eval_rules[@]}"; do
+    expected+=$(printf -- '- [ ] %s\n' "$line")
+    expected+=$'\n'
+  done
+  expected=${expected%$'\n'}
+  [[ "$actual" == "$expected" ]] || return 1
 }
 
 verify_skill "$SKILL" || fail 'submit skill structure or threshold contract is incomplete'
@@ -161,6 +195,30 @@ if verify_evals "$TMP/evals.md"; then
 fi
 printf 'ok - inserting approved into the exact second trigger fails the verifier\n'
 
+cp "$EVALS" "$TMP/evals.md"
+python3 - "$TMP/evals.md" "${negative_trigger_lines[0]}" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+line = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+text = text.replace(line + "\n", "", 1)
+text = text.replace("\n## Should NOT trigger (negative)", "\n" + line + "\n\n## Should NOT trigger (negative)", 1)
+path.write_text(text, encoding="utf-8")
+PY
+if verify_evals "$TMP/evals.md"; then
+  fail 'negative-to-positive section mutation survived'
+fi
+printf 'ok - moving a negative prompt into the positive section fails the verifier\n'
+
+cp "$EVALS" "$TMP/evals.md"
+sed -i '' 's/## Should NOT trigger (negative)/## Should trigger (negative)/' "$TMP/evals.md"
+if verify_evals "$TMP/evals.md"; then
+  fail 'NOT-negation mutation survived'
+fi
+printf 'ok - removing NOT from the negative heading fails the verifier\n'
+
 cp "$SKILL" "$TMP/skill.md"
 sed -i '' 's/, and `matrix_recall`//' "$TMP/skill.md"
 if verify_skill "$TMP/skill.md"; then
@@ -183,11 +241,11 @@ fi
 printf 'ok - changing the drip-round fallback predicate fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' '/explicitly approved the outward push and pull-request opening/d' "$TMP/evals.md"
+sed -i '' 's/The human saw the drafted title/The human reviewed the drafted title/' "$TMP/evals.md"
 if verify_evals "$TMP/evals.md"; then
-  fail 'pull-request approval eval mutation survived'
+  fail 'exact pull-request approval eval mutation survived'
 fi
-printf 'ok - removing the pull-request approval eval fails the verifier\n'
+printf 'ok - changing the exact pull-request approval eval fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
 sed -i '' 's/`\$submit` did not merge/`$submit` may merge/' "$TMP/evals.md"
