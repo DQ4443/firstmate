@@ -10,16 +10,17 @@ Use `/explore` alone for a local lookup that needs breadth, `/websearch` alone f
 Inside `/build`, reserve this full scout for a high-complexity move that needs ideation, filtering, and experiments.
 Routine issue recon uses `/explore` and `/websearch` concurrently without the rest of this pipeline.
 
-## Contract
+## Calibration
 
 Read `/pdw` before dispatch because it owns parallel-first topology, task sizing, bare-agent exceptions, lane ownership, funnels, structured returns, effort routing, and parent return rules.
 The top-level parent owns this pipeline and every native subagent is a leaf that returns only to its immediate parent.
-The parent chooses two to five genuinely different angles for each subject from the question's complexity and nature instead of reusing a fixed angle template.
+Each `/explore` and `/websearch` half owns its angle-design step and chooses two to five genuinely different angles from its subject's complexity and nature.
+The scout parent must not choose or prescribe an angle template for either half.
 When several subjects need research, give each subject its own task team and run those teams concurrently before one global convergence pass.
 Fan-out buys breadth across independent probes and does not speed up a dependent build, measure, and revise chain.
 Run independent halves, subjects, and lanes concurrently whenever the topology and ownership rules in `/pdw` permit it.
 
-## Pipeline
+## The pipeline
 
 1. Load `/explore` and `/websearch`, then dispatch both halves concurrently for every subject.
 2. Accept one funneled local situation brief and one funneled sourced brief from each subject.
@@ -28,17 +29,22 @@ Run independent halves, subjects, and lanes concurrently whenever the topology a
 5. Tag every candidate with one existence value from `codebase`, `other-branch`, `standard-to-adopt`, or `novel` and one testability value from `cheap-local` or `expensive-external`.
 6. Cull by reasoning only candidates killed by redundancy or YAGNI and Gricean reasoning.
 7. Route every other candidate to the cheapest decisive experiment, with Occam, Hitchens, and Newton used to design tests rather than reject ideas by debate.
-8. Run every cheap local experiment now with its test and metric, and mutation-validate an experiment that claims to fix a defect.
+8. Run every cheap local experiment now with its test and metric, label its result `MEASURED`, and mutation-validate an experiment that claims to fix a defect.
 9. Flag and justify expensive external experiments without launching them until the human explicitly approves the cost and live watch.
 10. Record adopt-existing candidates with exactly what to adopt and where it comes from.
 11. Publish a significant scout in the existing Lavish system as a decision page containing the situation brief, numbered candidates, recommended picks, experiment evidence, and open questions.
 12. Return a small single-wave result directly only when it produced no candidate set and required no decision or experiment.
 
-## Funnel
+### Funnel rule
 
 At every funnel, reject degenerate upstream outputs, verify referenced artifact paths exist on disk before folding them in, name dead or unverified lanes `UNVERIFIED` rather than omitting them, and dedupe against everything seen, not just what was accepted.
 Re-run a junk lane once when its subject still matters and label it `UNVERIFIED` if the replacement remains unusable.
 Surface contradictions between lanes instead of averaging them away.
+
+## The threshold
+
+Run a cheap local experiment when its cost is comparable to debating it.
+Require upfront judgment, explicit human approval, and a live cost watch before an expensive external experiment.
 
 ## Return
 
