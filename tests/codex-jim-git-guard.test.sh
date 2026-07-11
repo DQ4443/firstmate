@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+GUARD="$ROOT/.codex/hooks/git-guard.py"
+HOOKS="$ROOT/.codex/hooks.json"
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/codex-git-guard.XXXXXX")
+TMP=$(cd "$TMP" && pwd -P)
+trap 'rm -rf "$TMP"' EXIT
+
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+pass() {
+  printf 'PASS: %s\n' "$*"
+}
+
+payload() {
+  local cwd=$1
+  local command=$2
+  jq -nc \
+    --arg cwd "$cwd" \
+    --arg cmd "$command" \
+    '{session_id:"schema-fixture",transcript_path:"/tmp/transcript.jsonl",cwd:$cwd,hook_event_name:"PreToolUse",permission_mode:"never",tool_name:"unified_exec",tool_input:{cmd:$cmd},tool_use_id:"call-fixture"}'
+}
+
+run_guard() {
+  local expected=$1
+  local cwd=$2
+  local command=$3
+  local output
+  local status
+  set +e
+  output=$(payload "$cwd" "$command" | python3 "$GUARD" 2>&1)
+  status=$?
+  set -e
+  [[ "$status" -eq "$expected" ]] || fail "expected $expected for [$command], got $status: $output"
+  if [[ "$expected" -eq 2 ]]; then
+    [[ "$output" == BLOCKED:* ]] || fail "blocked command had no Codex stderr reason: $command"
+  fi
+}
+
+git init --bare "$TMP/remote.git" >/dev/null
+git init -b main "$TMP/repo" >/dev/null
+git -C "$TMP/repo" config user.name Test
+git -C "$TMP/repo" config user.email test@example.com
+printf 'base\n' >"$TMP/repo/file.txt"
+git -C "$TMP/repo" add file.txt
+git -C "$TMP/repo" commit -m base >/dev/null
+git -C "$TMP/repo" remote add origin "$TMP/remote.git"
+git -C "$TMP/repo" push -u origin main >/dev/null 2>&1
+
+run_guard 2 "$TMP/repo" 'git push'
+run_guard 2 "$TMP/repo" 'git push origin HEAD:refs/heads/main'
+run_guard 2 "$TMP/repo" 'git --no-pager push origin main'
+run_guard 2 "$TMP/repo" '/usr/bin/git push --force origin feature:master'
+run_guard 2 "$TMP/repo" 'git push --force-with-lease origin feature:master'
+run_guard 2 "$TMP/repo" 'git push origin --delete main'
+run_guard 2 "$TMP" "cd '$TMP/repo' && git push origin main"
+run_guard 2 "$TMP" "git -C '$TMP/repo' push --all origin"
+run_guard 2 "$TMP/repo" "bash -c 'git push origin main'"
+run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
+run_guard 2 "$TMP/repo" "eval 'git push origin master'"
+
+git -C "$TMP/repo" switch -c feature >/dev/null 2>&1
+printf 'feature\n' >>"$TMP/repo/file.txt"
+git -C "$TMP/repo" commit -am feature >/dev/null
+run_guard 0 "$TMP/repo" 'git push origin feature'
+run_guard 0 "$TMP/repo" 'git push origin main:feature-copy'
+run_guard 2 "$TMP/repo" 'git push origin feature:refs/heads/main'
+run_guard 0 "$TMP/repo" 'git commit --amend --no-edit'
+
+git -C "$TMP/repo" push -u origin feature >/dev/null 2>&1
+run_guard 2 "$TMP/repo" 'git commit --amend --no-edit'
+run_guard 2 "$TMP/repo" 'git commit -m "fix" -m "Co-Authored-By: Bot <bot@example.com>"'
+run_guard 2 "$TMP/repo" 'git commit -m "Generated-by automation"'
+printf 'subject\n\nGenerated with Codex\n' >"$TMP/repo/message.txt"
+run_guard 2 "$TMP/repo" 'git commit -F message.txt'
+run_guard 0 "$TMP/repo" 'git commit -m "ordinary message"'
+pass 'push, attribution, and pushed-amend policies resist adversarial command shapes'
+
+sentinel=$(git -C "$TMP/repo" rev-parse --git-path codex-submit-pr-go)
+[[ "$sentinel" = /* ]] || sentinel="$TMP/repo/$sentinel"
+run_guard 2 "$TMP/repo" 'gh pr create --title test'
+touch "$sentinel"
+run_guard 0 "$TMP/repo" 'gh pr create --title test'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed'
+run_guard 2 "$TMP/repo" 'gh pr create --title second'
+touch "$sentinel"
+run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr create --title two'
+[[ -e "$sentinel" ]] || fail 'ambiguous multiple-create command consumed the sentinel'
+rm -f "$sentinel"
+run_guard 0 "$TMP/repo" 'gh pr view 42'
+
+custom_sentinel="$TMP/custom-submit-go"
+touch "$custom_sentinel"
+export CODEX_SUBMIT_SENTINEL="$custom_sentinel"
+run_guard 0 "$TMP/repo" 'gh-axi pr create --title configured'
+unset CODEX_SUBMIT_SENTINEL
+[[ ! -e "$custom_sentinel" ]] || fail 'configured submit sentinel was not consumed'
+pass 'pull-request sentinel is project-local, one-shot, and cannot authorize two creates'
+
+set +e
+printf '{not-json' | python3 "$GUARD" >/dev/null 2>&1
+invalid_status=$?
+set -e
+[[ "$invalid_status" -eq 0 ]] || fail 'malformed hook input did not fail open'
+
+legacy=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{command:"git push origin main"}}')
+set +e
+legacy_output=$(printf '%s\n' "$legacy" | python3 "$GUARD" 2>&1)
+legacy_status=$?
+set -e
+[[ "$legacy_status" -eq 2 && "$legacy_output" == BLOCKED:* ]] || fail 'legacy command compatibility input failed'
+pass 'actual Codex cmd payload and legacy command payload are both handled'
+
+jq -e '
+  (.hooks | keys == ["PreToolUse"]) and
+  (.hooks.PreToolUse | length == 1) and
+  (.hooks.PreToolUse[0].matcher == "unified_exec") and
+  (.hooks.PreToolUse[0].hooks[0].type == "command") and
+  (.hooks.PreToolUse[0].hooks[0].command == "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/git-guard.py\"") and
+  (.hooks.PreToolUse[0].hooks[0].timeout == 10)
+' "$HOOKS" >/dev/null || fail 'project hook declaration does not match the proven Codex schema'
+
+hook_command=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$HOOKS")
+set +e
+subdir_status=$(cd "$ROOT/tests" && payload "$ROOT" 'git status --short' | sh -c "$hook_command"; printf '%s' "$?")
+set -e
+[[ "$subdir_status" -eq 0 ]] || fail 'project-root hook command failed from a repository subdirectory'
+pass 'project declaration installs only the load-bearing PreToolUse hook'
+
+CODEX_HOME_PROBE="$TMP/codex-home"
+PROJECT_PROBE="$CODEX_HOME_PROBE/project"
+mkdir -p "$PROJECT_PROBE/.codex"
+cp "$HOOKS" "$PROJECT_PROBE/.codex/hooks.json"
+cat >"$CODEX_HOME_PROBE/hooks.json" <<'JSON'
+{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"global-probe","timeout":10}]}]}}
+JSON
+cat >"$CODEX_HOME_PROBE/config.toml" <<EOF
+[projects."$PROJECT_PROBE"]
+trust_level = "trusted"
+[features]
+hooks = true
+EOF
+
+CODEX_HOME="$CODEX_HOME_PROBE" PROJECT_PROBE="$PROJECT_PROBE" python3 - <<'PY'
+import json
+import os
+import selectors
+import subprocess
+import time
+
+process = subprocess.Popen(
+    ["codex", "app-server", "--stdio"],
+    cwd=os.environ["PROJECT_PROBE"],
+    env=os.environ,
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True,
+)
+messages = [
+    {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "hook-test", "version": "1"}, "capabilities": {}}},
+    {"method": "initialized", "params": {}},
+    {"id": 2, "method": "hooks/list", "params": {}},
+]
+for message in messages:
+    assert process.stdin is not None
+    process.stdin.write(json.dumps(message) + "\n")
+    process.stdin.flush()
+
+assert process.stdout is not None
+selector = selectors.DefaultSelector()
+selector.register(process.stdout, selectors.EVENT_READ)
+deadline = time.monotonic() + 5
+response = None
+while response is None and time.monotonic() < deadline:
+    events = selector.select(deadline - time.monotonic())
+    if not events:
+        break
+    line = process.stdout.readline()
+    if not line:
+        break
+    message = json.loads(line)
+    if message.get("id") == 2:
+        response = message
+process.terminate()
+process.communicate(timeout=3)
+assert response is not None
+entry = response["result"]["data"][0]
+assert entry["warnings"] == []
+assert entry["errors"] == []
+hooks = entry["hooks"]
+assert [(hook["source"], hook["command"]) for hook in hooks] == [
+    ("user", "global-probe"),
+    ("project", 'python3 "$(git rev-parse --show-toplevel)/.codex/hooks/git-guard.py"'),
+]
+assert [hook["displayOrder"] for hook in hooks] == [0, 1]
+PY
+pass 'Codex app-server proves project hooks compose after existing global hooks'
+
+if rg -n '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
+  fail 'forbidden Claude artifact or unproven optional hook landed'
+fi
+for optional in session-title.sh session-rename-nudge.sh pre-commit-install.sh; do
+  [[ ! -e "$ROOT/.codex/hooks/$optional" ]] || fail "unproven optional hook landed: $optional"
+done
+pass 'no Claude artifact or unproven optional hook landed'
