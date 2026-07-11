@@ -10,7 +10,7 @@ STATE="$TMP/state"
 mkdir -p "$STATE"
 
 write_config() {
-  printf '{"retry_max_attempts":2,"claim_ttl_seconds":1,"drain_batch_size":1}\n' >"$STATE/config.json"
+  printf '{"retry_max_attempts":2,"claim_ttl_seconds":1,"lock_ttl_seconds":60,"drain_batch_size":1}\n' >"$STATE/config.json"
 }
 
 write_report() {
@@ -123,6 +123,59 @@ if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid.json" >/dev/null
   exit 1
 fi
 printf 'ok - missing return destination is rejected\n'
+
+lock_file="$STATE/.lock"
+now=$(date +%s)
+jq -n --argjson pid "$$" --argjson created_at_epoch "$((now - 120))" --arg token live-holder \
+  '{pid: $pid, created_at_epoch: $created_at_epoch, token: $token}' >"$lock_file"
+if $ADAPTER --state-dir "$STATE" drain >/dev/null 2>&1; then
+  printf 'not ok - an expired lock owned by a live process was deleted\n' >&2
+  exit 1
+fi
+jq -e '.token == "live-holder"' "$lock_file" >/dev/null
+printf 'ok - expired live-holder lock is never deleted\n'
+
+(trap - EXIT; sleep 30) &
+dead_holder=$!
+kill "$dead_holder"
+wait "$dead_holder" 2>/dev/null || true
+jq -n --argjson pid "$dead_holder" --argjson created_at_epoch "$(date +%s)" --arg token fresh-killed-holder \
+  '{pid: $pid, created_at_epoch: $created_at_epoch, token: $token}' >"$lock_file"
+if $ADAPTER --state-dir "$STATE" drain >/dev/null 2>&1; then
+  printf 'not ok - a dead holder was recovered before the lock TTL elapsed\n' >&2
+  exit 1
+fi
+jq -e '.token == "fresh-killed-holder"' "$lock_file" >/dev/null
+printf 'ok - dead-holder lock remains protected until its TTL elapses\n'
+
+jq -n --argjson pid "$dead_holder" --argjson created_at_epoch "$((now - 120))" --arg token killed-holder \
+  '{pid: $pid, created_at_epoch: $created_at_epoch, token: $token}' >"$lock_file"
+recovered_after_kill=$($ADAPTER --state-dir "$STATE" drain)
+jq -e 'type == "array"' <<<"$recovered_after_kill" >/dev/null
+[[ -f "$lock_file" && ! -s "$lock_file" ]]
+printf 'ok - expired killed-holder lock is recovered\n'
+
+write_report "$TMP/report-race.json" task-race
+race_successes=0
+race_failures=0
+race_pids=()
+for index in 1 2 3 4 5 6 7 8; do
+  (
+    $ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-race.json" >"$TMP/race-$index.out" 2>"$TMP/race-$index.err"
+  ) &
+  race_pids+=("$!")
+done
+for race_pid in "${race_pids[@]}"; do
+  if wait "$race_pid"; then
+    race_successes=$((race_successes + 1))
+  else
+    race_failures=$((race_failures + 1))
+  fi
+done
+((race_successes >= 1))
+[[ $(find "$STATE/pending" -type f -name '*.json' | wc -l | tr -d ' ') -ge 1 ]]
+[[ -f "$lock_file" && ! -s "$lock_file" ]]
+printf 'ok - racing lock contenders leave one valid report and no orphan lock (%s success, %s busy)\n' "$race_successes" "$race_failures"
 
 grep -Fq 'on every later owning-task wake while delivery remains incomplete' "$PDW_SKILL"
 grep -Fq 'report-back.sh drain' "$PDW_SKILL"

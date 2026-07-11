@@ -27,7 +27,7 @@ command=${1:-}
 [[ -n "$command" ]] || { usage >&2; exit 2; }
 shift
 
-for dependency in jq shasum; do
+for dependency in jq python3 shasum; do
   command -v "$dependency" >/dev/null || { printf 'missing dependency: %s\n' "$dependency" >&2; exit 2; }
 done
 
@@ -36,11 +36,13 @@ config="$state_dir/config.json"
 jq -e '
   (.retry_max_attempts | type == "number" and . >= 1 and floor == .) and
   (.claim_ttl_seconds | type == "number" and . >= 1 and floor == .) and
+  (.lock_ttl_seconds | type == "number" and . >= 1 and floor == .) and
   (.drain_batch_size | type == "number" and . >= 1 and floor == .)
 ' "$config" >/dev/null || { printf 'invalid report configuration: %s\n' "$config" >&2; exit 2; }
 
 retry_max=$(jq -r '.retry_max_attempts' "$config")
 claim_ttl=$(jq -r '.claim_ttl_seconds' "$config")
+lock_ttl=$(jq -r '.lock_ttl_seconds' "$config")
 drain_batch=$(jq -r '.drain_batch_size' "$config")
 for dir in pending retry inflight sent exhausted received tmp; do
   mkdir -p "$state_dir/$dir"
@@ -63,14 +65,49 @@ atomic_write() {
   mv "$temporary" "$destination"
 }
 
+lock_token=""
+lock_helper_pid=""
+lock_fifo_dir=""
+
+release_lock() {
+  [[ -n "$lock_helper_pid" ]] || return 0
+  exec 9>&- 9<&-
+  wait "$lock_helper_pid" 2>/dev/null || true
+  exec 8>&- 8<&-
+  [[ -z "$lock_fifo_dir" ]] || rm -rf "$lock_fifo_dir"
+}
+
 lock() {
-  local lock_dir="$state_dir/.lock"
-  mkdir "$lock_dir" 2>/dev/null || { printf 'report state is busy\n' >&2; exit 1; }
-  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+  local lock_file="$state_dir/.lock"
+  local current
+  local result
+  local helper
+
+  current=$(now_epoch)
+  lock_token=$(printf '%s' "$$:$current:$RANDOM:$state_dir" | shasum -a 256 | awk '{print $1}')
+  helper=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/report-lock.py
+  lock_fifo_dir=$(mktemp -d "$state_dir/tmp/lock-fifo.XXXXXX")
+  mkfifo "$lock_fifo_dir/control" "$lock_fifo_dir/status"
+  exec 9<>"$lock_fifo_dir/control"
+  exec 8<>"$lock_fifo_dir/status"
+  python3 "$helper" "$lock_file" "$lock_ttl" "$$" "$lock_token" <"$lock_fifo_dir/control" >"$lock_fifo_dir/status" 9>&- 8>&- &
+  lock_helper_pid=$!
+  IFS= read -r result <&8 || result=error
+  if [[ "$result" != ready ]]; then
+    release_lock
+    lock_helper_pid=""
+    lock_fifo_dir=""
+    printf 'report state is busy\n' >&2
+    exit 1
+  fi
+  trap 'release_lock' EXIT
 }
 
 unlock() {
-  rmdir "$state_dir/.lock" 2>/dev/null || true
+  release_lock
+  lock_token=""
+  lock_helper_pid=""
+  lock_fifo_dir=""
   trap - EXIT
 }
 
