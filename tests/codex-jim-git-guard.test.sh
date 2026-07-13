@@ -68,6 +68,16 @@ run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
 run_guard 2 "$TMP/repo" "eval -- 'git push origin master'"
+run_guard 2 "$TMP/repo" 'G=git; "$G" push origin main'
+run_guard 0 "$TMP/repo" 'G=git; "$G" status --short'
+
+git -C "$TMP/repo" config alias.publish push
+git -C "$TMP/repo" config alias.shell-publish '!git push'
+run_guard 2 "$TMP/repo" 'git publish origin main'
+run_guard 2 "$TMP/repo" 'git shell-publish origin main'
+run_guard 2 "$TMP/repo" 'git -c alias.inline-publish=push inline-publish origin main'
+run_guard 2 "$TMP/repo" 'git config alias.staged-publish push && git staged-publish origin main'
+run_guard 0 "$TMP/repo" 'git config alias.inspect status && git inspect --short'
 run_guard 2 "$TMP/repo" "bash -lc 'eval -- \"zsh -lc '\"'\"'git push origin main'\"'\"'\"'"
 
 git -C "$TMP/repo" switch -c feature >/dev/null 2>&1
@@ -104,9 +114,19 @@ pass 'push, attribution, and pushed-amend policies resist adversarial command sh
 sentinel=$(git -C "$TMP/repo" rev-parse --git-path codex-submit-pr-go)
 [[ "$sentinel" = /* ]] || sentinel="$TMP/repo/$sentinel"
 run_guard 2 "$TMP/repo" 'gh pr create --title test'
+run_guard 2 "$TMP/repo" 'gh api -X POST repos/example/project/pulls -f title=test'
+run_guard 2 "$TMP/repo" 'gh-axi api repos/example/project/pulls -f title=test -f head=feature'
+run_guard 2 "$TMP/repo" 'gh api graphql -f query="mutation { createPullRequest(input: {}) { pullRequest { id } } }"'
+run_guard 2 "$TMP/repo" 'GH=gh; "$GH" api --method POST repos/example/project/pulls'
+run_guard 0 "$TMP/repo" 'gh api repos/example/project/pulls'
+run_guard 0 "$TMP/repo" 'gh-axi api --method GET repos/example/project/pulls'
+run_guard 0 "$TMP/repo" 'gh api graphql -f query="{ viewer { login } }"'
 touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr create --title test'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed'
+touch "$sentinel"
+run_guard 0 "$TMP/repo" 'gh-axi api --method POST repos/example/project/pulls -f title=approved'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by raw pull-request creation'
 run_guard 2 "$TMP/repo" 'gh pr create --title second'
 run_guard 2 "$TMP/repo" 'gh pr ready 42'
 touch "$sentinel"
