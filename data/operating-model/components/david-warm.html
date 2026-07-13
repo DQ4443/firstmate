@@ -1,0 +1,340 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  ============================================================================
+  DAVID-WARM  ·  canonical component library for all David-facing HTML
+  ============================================================================
+
+  This is the single source of truth for the warm-light house style. Every
+  David-facing page (merge reviews, decision docs, lavish artifacts, board
+  attachments, scout reports) copies its components FROM HERE VERBATIM and
+  restyles nothing. Do not re-improvise blocks per doc; re-improvised blocks
+  drift and the banned patterns leak back in.
+
+  HOW TO USE
+    1. Copy the :root token block once, at the top of the page.
+    2. Copy the base reset + element rules once.
+    3. Copy each component you need from its "COPY VERBATIM" marker to the
+       matching close marker. Change only the human text inside, never the
+       structure, class names, or CSS.
+    4. Do not add any style the library does not already carry. If a component
+       is missing, add it to THIS file first, then copy it out.
+
+  BANNED PATTERNS  (structural, non-negotiable; these are David's UI em dashes)
+    - NO border-left / border-right accent stripes on cards or blocks.
+      A colored left-edge accent border on a rounded-rectangle card is the
+      single most-corrected regression. This file contains zero border-left.
+    - NO em dashes anywhere in copy. Use commas, periods, or parentheses.
+    - NO emojis anywhere.
+    - NO dark chrome. No dark backgrounds, no prefers-color-scheme dark
+      branch. The page is warm light in every viewer, always.
+    - NO rounded-rectangle card whose ONLY differentiator is a colored
+      left edge. Cards differentiate by background wash + full soft border.
+
+  PALETTE  (canonical David-warm; hexes reconciled from the approved
+  adoption.htmltxt and tracker-flags.htmltxt references, 2026-07-09)
+    cream bg      #F4EFE4      clay accent   #B4694A
+    card surface  #FCFAF4      clay deep     #9A5238
+    wash surface  #F8F3E9      clay soft     #F0DED2
+    ink           #2E2A22      sage green    #6E7D5E
+    brown/muted   #8A806E      sage soft     #E4E9DA
+    soft border   #E4DBC9      good (green)  #5E7A4E
+                               brick (red)   #A8473A
+  ============================================================================
+-->
+
+<!-- ========================= COPY VERBATIM: TOKENS ========================= -->
+<style>
+:root{
+  /* surfaces */
+  --bg:#F4EFE4;        /* cream page background */
+  --card:#FCFAF4;      /* card surface */
+  --wash:#F8F3E9;      /* background-wash section / secondary surface */
+  /* ink */
+  --ink:#2E2A22;       /* primary text */
+  --mut:#8A806E;       /* muted / brown neutral */
+  --line:#E4DBC9;      /* soft border */
+  /* clay accent */
+  --clay:#B4694A;      /* clay accent */
+  --clay-deep:#9A5238; /* deep clay (code, emphasis) */
+  --clay-soft:#F0DED2; /* clay wash (chips, callouts) */
+  /* sage */
+  --sage:#6E7D5E;      /* sage green */
+  --sage-soft:#E4E9DA; /* sage wash (recommended option, positive chips) */
+  /* status */
+  --good:#5E7A4E;      /* positive / verdict pass */
+  --brick:#A8473A;     /* negative / con / verdict fail */
+}
+</style>
+<!-- ======================= /COPY VERBATIM: TOKENS ========================== -->
+
+<!-- ==================== COPY VERBATIM: BASE RESET + ELEMENTS ================ -->
+<style>
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);margin:0;
+  font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding:32px 20px 80px}
+.wrap{max-width:940px;margin:0 auto}
+h1{font-size:clamp(24px,5vw,30px);line-height:1.25;letter-spacing:-.01em;margin:0 0 6px}
+h2{font-size:19px;letter-spacing:-.01em;margin:40px 0 10px;
+  padding-bottom:6px;border-bottom:1px solid var(--line)}
+h3{font-size:14.5px;margin:20px 0 4px}
+p{margin:8px 0}
+a{color:var(--clay)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:var(--wash);
+  padding:1px 5px;border-radius:4px;color:var(--clay-deep)}
+pre{background:var(--wash);border:1px solid var(--line);border-radius:10px;
+  padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.5;margin:12px 0}
+pre code{background:none;padding:0;color:var(--ink)}
+ul,ol{margin:6px 0;padding-left:22px}
+li{margin:3px 0}
+/* tables scroll inside their own container, never widen the page */
+.tw{overflow-x:auto;margin:12px 0;border-radius:10px;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:13px;background:var(--card)}
+.tw table{border:none}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
+  text-align:left;padding:8px 11px;background:var(--wash);
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+</style>
+<!-- =================== /COPY VERBATIM: BASE RESET + ELEMENTS ================ -->
+
+<div class="wrap">
+
+<!-- ==================== COPY VERBATIM: PAGE HEADER (eyebrow) ================ -->
+<style>
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--clay);margin:0 0 6px}
+.sub{color:var(--mut);font-size:14px;margin:0 0 22px}
+</style>
+<p class="eyebrow">Surface &middot; short context line</p>
+<h1>The page title, stated as the thing itself</h1>
+<p class="sub">One or two sentences of context under the title. What this page is,
+what it wants from David, and how to respond. Newest state on top.</p>
+<!-- =================== /COPY VERBATIM: PAGE HEADER (eyebrow) ================ -->
+
+
+<h2>1. Full soft-border card</h2>
+
+<!-- ==================== COPY VERBATIM: CARD ================================ -->
+<style>
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;margin:14px 0}
+.card.rec{background:var(--wash)}   /* emphasis variant: wash fill, NEVER a left edge */
+.card .ch{font-weight:650;font-size:14.5px;margin:0 0 4px}
+</style>
+<div class="card">
+  <p class="ch">Card heading</p>
+  <p>The card differentiates by a full one-pixel soft border plus an optional
+  wash fill, never by a colored left edge. Use it for any self-contained block:
+  a finding, a summary, a record. For emphasis add class <code>rec</code> for
+  the wash fill.</p>
+</div>
+<!-- =================== /COPY VERBATIM: CARD ================================ -->
+
+
+<h2>2. Background-wash section</h2>
+
+<!-- ==================== COPY VERBATIM: WASH SECTION ======================== -->
+<style>
+.wash-sec{background:var(--wash);border:1px solid var(--line);border-radius:14px;
+  padding:14px 18px;margin:16px 0;font-size:14px}
+.wash-sec b{font-weight:650}
+</style>
+<div class="wash-sec">
+  <b>What this section does:</b>
+  <ul>
+    <li>Groups a set of related points under a soft wash so it reads as one unit.</li>
+    <li>Use for a summary, a "what my recommendation does" block, or a note.</li>
+    <li>Full border, wash fill, no left accent.</li>
+  </ul>
+</div>
+<!-- =================== /COPY VERBATIM: WASH SECTION ======================== -->
+
+
+<h2>3. Your-call decision block</h2>
+
+<!-- ==================== COPY VERBATIM: YOUR-CALL BLOCK ===================== -->
+<style>
+.yc{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  margin:16px 0;overflow:hidden}
+.yc-h{font-weight:700;font-size:14px;padding:12px 16px;background:var(--wash);
+  border-bottom:1px solid var(--line);display:flex;justify-content:space-between;
+  gap:10px;align-items:baseline;flex-wrap:wrap}
+.yc-h .rk{font-size:11px;color:var(--mut);font-weight:600}
+.yc-b{padding:6px 16px 14px}
+.yc .why{font-size:12.5px;color:var(--ink);margin:8px 0 8px}
+.opt{border:1px solid var(--line);border-radius:10px;padding:10px 13px;
+  margin:10px 0;background:var(--bg)}
+.opt.pick{background:var(--sage-soft);border-color:#C9D3BB}  /* recommended: sage wash + full border, NOT a left edge */
+.opt .oh{font-weight:700;font-size:12.5px;margin-bottom:3px;display:flex;
+  align-items:center;gap:6px;flex-wrap:wrap}
+.opt .oh .pill{font-size:9.5px;font-weight:700;color:#fff;background:var(--sage);
+  padding:1px 7px;border-radius:9px;letter-spacing:.03em;text-transform:uppercase}
+.opt .od{font-size:12.5px;color:var(--ink)}
+.opt .pro{color:var(--good);font-size:11.5px;margin-top:5px}
+.opt .con{color:var(--brick);font-size:11.5px;margin-top:2px}
+.pick-radio{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pick-radio label{border:1.5px solid var(--line);border-radius:999px;
+  padding:5px 14px;font-size:13px;cursor:pointer;background:var(--bg)}
+.pick-radio input{accent-color:var(--clay);margin-right:6px}
+.pick-radio label.rec{border-color:var(--sage);background:var(--sage-soft);font-weight:650}
+</style>
+<div class="yc">
+  <div class="yc-h"><span>The decision, phrased as a question David answers</span><span class="rk">rank 1</span></div>
+  <div class="yc-b">
+    <p class="why">One line of context: why this needs David, the crux of the trade-off.</p>
+
+    <!-- Variant A: option cards with pros/cons, recommended one pre-marked .pick -->
+    <div class="opt pick">
+      <div class="oh">A1 &middot; Recommended option<span class="pill">recommended</span></div>
+      <div class="od">What this option does, in one or two plain sentences.</div>
+      <div class="pro">+ The strongest reason for it</div>
+      <div class="con">- The honest cost of it</div>
+    </div>
+    <div class="opt">
+      <div class="oh">A2 &middot; Alternative</div>
+      <div class="od">The other reading, stated fairly.</div>
+      <div class="con">- Why it ranks below A1</div>
+    </div>
+
+    <!-- Variant B: compact radio pills (recommended one carries .rec + checked) -->
+    <div class="pick-radio">
+      <label class="rec"><input type="radio" name="demo" checked>Do it (recommended)</label>
+      <label><input type="radio" name="demo">Defer</label>
+      <label><input type="radio" name="demo">Drop</label>
+    </div>
+  </div>
+</div>
+<!-- =================== /COPY VERBATIM: YOUR-CALL BLOCK ===================== -->
+
+
+<h2>4. Verdict / status chip row</h2>
+
+<!-- ==================== COPY VERBATIM: STATUS CHIPS ======================== -->
+<style>
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.chip{display:inline-block;font-size:10.5px;font-weight:700;padding:3px 10px;
+  border-radius:999px;letter-spacing:.03em;text-transform:uppercase;
+  border:1px solid transparent}
+.chip.pass{background:var(--sage-soft);color:var(--good);border-color:#C9D3BB}
+.chip.fail{background:var(--clay-soft);color:var(--brick);border-color:#E7C9B8}
+.chip.warn{background:var(--clay-soft);color:var(--clay-deep);border-color:#E7C9B8}
+.chip.neutral{background:var(--wash);color:var(--mut);border-color:var(--line)}
+.chip.info{background:var(--wash);color:var(--clay-deep);border-color:var(--line)}
+</style>
+<div class="chips">
+  <span class="chip pass">passing</span>
+  <span class="chip fail">blocked</span>
+  <span class="chip warn">needs work</span>
+  <span class="chip neutral">not relevant</span>
+  <span class="chip info">in review</span>
+</div>
+<!-- =================== /COPY VERBATIM: STATUS CHIPS ======================== -->
+
+
+<h2>5. Evidence badge row (E0 to E5)</h2>
+
+<!-- ==================== COPY VERBATIM: EVIDENCE LADDER ===================== -->
+<!--
+  The graded evidence vocabulary. Badge every load-bearing claim on a merge
+  review or completion doc with the level actually reached, not the level
+  hoped for. The CANONICAL definitions of E0 to E5 live in
+  data/operating-model/evidence-ladder.md (and AGENTS.md section 5); this
+  component only RENDERS them, it never redefines them, so the two cannot drift.
+  E3 (deployed e2e as the expected user) is David's ready-to-merge bar; anything
+  below E3 on a merge ask must be explicitly justified in the
+  case-against-merging section. A claim badged E1 on a merge ask that needs E3
+  is the thing this row exists to expose. Labels below match evidence-ladder.md
+  verbatim; if that file changes, change these to match.
+    E0  asserted                  no evidence, never sufficient for a merge ask
+    E1  code-read                 verified by reading the code or diff, nothing was run
+    E2  unit tests green          automated tests pass, isolated behavior not the user path
+    E3  deployed e2e              exercised on the deployed product as the expected user
+    E4  independently reproduced  a non-author agent reproduced the E3 result from scratch
+    E5  David-verified live       David observed the behavior himself, the terminal proof
+-->
+<style>
+.eladder{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.ebadge{display:inline-flex;align-items:baseline;gap:6px;font-size:11px;
+  padding:4px 10px;border-radius:999px;border:1px solid var(--line);
+  background:var(--wash)}
+.ebadge .lv{font-weight:700;letter-spacing:.02em}
+.ebadge.reached{background:var(--sage-soft);border-color:#C9D3BB}
+.ebadge.reached .lv{color:var(--good)}
+.ebadge.short{background:var(--clay-soft);border-color:#E7C9B8}
+.ebadge.short .lv{color:var(--brick)}
+.ebadge .lbl{color:var(--mut)}
+.ebadge.reached .lbl,.ebadge.short .lbl{color:var(--ink)}
+</style>
+<div class="eladder">
+  <span class="ebadge reached"><span class="lv">E3</span><span class="lbl">deployed e2e, real user path</span></span>
+  <span class="ebadge reached"><span class="lv">E2</span><span class="lbl">unit tests green</span></span>
+  <span class="ebadge"><span class="lv">E1</span><span class="lbl">code-read, nothing run</span></span>
+  <span class="ebadge short"><span class="lv">E0</span><span class="lbl">asserted, no evidence</span></span>
+  <span class="ebadge"><span class="lv">E4</span><span class="lbl">independently reproduced</span></span>
+  <span class="ebadge"><span class="lv">E5</span><span class="lbl">David-verified live</span></span>
+</div>
+<!-- =================== /COPY VERBATIM: EVIDENCE LADDER ===================== -->
+
+
+<h2>6. Light Mermaid theme config</h2>
+
+<!-- ==================== COPY VERBATIM: MERMAID LIGHT THEME ================= -->
+<!--
+  Mermaid must be explicitly themed light; the default theme renders a
+  near-white that fights the cream page and its edges read grey. Initialize
+  with this exact themeVariables block BEFORE any diagram so every node,
+  edge, and label sits in the warm-light palette. Copy verbatim; change nothing
+  but the diagram body. (The mermaid library itself is loaded by the host that
+  renders diagrams; this file only carries the canonical config.)
+-->
+<pre><code>mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  themeVariables: {
+    background:        '#F4EFE4',
+    primaryColor:      '#FCFAF4',
+    primaryBorderColor:'#E4DBC9',
+    primaryTextColor:  '#2E2A22',
+    secondaryColor:    '#F8F3E9',
+    tertiaryColor:     '#F0DED2',
+    lineColor:         '#8A806E',
+    edgeLabelBackground:'#F8F3E9',
+    clusterBkg:        '#F8F3E9',
+    clusterBorder:     '#E4DBC9',
+    titleColor:        '#2E2A22',
+    fontFamily:        'ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif',
+    fontSize:          '14px'
+  },
+  flowchart: { curve: 'basis', htmlLabels: true }
+});</code></pre>
+<!-- =================== /COPY VERBATIM: MERMAID LIGHT THEME ================= -->
+
+
+<h2>7. Footer execute-instruction block</h2>
+
+<!-- ==================== COPY VERBATIM: FOOTER EXECUTE ===================== -->
+<style>
+.exec{margin-top:34px;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:16px 18px;font-size:14px}
+.exec b{font-weight:650}
+.exec code{background:var(--wash)}
+.foot{margin-top:24px;padding-top:12px;border-top:1px solid var(--line);
+  color:var(--mut);font-size:11.5px}
+</style>
+<div class="exec">
+  <b>To execute:</b> the exact one-line instruction David gives back to hand the
+  ball forward, plus the concrete alternatives. For example, reply
+  <code>go with your recs</code> to run the whole pass, or name overrides per
+  item, e.g. <code>A2 instead, rest per recs</code>.
+</div>
+<div class="foot">
+  Prepared for David, PT timestamp and provenance line. Plain literal prose,
+  no em dashes, no emojis.
+</div>
+<!-- =================== /COPY VERBATIM: FOOTER EXECUTE ===================== -->
+
+</div>
