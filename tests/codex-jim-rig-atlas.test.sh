@@ -2,12 +2,21 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
-source_file=${JIM_RIG_SOURCE:-/Users/dq4443/Downloads/message (4).txt}
+source_file=${JIM_RIG_SOURCE:-}
 scripts="$repo_root/.agents/skills/rig-atlas/scripts"
 skill="$repo_root/.agents/skills/rig-atlas/SKILL.md"
 evals="$repo_root/.agents/skills/rig-atlas/evals.md"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
+
+if [ -z "$source_file" ]; then
+  echo "PASS: pinned Jim source audit skipped because JIM_RIG_SOURCE is not configured"
+  exit 0
+fi
+[ -f "$source_file" ] || {
+  echo "FAIL: JIM_RIG_SOURCE does not exist: $source_file" >&2
+  exit 1
+}
 
 fail() {
   echo "FAIL: $*" >&2
