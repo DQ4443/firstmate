@@ -230,6 +230,30 @@ done
 [[ -f "$lock_file" && ! -s "$lock_file" ]]
 printf 'ok - racing lock contenders leave one valid report and no orphan lock (%s success, %s busy)\n' "$race_successes" "$race_failures"
 
+LOCK_SCRIPT="$ROOT/.agents/skills/pdw/scripts/report-lock.py"
+corrupt_lock="$TMP/corrupt.lock"
+printf '{partial json from a crash mid-write' >"$corrupt_lock"
+reclaim_out=$(printf '' | python3 "$LOCK_SCRIPT" "$corrupt_lock" 60 "$$" reclaim-token)
+[[ "$reclaim_out" == "ready" ]]
+[[ -f "$corrupt_lock" && ! -s "$corrupt_lock" ]]
+printf 'ok - corrupt lock left by a dead holder is reclaimed, not deadlocked\n'
+
+held_fifo="$TMP/held.fifo"
+mkfifo "$held_fifo"
+python3 "$LOCK_SCRIPT" "$corrupt_lock" 60 "$$" holder-token <"$held_fifo" >"$TMP/holder.out" &
+holder_pid=$!
+exec 9>"$held_fifo"
+for _ in $(seq 1 50); do
+  [[ "$(cat "$TMP/holder.out" 2>/dev/null)" == "ready" ]] && break
+  sleep 0.1
+done
+[[ "$(cat "$TMP/holder.out")" == "ready" ]]
+busy_out=$(printf '' | python3 "$LOCK_SCRIPT" "$corrupt_lock" 60 "$$" intruder-token || true)
+[[ "$busy_out" == "busy" ]]
+exec 9>&-
+wait "$holder_pid" 2>/dev/null || true
+printf 'ok - a live lock holder is never taken over\n'
+
 grep -Fq 'on every later owning-task wake while delivery remains incomplete' "$PDW_SKILL"
 grep -Fq 'report-back.sh drain' "$PDW_SKILL"
 printf 'ok - owning-task wake contract drives durable retries without a new runtime\n'

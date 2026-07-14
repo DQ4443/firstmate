@@ -68,10 +68,7 @@ def main() -> int:
 
         current = int(time.time())
         prior = read_owner(handle)
-        if prior == {}:
-            print("busy", flush=True)
-            return 1
-        if prior is not None:
+        if prior:
             prior_pid = int(prior["pid"])
             prior_age = current - int(prior["created_at_epoch"])
             if process_is_alive(prior_pid) or prior_age < ttl:
