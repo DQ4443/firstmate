@@ -19,7 +19,7 @@ fail() {
 git cat-file blob "$pre_split_blob" >"$tmp/pre-split-agents.md"
 cmp -s "$claude" "$tmp/pre-split-agents.md" || fail "CLAUDE.md differs from the pre-split AGENTS blob"
 [ "$(shasum -a 256 "$claude" | awk '{print $1}')" = "$pre_split_sha256" ] || fail "CLAUDE.md digest changed"
-[ "$(stat -f '%i' "$agents")" != "$(stat -f '%i' "$claude")" ] || fail "harness contracts share an inode"
+[ "$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$agents")" != "$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$claude")" ] || fail "harness contracts share an inode"
 cmp -s "$agents" "$claude" && fail "AGENTS.md did not diverge from the frozen contract"
 echo "ok - frozen contract is byte-identical and mechanically unlinked"
 

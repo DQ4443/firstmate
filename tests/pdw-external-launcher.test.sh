@@ -10,9 +10,13 @@ mkdir -p "$FAKEBIN"
 
 printf 'Return the structured result.\n' >"$TMP/prompt.txt"
 
-installed_catalog=$(codex debug models)
-jq -e '[.models[] | select(.slug == "gpt-5.6-sol") | .supported_reasoning_levels[].effort] | (index("max") != null and index("ultra") != null)' <<<"$installed_catalog" >/dev/null
-printf 'ok - installed gpt-5.6-sol catalog advertises Max and Ultra\n'
+if command -v codex >/dev/null 2>&1; then
+  installed_catalog=$(codex debug models)
+  jq -e '[.models[] | select(.slug == "gpt-5.6-sol") | .supported_reasoning_levels[].effort] | (index("max") != null and index("ultra") != null)' <<<"$installed_catalog" >/dev/null
+  printf 'ok - installed gpt-5.6-sol catalog advertises Max and Ultra\n'
+else
+  printf 'ok - installed Codex capability probe skipped because codex CLI is absent\n'
+fi
 
 cat >"$FAKEBIN/codex" <<'SH'
 #!/usr/bin/env bash

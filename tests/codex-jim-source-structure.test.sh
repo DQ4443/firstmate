@@ -60,7 +60,8 @@ fi
 printf 'ok - Codex skill invocations use dollar syntax\n'
 
 cp "$PDW" "$TMP/pdw.md"
-sed -i '' 's/always uses the workflow shape and never degrades/may degrade/' "$TMP/pdw.md"
+sed -i.bak 's/always uses the workflow shape and never degrades/may degrade/' "$TMP/pdw.md"
+rm -f "$TMP/pdw.md.bak"
 if verify_structure "$TMP/pdw.md" "$BUILD" >/dev/null 2>&1; then
   printf 'not ok - explicit PDW degradation mutation survived\n' >&2
   exit 1
@@ -68,7 +69,8 @@ fi
 printf 'ok - explicit PDW degradation mutation fails the structure gate\n'
 
 cp "$PDW" "$TMP/pdw.md"
-sed -i '' 's/## Don.t to do/## Removed/' "$TMP/pdw.md"
+sed -i.bak 's/## Don.t to do/## Removed/' "$TMP/pdw.md"
+rm -f "$TMP/pdw.md.bak"
 if verify_structure "$TMP/pdw.md" "$BUILD" >/dev/null 2>&1; then
   printf 'not ok - missing Don.t to do module survived\n' >&2
   exit 1
@@ -76,7 +78,8 @@ fi
 printf 'ok - missing Don.t to do module fails the structure gate\n'
 
 cp "$BUILD" "$TMP/build.md"
-sed -i '' 's/, `r4_gate`//' "$TMP/build.md"
+sed -i.bak 's/, `r4_gate`//' "$TMP/build.md"
+rm -f "$TMP/build.md.bak"
 if verify_structure "$PDW" "$TMP/build.md" >/dev/null 2>&1; then
   printf 'not ok - missing canonical ledger field survived\n' >&2
   exit 1

@@ -35,7 +35,7 @@ first_sha=$(shasum -a 256 "$tmp/crlf.html" | awk '{print $1}')
 python3 "$INSTALLER" "$tmp/crlf.html" >"$tmp/install-second.out"
 second_sha=$(shasum -a 256 "$tmp/crlf.html" | awk '{print $1}')
 [ "$first_sha" = "$second_sha" ] || fail "component installer is not idempotent"
-[ "$(stat -f '%Lp' "$tmp/crlf.html")" = 754 ] || fail "installer changed source mode"
+[ "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$tmp/crlf.html")" = 754 ] || fail "installer changed source mode"
 python3 - "$tmp/crlf-original.html" "$tmp/crlf.html" <<'PY'
 import pathlib
 import sys
@@ -54,7 +54,7 @@ PY
 pass "installer preserves mode, CRLF line endings, untouched bytes, and idempotence"
 
 python3 "$INSTALLER" "$CANONICAL" --output "$tmp/lf.html" >"$tmp/install-lf.out"
-[ "$(stat -f '%Lp' "$tmp/lf.html")" = "$(stat -f '%Lp' "$CANONICAL")" ] || fail "output copy changed source mode"
+[ "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$tmp/lf.html")" = "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$CANONICAL")" ] || fail "output copy changed source mode"
 
 printf '<html><p>unsafe</p></html>\n' >"$tmp/unsafe.html"
 if python3 "$INSTALLER" "$tmp/unsafe.html" >"$tmp/unsafe.out" 2>"$tmp/unsafe.err"; then

@@ -17,8 +17,19 @@ write_report() {
   local file=$1
   local task_id=$2
   local report_id=${3:-completion-v1}
-  jq -n --arg task_id "$task_id" --arg report_id "$report_id" '{task_id: $task_id, report_id: $report_id, return_thread_id: "thread-1", return_host_id: "local", status: "COMPLETE", requested_status: "COMPLETE", effective_status: "COMPLETE", summary: "done", commands: [{command: "true", output_tail: ""}], artifacts: [], branch: "codex/test", worktree: "/repo/.claude/worktrees/test", last_commit_sha: "abc123", requested_model: "gpt-5.6-sol", effective_model: "unavailable_to_pin_in_native_subagent_api", requested_effort: "high", effective_effort: "unavailable_to_pin_in_native_subagent_api", routing_rationale: "review", identifiers: {}, child_returns: [{task_id: "child-a", status: "COMPLETE"}, {task_id: "child-b", status: "COMPLETE"}], NEXT_STEP: "independent review"}' >"$file"
+  jq -n --arg task_id "$task_id" --arg report_id "$report_id" '{task_id: $task_id, report_id: $report_id, return_thread_id: "thread-1", return_host_id: "local", status: "COMPLETE", requested_status: "COMPLETE", effective_status: "COMPLETE", summary: "done", commands: [{command: "true", output_tail: "PASS"}], artifacts: [], branch: "codex/test", worktree: "/repo/.claude/worktrees/test", last_commit_sha: "abc123", requested_model: "gpt-5.6-sol", effective_model: "unavailable_to_pin_in_native_subagent_api", requested_effort: "high", effective_effort: "unavailable_to_pin_in_native_subagent_api", routing_rationale: "review", identifiers: {run_id: "run-1"}, child_returns: [{task_id: "child-a", status: "COMPLETE"}, {task_id: "child-b", status: "COMPLETE"}], NEXT_STEP: "independent review"}' >"$file"
 }
+
+write_receipt() {
+  local envelope=$1
+  local receipt=$2
+  jq '{report_key, content_sha, return_thread_id: .thread_id, return_host_id: .host_id} + {delivery_status: "succeeded", transport: "send_message_to_thread", receipt_id: "receipt-1", delivered_at: "2026-07-13T00:00:00Z"}' "$envelope" >"$receipt"
+}
+
+BOOTSTRAP_STATE="$TMP/bootstrap-state"
+$ADAPTER --state-dir "$BOOTSTRAP_STATE" drain >/dev/null
+jq -e '.retry_max_attempts == 16 and .claim_ttl_seconds == 300 and .lock_ttl_seconds == 60 and .drain_batch_size == 10' "$BOOTSTRAP_STATE/config.json" >/dev/null
+printf 'ok - first use bootstraps valid report configuration\n'
 
 write_config
 write_report "$TMP/report.json" task-1
@@ -36,34 +47,50 @@ printf 'ok - repeated prepare keeps the stable report key\n'
 jq '.summary = "revised after final verification"' "$TMP/report.json" >"$TMP/report-revised.json"
 revised=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-revised.json")
 [[ $(jq -r '.report_key' <<<"$revised") == "$key" ]]
-jq -e '.status == "already-pending"' <<<"$revised" >/dev/null
-printf 'ok - revised summaries retain one stable task and report identity\n'
+jq -e '.status == "revised-pending"' <<<"$revised" >/dev/null
+jq -e '.revision == 1 and .report.summary == "revised after final verification"' "$STATE/pending/$key.json" >/dev/null
+printf 'ok - revised payload replaces queued content under one stable identity\n'
 
 write_report "$TMP/report-distinct.json" task-1 completion-v2
 distinct=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-distinct.json")
 distinct_key=$(jq -r '.report_key' <<<"$distinct")
 [[ "$distinct_key" != "$key" ]]
 $ADAPTER --state-dir "$STATE" claim --key "$distinct_key" >/dev/null
+$ADAPTER --state-dir "$STATE" ack --key "$distinct_key" >/dev/null 2>&1 && {
+  printf 'not ok - ack accepted a report without a native-send receipt\n' >&2
+  exit 1
+}
+write_receipt "$STATE/inflight/$distinct_key.json" "$TMP/distinct-receipt.json"
+$ADAPTER --state-dir "$STATE" receive --key "$distinct_key" --receipt "$TMP/distinct-receipt.json" >/dev/null
 $ADAPTER --state-dir "$STATE" ack --key "$distinct_key" >/dev/null
-printf 'ok - distinct report IDs create distinct delivery identities\n'
+printf 'ok - ack requires a bound successful native-send receipt\n'
 
 claimed=$($ADAPTER --state-dir "$STATE" claim --key "$key")
 jq -e '.status == "claimed" and .attempts == 1' <<<"$claimed" >/dev/null
 printf 'ok - claim leases a pending report for retry\n'
 
+write_receipt "$STATE/inflight/$key.json" "$TMP/receipt.json"
+first_receive=$($ADAPTER --state-dir "$STATE" receive --key "$key" --receipt "$TMP/receipt.json")
+second_receive=$($ADAPTER --state-dir "$STATE" receive --key "$key" --receipt "$TMP/receipt.json")
+jq -e '.apply_side_effects == true' <<<"$first_receive" >/dev/null
+jq -e '.status == "duplicate-suppressed" and .apply_side_effects == false' <<<"$second_receive" >/dev/null
+printf 'ok - receiver suppresses duplicate side effects\n'
+
+jq '.content_sha = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$TMP/receipt.json" >"$TMP/stale-receipt.json"
+if $ADAPTER --state-dir "$STATE" receive --key "$key" --receipt "$TMP/stale-receipt.json" >/dev/null 2>&1; then
+  printf 'not ok - receiver accepted a receipt for different content\n' >&2
+  exit 1
+fi
+printf 'ok - receiver binds receipts to the current report revision\n'
+
 $ADAPTER --state-dir "$STATE" ack --key "$key" >/dev/null
 [[ -f "$STATE/sent/$key.json" && ! -e "$STATE/inflight/$key.json" ]]
-printf 'ok - ack records delivery and clears transient state\n'
+jq -e '.delivery_receipt.content_sha == .content_sha' "$STATE/sent/$key.json" >/dev/null
+printf 'ok - ack records proven delivery and clears transient state\n'
 
 already=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report.json")
 jq -e '.status == "already-acknowledged"' <<<"$already" >/dev/null
 printf 'ok - acknowledged report is not requeued\n'
-
-first_receive=$($ADAPTER --state-dir "$STATE" receive --key "$key")
-second_receive=$($ADAPTER --state-dir "$STATE" receive --key "$key")
-jq -e '.apply_side_effects == true' <<<"$first_receive" >/dev/null
-jq -e '.status == "duplicate-suppressed" and .apply_side_effects == false' <<<"$second_receive" >/dev/null
-printf 'ok - receiver suppresses duplicate side effects\n'
 
 write_report "$TMP/report-2.json" task-2
 queued=$($ADAPTER --state-dir "$STATE" prepare --report "$TMP/report-2.json" --queue)
@@ -123,14 +150,6 @@ if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid-effort.json" >/d
 fi
 printf 'ok - unknown effective effort is rejected\n'
 
-mv "$STATE/config.json" "$STATE/config.saved"
-if $ADAPTER --state-dir "$STATE" drain >/dev/null 2>&1; then
-  printf 'not ok - missing config was accepted\n' >&2
-  exit 1
-fi
-printf 'ok - missing config fails closed\n'
-
-mv "$STATE/config.saved" "$STATE/config.json"
 write_report "$TMP/missing-destination.json" task-4
 jq 'del(.return_thread_id)' "$TMP/missing-destination.json" >"$TMP/invalid.json"
 if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/invalid.json" >/dev/null 2>&1; then
@@ -145,6 +164,18 @@ if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/missing-report-id.json" 
   exit 1
 fi
 printf 'ok - missing stable report ID is rejected\n'
+
+jq '.summary = "x"' "$TMP/missing-destination.json" >"$TMP/degenerate-summary.json"
+if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/degenerate-summary.json" >/dev/null 2>&1; then
+  printf 'not ok - single-character summary was accepted\n' >&2
+  exit 1
+fi
+jq '.commands = [{command: "x", output_tail: "x"}]' "$TMP/missing-destination.json" >"$TMP/degenerate-command.json"
+if $ADAPTER --state-dir "$STATE" prepare --report "$TMP/degenerate-command.json" >/dev/null 2>&1; then
+  printf 'not ok - degenerate command evidence was accepted\n' >&2
+  exit 1
+fi
+printf 'ok - degenerate completion shells are rejected\n'
 
 lock_file="$STATE/.lock"
 now=$(date +%s)

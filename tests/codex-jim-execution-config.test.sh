@@ -3,6 +3,15 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
+grep -Fq 'Only an explicit execute instruction for the agreed plan authorizes writes.' "$ROOT/.codex/agents/implementer.toml"
+grep -Fq 'A question about whether there is a better design requires analysis and a recommendation without edits.' "$ROOT/.codex/agents/implementer.toml"
+printf 'ok - implementer role carries the authorization fence\n'
+
+if ! command -v codex >/dev/null 2>&1; then
+  printf 'ok - installed Codex loader probe skipped because codex CLI is absent\n'
+  exit 0
+fi
+
 python3 - "$ROOT" <<'PY'
 import json
 import os
@@ -101,7 +110,3 @@ for role in ("planner", "implementer", "refute-reviewer"):
 PY
 printf 'ok - installed Codex config loader resolves root config and every role target\n'
 printf 'ok - installed Codex discovers the root AGENTS contract and all nine pipeline skills\n'
-
-grep -Fq 'Only an explicit execute instruction for the agreed plan authorizes writes.' "$ROOT/.codex/agents/implementer.toml"
-grep -Fq 'A question about whether there is a better design requires analysis and a recommendation without edits.' "$ROOT/.codex/agents/implementer.toml"
-printf 'ok - implementer role carries the authorization fence\n'
