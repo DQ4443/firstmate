@@ -68,7 +68,9 @@ run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
 run_guard 2 "$TMP/repo" "eval -- 'git push origin master'"
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
 run_guard 2 "$TMP/repo" 'G=git; "$G" push origin main'
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
 run_guard 0 "$TMP/repo" 'G=git; "$G" status --short'
 
 git -C "$TMP/repo" config alias.publish push
@@ -117,6 +119,7 @@ run_guard 2 "$TMP/repo" 'gh pr create --title test'
 run_guard 2 "$TMP/repo" 'gh api -X POST repos/example/project/pulls -f title=test'
 run_guard 2 "$TMP/repo" 'gh-axi api repos/example/project/pulls -f title=test -f head=feature'
 run_guard 2 "$TMP/repo" 'gh api graphql -f query="mutation { createPullRequest(input: {}) { pullRequest { id } } }"'
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
 run_guard 2 "$TMP/repo" 'GH=gh; "$GH" api --method POST repos/example/project/pulls'
 run_guard 0 "$TMP/repo" 'gh api repos/example/project/pulls'
 run_guard 0 "$TMP/repo" 'gh-axi api --method GET repos/example/project/pulls'
