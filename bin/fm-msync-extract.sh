@@ -63,8 +63,10 @@ while [ $# -gt 0 ]; do
     *) echo "fm-msync-extract: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$SLOT" ] && [ -n "$NOTES" ] && [ -n "$OUT" ] || {
-  echo "fm-msync-extract: --slot, --notes and --out are required" >&2; exit 2; }
+if [ -z "$SLOT" ] || [ -z "$NOTES" ] || [ -z "$OUT" ]; then
+  echo "fm-msync-extract: --slot, --notes and --out are required" >&2
+  exit 2
+fi
 [ -f "$NOTES" ] || { echo "fm-msync-extract: notes file not found: $NOTES" >&2; exit 2; }
 
 degrade() { # <reason> - one machine-parseable line, hint to stderr, exit 3

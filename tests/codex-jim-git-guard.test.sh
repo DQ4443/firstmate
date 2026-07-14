@@ -68,6 +68,16 @@ run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
 run_guard 2 "$TMP/repo" "eval -- 'git push origin master'"
+# shellcheck disable=SC2016  # literal payload: the guard must inspect expansion inside eval
+run_guard 2 "$TMP/repo" 'cmd="git push origin main"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: the guard must inspect expansion inside sh -c
+run_guard 2 "$TMP/repo" 'cmd="git push origin main"; sh -c "$cmd"'
+# shellcheck disable=SC2016  # literal payload: the guard must inspect an expanded PR action
+run_guard 2 "$TMP/repo" 'cmd="gh pr create --title variable-bypass"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: safe expanded commands must remain allowed
+run_guard 0 "$TMP/repo" 'cmd="git status --short"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: recursive expansion must fail closed
+run_guard 2 "$TMP/repo" 'cmd='"'"'eval "$cmd"'"'"'; eval "$cmd"'
 # shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
 run_guard 2 "$TMP/repo" 'G=git; "$G" push origin main'
 # shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
@@ -218,21 +228,22 @@ set -e
 [[ "$subdir_status" -eq 0 ]] || fail 'project-root hook command failed from a repository subdirectory'
 pass 'project declaration installs only the load-bearing PreToolUse hook'
 
-CODEX_HOME_PROBE="$TMP/codex-home"
-PROJECT_PROBE="$CODEX_HOME_PROBE/project"
-mkdir -p "$PROJECT_PROBE/.codex"
-cp "$HOOKS" "$PROJECT_PROBE/.codex/hooks.json"
-cat >"$CODEX_HOME_PROBE/hooks.json" <<'JSON'
+if command -v codex >/dev/null 2>&1; then
+  CODEX_HOME_PROBE="$TMP/codex-home"
+  PROJECT_PROBE="$CODEX_HOME_PROBE/project"
+  mkdir -p "$PROJECT_PROBE/.codex"
+  cp "$HOOKS" "$PROJECT_PROBE/.codex/hooks.json"
+  cat >"$CODEX_HOME_PROBE/hooks.json" <<'JSON'
 {"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"global-probe","timeout":10}]}]}}
 JSON
-cat >"$CODEX_HOME_PROBE/config.toml" <<EOF
+  cat >"$CODEX_HOME_PROBE/config.toml" <<EOF
 [projects."$PROJECT_PROBE"]
 trust_level = "trusted"
 [features]
 hooks = true
 EOF
 
-CODEX_HOME="$CODEX_HOME_PROBE" PROJECT_PROBE="$PROJECT_PROBE" python3 - <<'PY'
+  CODEX_HOME="$CODEX_HOME_PROBE" PROJECT_PROBE="$PROJECT_PROBE" python3 - <<'PY'
 import json
 import os
 import selectors
@@ -286,7 +297,10 @@ assert [(hook["source"], hook["command"]) for hook in hooks] == [
 ]
 assert [hook["displayOrder"] for hook in hooks] == [0, 1]
 PY
-pass 'Codex app-server proves project hooks compose after existing global hooks'
+  pass 'Codex app-server proves project hooks compose after existing global hooks'
+else
+  pass 'Codex app-server hook composition probe skipped because codex CLI is absent'
+fi
 
 if rg -n '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
   fail 'forbidden Claude artifact or unproven optional hook landed'

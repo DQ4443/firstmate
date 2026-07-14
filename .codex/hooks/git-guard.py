@@ -532,12 +532,31 @@ def check(command: str, cwd: Path) -> int:
     pr_actions: list[Path] = []
     variables: dict[str, str] = {}
     runtime_aliases: dict[tuple[str | None, str], str] = {}
-    inspected_aliases = 0
+    inspected_dynamic_shells = 0
+    inspected_dynamic_bytes = len(command)
+    inspection_budget = min(
+        MAX_INSPECTION_BYTES,
+        max(4096, len(command) * INSPECTION_BUDGET_FACTOR),
+    )
 
     while segments:
-        tokens, _ = expand_recorded_variables(segments.popleft(), variables)
+        recorded_tokens = segments.popleft()
+        tokens, _ = expand_recorded_variables(recorded_tokens, variables)
         if not tokens:
             continue
+        if tokens != recorded_tokens:
+            expanded_shell = nested_shell_command(tokens)
+            if expanded_shell is not None:
+                inspected_dynamic_shells += 1
+                inspected_dynamic_bytes += len(expanded_shell)
+                if (
+                    inspected_dynamic_shells > MAX_SHELL_DEPTH
+                    or inspected_dynamic_bytes > inspection_budget
+                ):
+                    raise ShellInspectionLimit
+                expanded_segments = shell_segments(expanded_shell)
+                for expanded_segment in reversed(expanded_segments):
+                    segments.appendleft(expanded_segment)
         if len(tokens) >= 2 and tokens[0] == "cd":
             active_cwd = segment_cwd(tokens, active_cwd)
             if len(tokens) == 2:
@@ -554,8 +573,12 @@ def check(command: str, cwd: Path) -> int:
                 runtime_aliases,
             )
             if alias_shell is not None:
-                inspected_aliases += 1
-                if inspected_aliases > MAX_SHELL_DEPTH:
+                inspected_dynamic_shells += 1
+                inspected_dynamic_bytes += len(alias_shell)
+                if (
+                    inspected_dynamic_shells > MAX_SHELL_DEPTH
+                    or inspected_dynamic_bytes > inspection_budget
+                ):
                     raise ShellInspectionLimit
                 alias_segments = shell_segments(alias_shell)
                 for alias_segment in reversed(alias_segments):
