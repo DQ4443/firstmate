@@ -188,6 +188,32 @@ set -e
 [[ "$canonical_priority_status" -eq 0 ]] || fail 'compatibility cmd overrode canonical command input'
 pass 'canonical Codex command payload and secondary unified-exec cmd payload are both handled'
 
+argv_cmd=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","push","origin","main"]}}')
+set +e
+argv_output=$(printf '%s\n' "$argv_cmd" | python3 "$GUARD" 2>&1)
+argv_status=$?
+set -e
+[[ "$argv_status" -eq 2 && "$argv_output" == BLOCKED:* ]] || fail 'argv-form unified-exec cmd bypassed the guard'
+argv_command=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{command:["git","push","origin","main"]}}')
+set +e
+printf '%s\n' "$argv_command" | python3 "$GUARD" >/dev/null 2>&1
+argv_command_status=$?
+set -e
+[[ "$argv_command_status" -eq 2 ]] || fail 'argv-form canonical command bypassed the guard'
+argv_safe=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","status","--short"]}}')
+set +e
+printf '%s\n' "$argv_safe" | python3 "$GUARD" >/dev/null 2>&1
+argv_safe_status=$?
+set -e
+[[ "$argv_safe_status" -eq 0 ]] || fail 'argv-form safe command was blocked'
+argv_bad=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","push",42]}}')
+set +e
+argv_bad_output=$(printf '%s\n' "$argv_bad" | python3 "$GUARD" 2>&1)
+argv_bad_status=$?
+set -e
+[[ "$argv_bad_status" -eq 2 && "$argv_bad_output" == BLOCKED:* ]] || fail 'uninspectable argv command did not fail closed'
+pass 'argv-form unified-exec commands are normalized and inspected, not bypassed'
+
 GUARD="$GUARD" REPO="$TMP/repo" python3 - <<'PY'
 import json
 import os

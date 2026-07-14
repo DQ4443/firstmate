@@ -2,7 +2,8 @@
 """Guard Codex shell calls against the repository's gated git operations.
 
 Codex PreToolUse sends Bash commands in ``tool_input.command``.
-The desktop unified-exec ``tool_input.cmd`` field is accepted secondarily.
+The desktop unified-exec ``tool_input.cmd`` field is accepted secondarily,
+including its argv-array form, which is normalized to a shell string before inspection.
 Malformed input and local inspection failures are fail-open, matching Jim's guard.
 An intentional policy rejection exits 2 and writes its reason to stderr.
 
@@ -626,6 +627,16 @@ def check(command: str, cwd: Path) -> int:
     return 0
 
 
+def normalize_command(raw: object) -> str | None:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (list, tuple)):
+        if not all(isinstance(part, str) for part in raw):
+            return None
+        return shlex.join(raw)
+    return ""
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -634,9 +645,14 @@ def main() -> int:
 
     try:
         tool_input = payload.get("tool_input") or {}
-        command = tool_input.get("command") or tool_input.get("cmd") or ""
+        raw_command = tool_input.get("command")
+        if raw_command is None or raw_command == "":
+            raw_command = tool_input.get("cmd")
+        command = normalize_command(raw_command)
+        if command is None:
+            return block("argv-form command contained members that cannot be inspected safely")
         cwd = Path(payload.get("cwd") or os.getcwd())
-        if not isinstance(command, str) or not command:
+        if not command:
             return 0
         return check(command, cwd)
     except ShellInspectionLimit:
