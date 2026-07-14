@@ -157,7 +157,7 @@ verify_evals "$EVALS" || fail 'submit eval trigger or gate contract is incomplet
 printf 'ok - submit structure, trigger head, thresholds, and eval checks are present\n'
 printf 'ok - all five positive triggers, three negative triggers, and 24 binary eval rules are enumerated\n'
 
-if rg -n '[—–]|[⚡⚙🔁📦]|\.claude|Workflow|ReviewBot|PushNotification|ScheduleWakeup|Skill\(' "$SKILL" "$EVALS"; then
+if grep -En '[—–]|[⚡⚙🔁📦]|\.claude|Workflow|ReviewBot|PushNotification|ScheduleWakeup|Skill\(' "$SKILL" "$EVALS"; then
   fail 'Claude artifact or banned prose survived adaptation'
 fi
 printf 'ok - submit skill has no Claude artifact or banned prose\n'

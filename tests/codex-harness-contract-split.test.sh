@@ -23,7 +23,7 @@ cmp -s "$claude" "$tmp/pre-split-agents.md" || fail "CLAUDE.md differs from the 
 cmp -s "$agents" "$claude" && fail "AGENTS.md did not diverge from the frozen contract"
 echo "ok - frozen contract is byte-identical and mechanically unlinked"
 
-if rg -n 'Workflow|Skill\(|ScheduleWakeup|\.agents/skills-spine' "$agents"; then
+if grep -En 'Workflow|Skill\(|ScheduleWakeup|\.agents/skills-spine' "$agents"; then
   fail "AGENTS.md contains a retired harness carrier"
 fi
 punctuation_pattern="$(printf '\342\200\224')\|$(printf '\342\200\223')"

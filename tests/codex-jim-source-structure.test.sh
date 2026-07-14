@@ -43,17 +43,17 @@ verify_structure "$PDW" "$BUILD"
 printf 'ok - Jim execution module and node order is preserved\n'
 
 for required in requested_effort effective_effort requested_status effective_status routing_rationale return_thread_id return_host_id report_id NEXT_STEP UNVERIFIED; do
-  rg -q "$required" "$PDW" || { printf 'not ok - missing PDW carrier %s\n' "$required" >&2; exit 1; }
+  grep -Eq "$required" "$PDW" || { printf 'not ok - missing PDW carrier %s\n' "$required" >&2; exit 1; }
 done
 printf 'ok - PDW contains the approved routing and return carriers\n'
 
-if rg -n '\.claude/agents|Workflow TOOL|PushNotification|ScheduleWakeup|RunPlatform|ReviewBot|Jim says|Jim chooses' "$ROOT/.agents/skills/pdw" "$ROOT/.agents/skills/build" "$ROOT/.codex"; then
+if grep -ERn --exclude='*.pyc' --exclude-dir='__pycache__' '\.claude/agents|Workflow TOOL|PushNotification|ScheduleWakeup|RunPlatform|ReviewBot|Jim says|Jim chooses' "$ROOT/.agents/skills/pdw" "$ROOT/.agents/skills/build" "$ROOT/.codex"; then
   printf 'not ok - Claude or Jim-specific artifact survived adaptation\n' >&2
   exit 1
 fi
 printf 'ok - adapted execution files contain no forbidden Claude artifacts\n'
 
-if rg -n '/(pdw|build|scout|explore|websearch|lavish|submit)([^A-Za-z0-9_-]|$)' "$PDW" "$BUILD" "$ROOT/.agents/skills/pdw/evals.md" "$ROOT/.agents/skills/build/evals.md"; then
+if grep -En '/(pdw|build|scout|explore|websearch|lavish|submit)([^A-Za-z0-9_-]|$)' "$PDW" "$BUILD" "$ROOT/.agents/skills/pdw/evals.md" "$ROOT/.agents/skills/build/evals.md"; then
   printf 'not ok - Claude slash skill invocation survived adaptation\n' >&2
   exit 1
 fi

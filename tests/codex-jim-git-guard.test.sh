@@ -328,7 +328,7 @@ else
   pass 'Codex app-server hook composition probe skipped because codex CLI is absent'
 fi
 
-if rg -n '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
+if grep -En '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
   fail 'forbidden Claude artifact or unproven optional hook landed'
 fi
 for optional in session-title.sh session-rename-nudge.sh pre-commit-install.sh; do
