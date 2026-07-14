@@ -188,8 +188,21 @@ fi
 jq -e '.token == "live-holder"' "$lock_file" >/dev/null
 printf 'ok - expired live-holder lock is never deleted\n'
 
-(trap - EXIT; sleep 30) &
+dead_holder_ready="$TMP/dead-holder-ready"
+(
+  trap - EXIT
+  : >"$dead_holder_ready"
+  exec sleep 30
+) &
 dead_holder=$!
+for _ in {1..100}; do
+  [[ -e "$dead_holder_ready" ]] && break
+  sleep 0.01
+done
+[[ -e "$dead_holder_ready" ]] || {
+  printf 'not ok - dead-holder fixture did not become ready\n' >&2
+  exit 1
+}
 kill "$dead_holder"
 wait "$dead_holder" 2>/dev/null || true
 jq -n --argjson pid "$dead_holder" --argjson created_at_epoch "$(date +%s)" --arg token fresh-killed-holder \
