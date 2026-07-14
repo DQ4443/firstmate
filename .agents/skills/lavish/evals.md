@@ -27,6 +27,7 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] Browser QA rendered the page and the worker inspected the screenshot before presentation.
 - [ ] QA checked overflow, clipping, overlap, diagrams, selection, typing, tabs, reply composition, and the Copy fallback.
 - [ ] Reading content is linear and only live decisions are tabbed at the end.
+- [ ] Every checkpoint began with a visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before round evidence or decisions.
 - [ ] Every page ends with the decision zone and Questions.
 - [ ] Short-answer questions have real textareas wired into the reply bar.
 - [ ] A results page starts with a short summary, then a final-pipeline diagram, then definitions of what was tried.

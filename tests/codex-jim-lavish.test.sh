@@ -161,6 +161,13 @@ mutate_and_reject textarea lavish.md 'Every short-answer question gets a real te
 mutate_and_reject stable-path lavish.md 'Keep one stable file path per workstream.' 'Create a new path per round.'
 mutate_and_reject append-only lavish.md 'Each round appends a section and preserves all prior round content.' 'Each round replaces prior content.'
 mutate_and_reject real-resume lavish.md 'Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.' 'Assume session resume.'
+mutate_and_reject checkpoint-orientation lavish.md '### Checkpoint orientation' '### Decision preface'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-mandatory lavish.md 'Every checkpoint begins immediately after the page header with a visible `Where you are` orientation table.' 'A checkpoint may include a visible `Where you are` orientation table.'
+# shellcheck disable=SC2016
+mutate_and_reject whole-ticket-success lavish.md '`Whole-ticket success`' '`Round success`'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-eval evals.md 'Every checkpoint began with a visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before round evidence or decisions.' 'A checkpoint may include a brief orientation.'
 mutate_and_reject style-owner oat.md 'only source of visual tokens and components' 'one optional source of visual tokens and components'
 # shellcheck disable=SC2016
 mutate_and_reject arbitrary-ids decision.md 'arbitrary page-scoped `Dn`, `On`, and `Qn`' 'fixed D1 and D2 identifiers'

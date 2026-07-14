@@ -76,6 +76,26 @@ Only decisions use tabs, and those tabs come after the evidence they depend on.
 
 A single open decision may render linearly without a tab row, but it still uses the decision-zone structure and reply channel.
 
+### Checkpoint orientation
+
+Every checkpoint begins immediately after the page header with a visible `Where you are` orientation table.
+It appears before the short summary, round evidence, and decision zone, and is never hidden in a fold or tab.
+
+The table contains these exact rows:
+
+- `Project`: the product or repository and its purpose.
+- `Ticket`: the issue identifier, title, and direct issue link when available.
+- `Bigger picture`: the user or business problem this ticket helps solve.
+- `System position`: where this work sits in the product flow, including the relevant upstream input and downstream consumer.
+- `Whole-ticket success`: the observable end state for the full ticket, separate from the current round's proof.
+- `Current round`: the present phase, what is proven or unproven, and why David is being asked to decide now.
+- `Scope boundaries`: what is in scope, what is explicitly out, and any dependency or human gate.
+
+Write these rows in plain product language.
+Internal workflow terms may appear only after their product meaning is stated.
+Refresh `Current round` and any changed boundary every round.
+Do not replace whole-ticket success with the next implementation move.
+
 ### Short summary
 
 Use at most four short standalone lines or a two-column mini-table.
@@ -183,7 +203,7 @@ The live decision zone carries the next round's open decisions, not completed de
 
 Zero open decisions is valid only on a terminal page or a stuck page whose blocker is named.
 
-The content order is what landed and its evidence, suggested next moves, stop check, Questions, and the standing mode choice.
+The content order is the `Where you are` orientation table, short summary, any required `What was tried` definition, what landed and its evidence, suggested next moves, stop check, Questions, and the standing mode choice.
 
 Suggested moves are concrete forks produced by the round's validation and reconnaissance.
 

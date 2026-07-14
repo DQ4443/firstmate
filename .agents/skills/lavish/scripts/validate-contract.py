@@ -31,6 +31,30 @@ def main() -> int:
         require(lavish, "Keep one stable file path per workstream.", "stable path rule")
         require(lavish, "Each round appends a section and preserves all prior round content.", "append-only update rule")
         require(lavish, "Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.", "real resume evidence gate")
+        require(
+            lavish,
+            "Every checkpoint begins immediately after the page header with a visible `Where you are` orientation table.",
+            "mandatory checkpoint orientation placement",
+        )
+        require(
+            evals,
+            "Every checkpoint began with a visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before round evidence or decisions.",
+            "checkpoint orientation eval",
+        )
+        orientation = lavish.index("### Checkpoint orientation")
+        summary = lavish.index("### Short summary")
+        if orientation >= summary:
+            raise ValueError("checkpoint orientation must precede the short summary")
+        for field in (
+            "`Project`",
+            "`Ticket`",
+            "`Bigger picture`",
+            "`System position`",
+            "`Whole-ticket success`",
+            "`Current round`",
+            "`Scope boundaries`",
+        ):
+            require(lavish, field, f"checkpoint orientation field {field}")
         require(oat, "only source of visual tokens and components", "sole style owner")
         require(texts["decision"], "arbitrary page-scoped `Dn`, `On`, and `Qn`", "arbitrary identifier support")
         require(texts["decision"], "DAVID_WARM_COMPONENT_FILE", "configured decision source")
