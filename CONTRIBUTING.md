@@ -33,10 +33,11 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 ## Repo conventions
 
 - This repo is a template for running a firstmate orchestrator agent.
-  `AGENTS.md` is the agent's main job description and names when to load bundled firstmate skills; `CLAUDE.md` is a symlink to it, and `.claude/skills` is a symlink to `.agents/skills`.
-- Only shared material is tracked: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, and `skills/`.
+  `AGENTS.md` is the Codex harness contract and `CLAUDE.md` is the frozen Claude harness contract; each is that harness's main job description and names when to load bundled firstmate skills.
+  `CLAUDE.md` used to be a symlink to `AGENTS.md`, but the two contracts have diverged and it is now a tracked regular file; `.claude/skills` is still a symlink to `.agents/skills`.
+- Only shared material is tracked: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, `skills/`, `.codex/` (Codex harness config, roles, and hooks), and the single canonical component library `data/operating-model/components/david-warm.html`.
   `.agents/skills/` holds agent-loaded skills that assume a live firstmate home and carry `metadata.internal: true` so installers such as [skills.sh](https://skills.sh) hide them from discovery; `skills/` holds standalone, installer-facing public skills with no firstmate dependency (see the README's "Two-tier skill layout").
-  Everything personal to one captain's fleet (`.env`, `data/`, `state/`, `config/`, `projects/`, `.no-mistakes/`) is gitignored; never commit it.
+  Everything personal to one captain's fleet (`.env`, `data/`, `state/`, `config/`, `projects/`, `.no-mistakes/`) is gitignored; never commit it, with the one carved-out exception of the tracked `data/operating-model/components/david-warm.html` component library.
   The root `.tasks.toml` is tracked `tasks-axi` config for `data/backlog.md`; compatible `tasks-axi` is the default backend for routine backlog mutations.
   A local `config/backlog-backend=manual` opt-out forces hand-editing and stays gitignored.
   A local `config/backend` file explicitly overrides runtime auto-detection for new task endpoints and stays gitignored; spawn-supported values are `tmux` plus experimental `herdr`, `zellij`, `orca`, and `cmux`.
@@ -53,7 +54,7 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 
 ## Development
 
-Tracked changes to firstmate itself - `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, and `skills/` - ship through the `no-mistakes` pipeline on a feature branch and require an explicit merge approval.
+Tracked changes to firstmate itself - `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, `skills/`, `.codex/`, and `data/operating-model/components/david-warm.html` - ship through the `no-mistakes` pipeline on a feature branch and require an explicit merge approval.
 Before making any such change, load the agent-only `firstmate-coding-guidelines` skill (`.agents/skills/firstmate-coding-guidelines/SKILL.md`).
 It has the knowledge-placement rules that keep `AGENTS.md` from regrowing after each diet pass.
 There is no reliable way for `bin/fm-brief.sh`'s scaffold to detect that a task's repo is firstmate itself, so firstmate adds this skill's load line to firstmate-repo briefs by hand.
@@ -116,7 +117,19 @@ tests/fm-backend-orca.test.sh             # fake Orca CLI unit tests for primiti
 tests/cmux-test-safety.sh                 # guarded cleanup helper for real-cmux tests, refusing to close anything except a matching fm-test- workspace
 tests/fm-backend-cmux.test.sh             # fake cmux CLI unit tests for the experimental cmux adapter, including socket auth, title scoping, target recovery, fresh-surface liveness, current-path probing, structural composer verification, and secondmate refusal
 tests/fm-backend-cmux-smoke.test.sh       # real cmux adapter smoke test, skipped when cmux or jq is unavailable or the socket is not password-mode authenticated, using fm-test- workspaces and guarded cleanup
-[ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
+tests/codex-harness-contract-split.test.sh # Codex and frozen Claude harness contracts (AGENTS.md vs CLAUDE.md) are mechanically split and do not cross-reference
+tests/codex-jim-source-structure.test.sh  # Jim source-fidelity structure gate: required modules, canonical ledger fields, and source-hash/adaptation-carrier match
+tests/codex-jim-evidence-contract.test.sh # Jim evidence semantics, laptop cap, side-claim parity, and the canonical E0-E5 badge carrier
+tests/codex-jim-execution-config.test.sh  # installed Codex config loader resolves the root AGENTS contract, all nine pipeline skills, and every role config target (skipped when the codex CLI is absent)
+tests/codex-jim-git-guard.test.sh         # .codex git-guard hook: worktree write fence, nested-eval fail-closed inspection, and its timing bound
+tests/codex-jim-lavish.test.sh            # deterministic Lavish component/contract suite: decision-zone checkbox behavior, oat mermaid verification, and warm-component carriers
+tests/codex-jim-recon-skills.test.sh      # adversarial recon (explore/scout/websearch) structure, sectioned triggers, MEASURED experiment rules, and effort contracts
+tests/codex-jim-rig-atlas.test.sh         # rig-atlas: complete atlas, source re-derivation, live-file gates, adapted memories, leak scan, tamper verification, and module mutations
+tests/codex-jim-submit-skills.test.sh     # submit/build skill triggers (five positive, three negative) and the 24 binary eval rules are enumerated
+tests/pdw-effort-router.test.sh           # pdw effort router: Ultra gate, unsupported-fallback protection, and unknown-effort rejection
+tests/pdw-external-launcher.test.sh       # pdw external codex exec launcher: HEAD/clean-descendant-commit requirement, nested-repo rejection, and sandbox-mode match to the role TOML
+tests/pdw-report-back.test.sh             # pdw report-back transport and report-lock: dead-holder reclaim, live-holder protection, and the owning-task durable-retry wake contract
+[ -f CLAUDE.md ] && [ ! -L CLAUDE.md ]   # CLAUDE.md is a frozen regular file, no longer a symlink to AGENTS.md
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 tmp=$(mktemp -d) && printf 'done: smoke\n' > "$tmp/smoke.status" && FM_STATE_OVERRIDE="$tmp" FM_SIGNAL_GRACE=1 FM_POLL=1 FM_HEARTBEAT=999999 bin/fm-watch-arm.sh  # watcher re-arm smoke test (prints arm status, then an actionable signal)
 ```
