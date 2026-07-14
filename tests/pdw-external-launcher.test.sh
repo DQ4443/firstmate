@@ -42,9 +42,20 @@ printf 'mock result\n' >"$CAPTURE_LAST"
 SH
 chmod +x "$FAKEBIN/codex"
 
+# Read-only launches still require a genuine linked .claude/worktrees worktree.
+# Build one in a throwaway repo instead of assuming this checkout is itself one,
+# so the test does not depend on where the repository happens to be cloned.
+git init -q "$TMP/ro-repo"
+printf 'base\n' >"$TMP/ro-repo/base.txt"
+git -C "$TMP/ro-repo" add base.txt
+git -C "$TMP/ro-repo" -c user.name='Launcher Test' -c user.email='launcher@example.invalid' commit -qm base
+mkdir -p "$TMP/ro-repo/.claude/worktrees"
+git -C "$TMP/ro-repo" worktree add -q -b ro-probe "$TMP/ro-repo/.claude/worktrees/probe" HEAD
+RO_WT="$TMP/ro-repo/.claude/worktrees/probe"
+
 CAPTURE_ARGS="$TMP/args" CAPTURE_LAST="$TMP/last.txt" PATH="$FAKEBIN:$PATH" \
   "$LAUNCHER" \
-  --worktree "$ROOT" \
+  --worktree "$RO_WT" \
   --role-file "$ROOT/.codex/agents/planner.toml" \
   --model test-model \
   --effort light \
@@ -64,26 +75,26 @@ grep -Fxq -- "$ROOT/.codex/agents/planner.toml" <(jq -r '.role_file' "$TMP/evide
 jq -e '.carrier_effort == "low" and .effective_effort == "unverified_from_process_output" and (.enforcement_verified | not)' "$TMP/evidence.json" >/dev/null
 printf 'ok - command carrier pins model, Light-to-low effort, sandbox, worktree, and role instructions without claiming live enforcement\n'
 
-if "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model test --effort ultra --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/e" --last-message-file "$TMP/l" --evidence-file "$TMP/v" >/dev/null 2>&1; then
+if "$LAUNCHER" --worktree "$RO_WT" --role-file "$ROOT/.codex/agents/planner.toml" --model test --effort ultra --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/e" --last-message-file "$TMP/l" --evidence-file "$TMP/v" >/dev/null 2>&1; then
   printf 'not ok - Ultra launched without a parallel-lane plan\n' >&2
   exit 1
 fi
 printf 'ok - external launcher enforces the Ultra parallel-lane gate\n'
 
 CAPTURE_ARGS="$TMP/max-args" CAPTURE_LAST="$TMP/max-last.txt" PATH="$FAKEBIN:$PATH" \
-  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/max-events" --last-message-file "$TMP/max-last.txt" --evidence-file "$TMP/max-evidence.json" >/dev/null
+  "$LAUNCHER" --worktree "$RO_WT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/max-events" --last-message-file "$TMP/max-last.txt" --evidence-file "$TMP/max-evidence.json" >/dev/null
 grep -Fxq 'model_reasoning_effort="max"' "$TMP/max-args"
 jq -e '.carrier_effort == "max" and (.fallback_applied | not)' "$TMP/max-evidence.json" >/dev/null
 printf 'ok - gpt-5.6-sol preserves Max from the installed capability set\n'
 
 CAPTURE_ARGS="$TMP/ultra-args" CAPTURE_LAST="$TMP/ultra-last.txt" PATH="$FAKEBIN:$PATH" \
-  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort ultra --parallel-lanes 2 --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/ultra-events" --last-message-file "$TMP/ultra-last.txt" --evidence-file "$TMP/ultra-evidence.json" >/dev/null
+  "$LAUNCHER" --worktree "$RO_WT" --role-file "$ROOT/.codex/agents/planner.toml" --model gpt-5.6-sol --effort ultra --parallel-lanes 2 --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/ultra-events" --last-message-file "$TMP/ultra-last.txt" --evidence-file "$TMP/ultra-evidence.json" >/dev/null
 grep -Fxq 'model_reasoning_effort="ultra"' "$TMP/ultra-args"
 jq -e '.carrier_effort == "ultra" and (.fallback_applied | not)' "$TMP/ultra-evidence.json" >/dev/null
 printf 'ok - gpt-5.6-sol preserves Ultra when the parallel-lane gate passes\n'
 
 CAPTURE_ARGS="$TMP/fallback-args" CAPTURE_LAST="$TMP/fallback-last.txt" PATH="$FAKEBIN:$PATH" \
-  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/fallback-events" --last-message-file "$TMP/fallback-last.txt" --evidence-file "$TMP/fallback-evidence.json" >/dev/null
+  "$LAUNCHER" --worktree "$RO_WT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort max --sandbox read-only --prompt-file "$TMP/prompt.txt" --events-file "$TMP/fallback-events" --last-message-file "$TMP/fallback-last.txt" --evidence-file "$TMP/fallback-evidence.json" >/dev/null
 grep -Fxq 'model_reasoning_effort="xhigh"' "$TMP/fallback-args"
 jq -e '.requested_codex_effort == "max" and .carrier_effort == "xhigh" and .fallback_applied' "$TMP/fallback-evidence.json" >/dev/null
 printf 'ok - unsupported Max records the nearest model-aware fallback\n'
@@ -122,7 +133,7 @@ fi
 printf 'ok - standalone nested repositories are rejected\n'
 
 if CAPTURE_ARGS="$TMP/mismatch-args" CAPTURE_LAST="$TMP/mismatch-last" PATH="$FAKEBIN:$PATH" \
-  "$LAUNCHER" --worktree "$ROOT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort light --sandbox workspace-write --prompt-file "$TMP/prompt.txt" --events-file "$TMP/mismatch-events" --last-message-file "$TMP/mismatch-last" --evidence-file "$TMP/mismatch-evidence" >/dev/null 2>&1; then
+  "$LAUNCHER" --worktree "$RO_WT" --role-file "$ROOT/.codex/agents/planner.toml" --model test-model --effort light --sandbox workspace-write --prompt-file "$TMP/prompt.txt" --events-file "$TMP/mismatch-events" --last-message-file "$TMP/mismatch-last" --evidence-file "$TMP/mismatch-evidence" >/dev/null 2>&1; then
   printf 'not ok - sandbox mismatch passed role enforcement\n' >&2
   exit 1
 fi
