@@ -151,6 +151,40 @@ PY
   fi
 }
 
+swap_and_reject() {
+  local label=$1 file=$2 first=$3 second=$4 expected=$5
+  local dir="$tmp/mutation-$label"
+  mkdir -p "$dir"
+  cp "$LAVISH" "$dir/lavish.md"
+  cp "$EVALS" "$dir/evals.md"
+  cp "$OAT" "$dir/oat.md"
+  cp "$DECISION" "$dir/decision.md"
+  cp "$SIDEBAR" "$dir/sidebar.md"
+  cp "$INSTALLER" "$dir/installer.py"
+  python3 - "$dir/$file" "$first" "$second" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+first, second = sys.argv[2:4]
+assert first in text and second in text
+placeholder = "__LAVISH_MUTATION_SWAP__"
+assert placeholder not in text
+text = text.replace(first, placeholder, 1)
+text = text.replace(second, first, 1)
+text = text.replace(placeholder, second, 1)
+path.write_text(text, encoding="utf-8")
+PY
+  if python3 "$VALIDATOR" --lavish "$dir/lavish.md" --evals "$dir/evals.md" --oat "$dir/oat.md" --decision "$dir/decision.md" --sidebar "$dir/sidebar.md" --installer "$dir/installer.py" >"$dir/out" 2>"$dir/err"; then
+    fail "validator accepted mutation: $label"
+  fi
+  if ! grep -Fq -- "$expected" "$dir/err"; then
+    cat "$dir/err" >&2
+    fail "validator rejected mutation for the wrong reason: $label"
+  fi
+}
+
 # Literal backticks and dollar signs are intentional mutation targets.
 # shellcheck disable=SC2016
 mutate_and_reject module-order lavish.md 'Read `.agents/skills/oat/SKILL.md`' 'Load the style guide'
@@ -159,8 +193,52 @@ mutate_and_reject trigger evals.md '$lavish discuss the dashboard design here' '
 mutate_and_reject recommended lavish.md 'The Recommended option is first and preselected.' 'The Recommended option may appear anywhere.'
 mutate_and_reject textarea lavish.md 'Every short-answer question gets a real textarea wired into the reply bar.' 'Short answers use plain text.'
 mutate_and_reject stable-path lavish.md 'Keep one stable file path per workstream.' 'Create a new path per round.'
-mutate_and_reject append-only lavish.md 'Each round appends a section and preserves all prior round content.' 'Each round replaces prior content.'
+mutate_and_reject append-only lavish.md 'Keep one mutable current-round section directly after the page header and an append-only chronological history of completed rounds below it.' 'Keep only the latest round.'
+mutate_and_reject move-without-duplication lavish.md 'At a round transition, append the completed section to history before creating the next current section; move it rather than duplicating it.' 'Duplicate the completed section in history.'
 mutate_and_reject real-resume lavish.md 'Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.' 'Assume session resume.'
+mutate_and_reject checkpoint-orientation lavish.md '### Checkpoint orientation' '### Decision preface'
+swap_and_reject orientation-before-summary lavish.md '### Checkpoint orientation' '### Short summary' 'checkpoint orientation must precede the short summary'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-mandatory lavish.md 'Every checkpoint begins immediately after the page header with one mutable current-round section.' 'A checkpoint may include a current-round section.'
+# shellcheck disable=SC2016
+mutate_and_reject current-round-table-placement lavish.md "Its round heading is followed immediately by that round's visible \`Where you are\` table before the short summary, evidence, or decisions." 'The current round may use one page-level table outside its section.'
+# shellcheck disable=SC2016
+mutate_and_reject round-exactly-once lavish.md 'Each round appears exactly once on the page.' 'A round may appear twice on the page.'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-never-hidden lavish.md 'The tables are never hidden in a fold or tab.' 'The tables may be hidden in a fold or tab.'
+# shellcheck disable=SC2016
+mutate_and_reject per-round-orientation lavish.md "Every preserved earlier-round section also begins with its own visible \`Where you are\` table immediately after the round heading and before that round's summary, evidence, or decisions." 'Only the current round needs an orientation table.'
+# shellcheck disable=SC2016
+mutate_and_reject frozen-round-orientation lavish.md "When the next round begins, freeze the completed round's table with that round's final state, move the complete section into chronological history, and create a fresh current-round section at the top." 'Rewrite every table to show the newest state.'
+# shellcheck disable=SC2016
+mutate_and_reject refresh-round-orientation lavish.md 'Refresh all seven rows when a new round begins so the table is a truthful snapshot of that round.' 'Reuse the previous round table unchanged.'
+# shellcheck disable=SC2016
+mutate_and_reject current-round-field lavish.md '- `Current round`: the present phase, what is proven or unproven, and why David is being asked to decide now.' '- `Round status`: optional context.'
+# shellcheck disable=SC2016
+mutate_and_reject active-round-refresh lavish.md 'While a round is active, update its `Current round` row and any changed boundary in place.' 'While a round is active, leave its current state stale.'
+# shellcheck disable=SC2016
+mutate_and_reject complete-round-log lavish.md "The preserved content includes that round's seven-row orientation table, evidence, decisions, findings, and outcome." 'Preserve only the latest outcome.'
+# shellcheck disable=SC2016
+mutate_and_reject no-prior-round-rewrite lavish.md 'Never rewrite an earlier round to match the current state, remove it after supersession, or replace the page with only the latest round.' 'Rewrite earlier rounds to match the current state.'
+# shellcheck disable=SC2016
+mutate_and_reject discarded-work-preservation lavish.md 'Keep discarded work in its original round and mark its verdict `DISCARDED` with the reason.' 'Remove discarded work.'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-outside-fold lavish.md 'Older round bodies may use `details` folds but may not disappear, and their round heading plus seven-row orientation table stay unfolded.' 'Older rounds may hide their entire sections in details folds.'
+# shellcheck disable=SC2016
+mutate_and_reject project-field lavish.md '`Project`' '`Repo name`'
+# shellcheck disable=SC2016
+mutate_and_reject ticket-field lavish.md '`Ticket`' '`Issue`'
+# shellcheck disable=SC2016
+mutate_and_reject bigger-picture-field lavish.md '`Bigger picture`' '`Motivation`'
+# shellcheck disable=SC2016
+mutate_and_reject system-position-field lavish.md '`System position`' '`Pipeline slot`'
+# shellcheck disable=SC2016
+mutate_and_reject whole-ticket-success lavish.md '`Whole-ticket success`' '`Round success`'
+# shellcheck disable=SC2016
+mutate_and_reject scope-boundaries-field lavish.md '`Scope boundaries`' '`Boundaries`'
+# shellcheck disable=SC2016
+mutate_and_reject orientation-eval evals.md "The single current-round section and every preserved earlier round began with that round's visible, unfolded \`Where you are\` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before its summary, evidence, or decisions." 'A checkpoint may include a brief orientation.'
+mutate_and_reject round-log-eval evals.md "The round-N page contains exactly one mutable current-round section plus N-1 complete chronological history sections, including each round's frozen seven-row orientation snapshot, evidence, decisions, findings, and outcome; earlier round bodies may fold without deletion or current-state rewriting." 'The round-N page may replace earlier rounds.'
 mutate_and_reject style-owner oat.md 'only source of visual tokens and components' 'one optional source of visual tokens and components'
 # shellcheck disable=SC2016
 mutate_and_reject arbitrary-ids decision.md 'arbitrary page-scoped `Dn`, `On`, and `Qn`' 'fixed D1 and D2 identifiers'

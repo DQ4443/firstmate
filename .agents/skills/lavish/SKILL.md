@@ -76,6 +76,31 @@ Only decisions use tabs, and those tabs come after the evidence they depend on.
 
 A single open decision may render linearly without a tab row, but it still uses the decision-zone structure and reply channel.
 
+### Checkpoint orientation
+
+Every checkpoint begins immediately after the page header with one mutable current-round section.
+Its round heading is followed immediately by that round's visible `Where you are` table before the short summary, evidence, or decisions.
+Every preserved earlier-round section also begins with its own visible `Where you are` table immediately after the round heading and before that round's summary, evidence, or decisions.
+Each round appears exactly once on the page.
+The tables are never hidden in a fold or tab.
+
+The table contains these exact rows:
+
+- `Project`: the product or repository and its purpose.
+- `Ticket`: the issue identifier, title, and direct issue link when available.
+- `Bigger picture`: the user or business problem this ticket helps solve.
+- `System position`: where this work sits in the product flow, including the relevant upstream input and downstream consumer.
+- `Whole-ticket success`: the observable end state for the full ticket, separate from the current round's proof.
+- `Current round`: the present phase, what is proven or unproven, and why David is being asked to decide now.
+- `Scope boundaries`: what is in scope, what is explicitly out, and any dependency or human gate.
+
+Write these rows in plain product language.
+Internal workflow terms may appear only after their product meaning is stated.
+Refresh all seven rows when a new round begins so the table is a truthful snapshot of that round.
+While a round is active, update its `Current round` row and any changed boundary in place.
+When the next round begins, freeze the completed round's table with that round's final state, move the complete section into chronological history, and create a fresh current-round section at the top.
+Do not replace whole-ticket success with the next implementation move.
+
 ### Short summary
 
 Use at most four short standalone lines or a two-column mini-table.
@@ -183,7 +208,7 @@ The live decision zone carries the next round's open decisions, not completed de
 
 Zero open decisions is valid only on a terminal page or a stuck page whose blocker is named.
 
-The content order is what landed and its evidence, suggested next moves, stop check, Questions, and the standing mode choice.
+The content order is the `Where you are` orientation table, short summary, any required `What was tried` definition, what landed and its evidence, suggested next moves, stop check, Questions, and the standing mode choice.
 
 Suggested moves are concrete forks produced by the round's validation and reconnaissance.
 
@@ -199,9 +224,12 @@ Passive mode takes the Recommended move and keeps looping until a termination pr
 
 ### Append-only history
 
-Each round appends a section and preserves all prior round content.
+Keep one mutable current-round section directly after the page header and an append-only chronological history of completed rounds below it.
+At a round transition, append the completed section to history before creating the next current section; move it rather than duplicating it.
+The preserved content includes that round's seven-row orientation table, evidence, decisions, findings, and outcome.
+Never rewrite an earlier round to match the current state, remove it after supersession, or replace the page with only the latest round.
 
-Older rounds may use `details` folds but may not disappear.
+Older round bodies may use `details` folds but may not disappear, and their round heading plus seven-row orientation table stay unfolded.
 
 A substantive round gets a one-line purpose, a small flow diagram when flow changed, per-lane mechanism sections, panel findings, evidence, and spillover.
 
@@ -219,7 +247,7 @@ Each round link uses `<status glyph> R# &middot; terse summary`.
 
 When later work replaces an earlier result, keep the earlier section and add an `updated cycle N` link to the replacement.
 
-Remove work that was discarded without a replacement because the ledger remains its record.
+Keep discarded work in its original round and mark its verdict `DISCARDED` with the reason.
 
 Each decision state is `open`, `decided: <pick>`, or `SUPERSEDED: <replacement>` with an evidence link.
 
