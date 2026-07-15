@@ -78,8 +78,11 @@ A single open decision may render linearly without a tab row, but it still uses 
 
 ### Checkpoint orientation
 
-Every checkpoint begins immediately after the page header with a visible `Where you are` orientation table.
-It appears before the short summary, round evidence, and decision zone, and is never hidden in a fold or tab.
+Every checkpoint begins immediately after the page header with one mutable current-round section.
+Its round heading is followed immediately by that round's visible `Where you are` table before the short summary, evidence, or decisions.
+Every preserved earlier-round section also begins with its own visible `Where you are` table immediately after the round heading and before that round's summary, evidence, or decisions.
+Each round appears exactly once on the page.
+The tables are never hidden in a fold or tab.
 
 The table contains these exact rows:
 
@@ -93,7 +96,9 @@ The table contains these exact rows:
 
 Write these rows in plain product language.
 Internal workflow terms may appear only after their product meaning is stated.
-Refresh `Current round` and any changed boundary every round.
+Refresh all seven rows when a new round begins so the table is a truthful snapshot of that round.
+While a round is active, update its `Current round` row and any changed boundary in place.
+When the next round begins, freeze the completed round's table with that round's final state, move the complete section into chronological history, and create a fresh current-round section at the top.
 Do not replace whole-ticket success with the next implementation move.
 
 ### Short summary
@@ -219,9 +224,12 @@ Passive mode takes the Recommended move and keeps looping until a termination pr
 
 ### Append-only history
 
-Each round appends a section and preserves all prior round content.
+Keep one mutable current-round section directly after the page header and an append-only chronological history of completed rounds below it.
+At a round transition, append the completed section to history before creating the next current section; move it rather than duplicating it.
+The preserved content includes that round's seven-row orientation table, evidence, decisions, findings, and outcome.
+Never rewrite an earlier round to match the current state, remove it after supersession, or replace the page with only the latest round.
 
-Older rounds may use `details` folds but may not disappear.
+Older round bodies may use `details` folds but may not disappear, and their round heading plus seven-row orientation table stay unfolded.
 
 A substantive round gets a one-line purpose, a small flow diagram when flow changed, per-lane mechanism sections, panel findings, evidence, and spillover.
 
@@ -239,7 +247,7 @@ Each round link uses `<status glyph> R# &middot; terse summary`.
 
 When later work replaces an earlier result, keep the earlier section and add an `updated cycle N` link to the replacement.
 
-Remove work that was discarded without a replacement because the ledger remains its record.
+Keep discarded work in its original round and mark its verdict `DISCARDED` with the reason.
 
 Each decision state is `open`, `decided: <pick>`, or `SUPERSEDED: <replacement>` with an evidence link.
 

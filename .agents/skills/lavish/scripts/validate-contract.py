@@ -29,17 +29,83 @@ def main() -> int:
         require(lavish, "The Recommended option is first and preselected.", "Recommended-first rule")
         require(lavish, "Every short-answer question gets a real textarea wired into the reply bar.", "textarea rule")
         require(lavish, "Keep one stable file path per workstream.", "stable path rule")
-        require(lavish, "Each round appends a section and preserves all prior round content.", "append-only update rule")
+        require(
+            lavish,
+            "Keep one mutable current-round section directly after the page header and an append-only chronological history of completed rounds below it.",
+            "append-only update rule",
+        )
+        require(
+            lavish,
+            "At a round transition, append the completed section to history before creating the next current section; move it rather than duplicating it.",
+            "move completed round without duplication",
+        )
         require(lavish, "Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.", "real resume evidence gate")
         require(
             lavish,
-            "Every checkpoint begins immediately after the page header with a visible `Where you are` orientation table.",
+            "Every checkpoint begins immediately after the page header with one mutable current-round section.",
             "mandatory checkpoint orientation placement",
         )
         require(
+            lavish,
+            "Its round heading is followed immediately by that round's visible `Where you are` table before the short summary, evidence, or decisions.",
+            "current-round table placement",
+        )
+        require(lavish, "Each round appears exactly once on the page.", "one section per round")
+        require(lavish, "The tables are never hidden in a fold or tab.", "orientation tables stay unfolded")
+        require(
             evals,
-            "Every checkpoint began with a visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before round evidence or decisions.",
+            "The single current-round section and every preserved earlier round began with that round's visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before its summary, evidence, or decisions.",
             "checkpoint orientation eval",
+        )
+        require(
+            lavish,
+            "Every preserved earlier-round section also begins with its own visible `Where you are` table immediately after the round heading and before that round's summary, evidence, or decisions.",
+            "per-round orientation placement",
+        )
+        require(
+            lavish,
+            "When the next round begins, freeze the completed round's table with that round's final state, move the complete section into chronological history, and create a fresh current-round section at the top.",
+            "frozen prior-round orientation",
+        )
+        require(
+            lavish,
+            "Refresh all seven rows when a new round begins so the table is a truthful snapshot of that round.",
+            "refreshed round orientation",
+        )
+        require(
+            lavish,
+            "- `Current round`: the present phase, what is proven or unproven, and why David is being asked to decide now.",
+            "current-round orientation field",
+        )
+        require(
+            lavish,
+            "While a round is active, update its `Current round` row and any changed boundary in place.",
+            "active-round orientation refresh",
+        )
+        require(
+            lavish,
+            "The preserved content includes that round's seven-row orientation table, evidence, decisions, findings, and outcome.",
+            "complete append-only round log",
+        )
+        require(
+            lavish,
+            "Never rewrite an earlier round to match the current state, remove it after supersession, or replace the page with only the latest round.",
+            "no prior-round rewrite",
+        )
+        require(
+            lavish,
+            "Keep discarded work in its original round and mark its verdict `DISCARDED` with the reason.",
+            "discarded-work preservation",
+        )
+        require(
+            lavish,
+            "Older round bodies may use `details` folds but may not disappear, and their round heading plus seven-row orientation table stay unfolded.",
+            "orientation outside history folds",
+        )
+        require(
+            evals,
+            "The round-N page contains exactly one mutable current-round section plus N-1 complete chronological history sections, including each round's frozen seven-row orientation snapshot, evidence, decisions, findings, and outcome; earlier round bodies may fold without deletion or current-state rewriting.",
+            "complete round-log eval",
         )
         orientation = lavish.index("### Checkpoint orientation")
         summary = lavish.index("### Short summary")
