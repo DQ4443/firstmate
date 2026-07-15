@@ -152,7 +152,7 @@ PY
 }
 
 swap_and_reject() {
-  local label=$1 file=$2 first=$3 second=$4
+  local label=$1 file=$2 first=$3 second=$4 expected=$5
   local dir="$tmp/mutation-$label"
   mkdir -p "$dir"
   cp "$LAVISH" "$dir/lavish.md"
@@ -179,6 +179,10 @@ PY
   if python3 "$VALIDATOR" --lavish "$dir/lavish.md" --evals "$dir/evals.md" --oat "$dir/oat.md" --decision "$dir/decision.md" --sidebar "$dir/sidebar.md" --installer "$dir/installer.py" >"$dir/out" 2>"$dir/err"; then
     fail "validator accepted mutation: $label"
   fi
+  if ! grep -Fq -- "$expected" "$dir/err"; then
+    cat "$dir/err" >&2
+    fail "validator rejected mutation for the wrong reason: $label"
+  fi
 }
 
 # Literal backticks and dollar signs are intentional mutation targets.
@@ -193,7 +197,7 @@ mutate_and_reject append-only lavish.md 'Keep one mutable current-round section 
 mutate_and_reject move-without-duplication lavish.md 'At a round transition, append the completed section to history before creating the next current section; move it rather than duplicating it.' 'Duplicate the completed section in history.'
 mutate_and_reject real-resume lavish.md 'Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.' 'Assume session resume.'
 mutate_and_reject checkpoint-orientation lavish.md '### Checkpoint orientation' '### Decision preface'
-swap_and_reject orientation-before-summary lavish.md '### Checkpoint orientation' '### Short summary'
+swap_and_reject orientation-before-summary lavish.md '### Checkpoint orientation' '### Short summary' 'checkpoint orientation must precede the short summary'
 # shellcheck disable=SC2016
 mutate_and_reject orientation-mandatory lavish.md 'Every checkpoint begins immediately after the page header with one mutable current-round section.' 'A checkpoint may include a current-round section.'
 # shellcheck disable=SC2016
