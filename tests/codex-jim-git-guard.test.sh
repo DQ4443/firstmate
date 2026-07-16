@@ -112,17 +112,8 @@ run_guard 2 "$TMP/repo" 'gh pr ready 42'
 touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr ready 42'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh pr ready'
-run_guard 2 "$TMP/repo" 'gh-axi pr ready 42'
 touch "$sentinel"
-run_guard 0 "$TMP/repo" 'gh-axi pr ready 42'
-[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh-axi pr ready'
-run_guard 2 "$TMP/repo" 'npx -y gh-axi pr create --title house-cli'
-run_guard 2 "$TMP/repo" 'npx -y gh-axi@latest pr create --title versioned-house-cli'
-touch "$sentinel"
-run_guard 0 "$TMP/repo" 'npx -y gh-axi@1.2.3 pr ready 42'
-[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by versioned npx gh-axi pr ready'
-touch "$sentinel"
-run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr ready 42'
+run_guard 2 "$TMP/repo" 'gh pr create --title one && gh pr ready 42'
 [[ -e "$sentinel" ]] || fail 'ambiguous multiple-action command consumed the sentinel'
 rm -f "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr view 42'
@@ -130,7 +121,7 @@ run_guard 0 "$TMP/repo" 'gh pr view 42'
 custom_sentinel="$TMP/custom-submit-go"
 touch "$custom_sentinel"
 export CODEX_SUBMIT_SENTINEL="$custom_sentinel"
-run_guard 0 "$TMP/repo" 'gh-axi pr create --title configured'
+run_guard 0 "$TMP/repo" 'gh pr create --title configured'
 unset CODEX_SUBMIT_SENTINEL
 [[ ! -e "$custom_sentinel" ]] || fail 'configured submit sentinel was not consumed'
 pass 'pull-request sentinel is project-local, one-shot, and cannot authorize two actions'

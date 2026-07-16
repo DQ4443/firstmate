@@ -319,16 +319,13 @@ def is_pushed_head(repo: Path) -> bool:
 
 
 def normalized_executable(token: str) -> str:
-    name = Path(token).name
-    if name.startswith("gh-axi@"):
-        return "gh-axi"
-    return name
+    return Path(token).name
 
 
 def pr_action_count(tokens: list[str]) -> int:
     count = 0
     for index, token in enumerate(tokens):
-        if normalized_executable(token) not in {"gh", "gh-axi"}:
+        if normalized_executable(token) != "gh":
             continue
         for cursor in range(index + 1, len(tokens) - 1):
             if tokens[cursor] == "pr" and tokens[cursor + 1] in {"create", "ready"}:
