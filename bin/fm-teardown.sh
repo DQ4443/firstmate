@@ -160,10 +160,10 @@ remove_grok_turnend_auth() {
 # single match and returns 0; returns non-zero on no match or any lookup failure,
 # so the caller treats it as "no PR found" (fail-safe).
 pr_number_from_branch() {
-  local branch=$1 out n
+  local branch=$1 n
   [ -n "$branch" ] && [ "$branch" != HEAD ] || return 1
-  out=$(cd "$WT" && gh pr list --state all --head "$branch" --limit 1 --json number 2>/dev/null) || return 1
-  n=$(printf '%s\n' "$out" | jq -er 'if length == 1 then .[0].number else empty end' 2>/dev/null) || return 1
+  n=$(cd "$WT" && gh pr list --state all --head "$branch" --limit 1 --json number \
+    --jq 'if length == 1 then .[0].number else empty end' 2>/dev/null) || return 1
   [ -n "$n" ] || return 1
   printf '%s' "$n"
 }
@@ -232,15 +232,15 @@ EOF
 # current work is not contained in the PR head, no PR is found, or any gh error
 # occurs - the caller then falls back to the content check.
 pr_is_merged() {
-  local branch=$1 target view parsed state head current
+  local branch=$1 target parsed state head current
   if [ -n "$PR_URL" ]; then
     target=$PR_URL
   else
     target=$(pr_number_from_branch "$branch") || return 1
   fi
   [ -n "$target" ] || return 1
-  view=$(cd "$WT" && gh pr view "$target" --json state,headRefOid 2>/dev/null) || return 1
-  parsed=$(printf '%s\n' "$view" | jq -er '[.state, .headRefOid] | @tsv' 2>/dev/null) || return 1
+  parsed=$(cd "$WT" && gh pr view "$target" --json state,headRefOid \
+    --jq '[.state, .headRefOid] | @tsv' 2>/dev/null) || return 1
   IFS=$'\t' read -r state head <<< "$parsed"
   case "$state" in
     MERGED|merged) ;;

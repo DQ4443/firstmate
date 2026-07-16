@@ -34,6 +34,7 @@
 #   (o) fm-pr-check rerun after HEAD moved                      -> no stale pr_head
 #   (p) fm-pr-check when local HEAD lags                        -> record remote PR head
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
+#   (r) merged PR discovery works without an external jq binary -> ALLOW  (native gh --jq)
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -178,9 +179,15 @@ add_gh_pr_merged_for_head() {
   cat > "$case_dir/fakebin/gh" <<SH
 #!/usr/bin/env bash
 case "\${1:-} \${2:-}" in
-  "pr list") printf '%s\n' '[{"number":7}]' ; exit 0 ;;
+  "pr list")
+    case " \$* " in
+      *" --jq "*) printf '%s\n' '7' ; exit 0 ;;
+      *) printf '%s\n' '[{"number":7}]' ; exit 0 ;;
+    esac
+    ;;
   "pr view")
     case " \$* " in
+      *"state,headRefOid"*" --jq "*) printf '%s\t%s\n' 'MERGED' '$head' ; exit 0 ;;
       *"state,headRefOid"*) printf '%s\n' '{"state":"MERGED","headRefOid":"$head"}' ; exit 0 ;;
       *"headRefOid"*) printf '%s\n' '$head' ; exit 0 ;;
     esac
@@ -387,6 +394,12 @@ test_squash_merged_branch_deleted_allows() {
   append_pr_meta_for_current_head "$case_dir"
   pr_head=$(git -C "$case_dir/wt" rev-parse HEAD)
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
+  cat > "$case_dir/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+echo "external jq must not be called by native-gh teardown" >&2
+exit 127
+SH
+  chmod +x "$case_dir/fakebin/jq"
 
   set +e
   run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
@@ -435,6 +448,12 @@ test_no_pr_recorded_discovers_merged_pr_by_branch_allows() {
   pr_head=$(commit_tree_from_wt_head "$case_dir" "$local_head" "no-mistakes auto-fix")
   land_on_origin_main "$case_dir" feature.txt hello
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
+  cat > "$case_dir/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+echo "external jq must not be called by native-gh teardown" >&2
+exit 127
+SH
+  chmod +x "$case_dir/fakebin/jq"
   # No append_pr_meta_* call: state/task-x1.meta has no pr= or pr_head= line.
 
   ! grep -qE '^(pr|pr_head)=' "$case_dir/state/task-x1.meta" \

@@ -18,8 +18,9 @@
 # and repository.
 #
 # Merge method: defaults to --squash when the caller passes none of --squash,
-# --merge, --rebase, or --method after the optional -- separator. An explicit
-# caller method is never overridden.
+# --merge, or --rebase after the optional -- separator. Native gh does not
+# support the retired wrapper's --method flag, so that flag is rejected before
+# any task state is recorded.
 # Extra args must not include --repo or -R because the repo is parsed from the
 # PR URL.
 #
@@ -42,10 +43,23 @@ caller_has_merge_method() {
   local arg
   for arg in "$@"; do
     case "$arg" in
-      --squash|--merge|--rebase|--method|--method=*) return 0 ;;
+      --squash|--merge|--rebase) return 0 ;;
     esac
   done
   return 1
+}
+
+reject_legacy_method_flag() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --method|--method=*)
+        echo "error: unsupported native gh flag $arg; use --merge, --rebase, or --squash" >&2
+        return 1
+        ;;
+    esac
+  done
+  return 0
 }
 
 parse_pr_url() {
@@ -77,6 +91,7 @@ reject_repo_overrides() {
 
 parse_pr_url "$URL" || exit 1
 reject_repo_overrides "$@" || exit 1
+reject_legacy_method_flag "$@" || exit 1
 
 "$SCRIPT_DIR/fm-pr-check.sh" "$ID" "$URL"
 grep -qxF "pr=$URL" "$META" || { echo "error: fm-pr-check did not record pr=$URL in $META; refusing to merge" >&2; exit 1; }

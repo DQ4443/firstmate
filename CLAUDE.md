@@ -381,8 +381,7 @@ bin/fm-pr-merge.sh executes it (squash default).
 PR/CI awareness keeps the whole board current, not just the per-PR merge poll.
 Refresh open-PR and CI status after a merge, push, or PR opening, at the start of new work, when David asks, and during long background runs.
 List open pull requests with `gh pr list --repo KronosAIPS/kronosai_agentic_simulation --state open --json number,title,headRefName,reviewDecision,mergeStateStatus`, swapping the repo per project.
-Do not request `statusCheckRollup` from `gh pr list`.
-Inspect each returned pull request with `gh pr checks --repo <repo> <number> --json name,state,bucket,link,description` and interpret the `bucket` field.
+Keep the list query to PR metadata, then inspect each returned pull request with `gh pr checks --repo <repo> <number> --json name,state,bucket,link,description` and interpret the `bucket` field. This is an explicit per-PR bucket policy, not a limitation of `gh pr list`.
 Fold newly red checks with a one-line reason, new reviews, approvals or changes requested, and newly mergeable CLEAN pull requests into the backlog and board.
 Track and surface only, and never merge, push, or comment from this pass.
 Surface only what needs David's action because he already gets GitHub and Linear notifications.
