@@ -198,6 +198,8 @@ Add a blocking end-to-end defect to the current task instead of splitting it int
 After a pull request exists, run `bin/fm-pr-check.sh <item-id> <pull-request-url>` to record and monitor it.
 When David explicitly says merge, use `bin/fm-pr-merge.sh` and preserve its default squash behavior.
 Refresh open pull-request and CI state after a push, pull-request opening, review change, merge, new task start, or David request.
+List pull requests with native `gh pr list`, then inspect each one with `gh pr checks --json name,state,bucket,link,description` and parse `bucket` explicitly.
+Use raw `gh api` GraphQL `Commit.statusCheckRollup` and exact-SHA REST commit status plus check runs when legacy `StatusContext` and `CheckRun` types must be distinguished.
 Track only what changes David's next action and never merge, push, or comment during a status refresh.
 
 On restart, acquire `bin/fm-lock.sh`, drain queued wakes, read the board and backlog, and verify the poller.
