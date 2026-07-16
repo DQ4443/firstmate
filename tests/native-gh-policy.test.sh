@@ -63,7 +63,7 @@ grep -Fq 'unresolved review threads separately' "$submit" \
 pass 'submit defines exact-head native gh and raw API status interpretation'
 
 if grep -Eq 'gh pr list.*--json[^`]*statusCheckRollup' "$sync"; then
-  fail 'sync requests unsupported statusCheckRollup data from gh pr list'
+  fail 'sync bypasses the required per-PR gh pr checks bucket policy'
 fi
 grep -Fq 'gh pr checks --repo <repo> <number> --json name,state,bucket,link,description' "$sync" \
   || fail 'sync does not inspect each listed pull request with gh pr checks'

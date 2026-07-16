@@ -14,6 +14,7 @@
 #   (f) malformed PR URL fails fast without calling gh
 #   (g) explicit merge method is not overridden by the default --squash
 #   (h) repo override args fail fast because the repo comes from the URL
+#   (i) the legacy wrapper-only --method flag fails before state is recorded
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -257,19 +258,27 @@ test_explicit_merge_method_not_overridden() {
   pass "fm-pr-merge does not add default --squash when the caller passes an explicit merge method"
 }
 
-test_method_equals_merge_method_not_overridden() {
-  local case_dir
-  case_dir=$(make_case method-equals-merge-method)
+test_legacy_method_flag_refuses_before_recording() {
+  local case_dir rc
+  case_dir=$(make_case legacy-method-flag)
   mkdir -p "$case_dir/wt"
   add_gh_mocks "$case_dir" 7777777777777777777777777777777777777777
   : > "$case_dir/gh.log"
 
+  set +e
   run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/23 -- --method=merge \
-    > "$case_dir/stdout" 2> "$case_dir/stderr" || fail "method-equals-merge-method: fm-pr-merge failed"
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
 
-  grep -qxF 'pr merge 23 --repo example/repo --method=merge' "$case_dir/gh.log" \
-    || fail "method-equals-merge-method: caller --method=merge was not forwarded without an extra default --squash"
-  pass "fm-pr-merge respects --method=<value> as an explicit merge method"
+  expect_code 1 "$rc" "legacy-method-flag: unsupported --method should fail"
+  assert_grep 'unsupported native gh flag --method=merge' "$case_dir/stderr" \
+    "legacy-method-flag: refusal did not explain the native gh replacement flags"
+  assert_no_grep 'pr=https://github.com/example/repo/pull/23' "$case_dir/state/task-x1.meta" \
+    "legacy-method-flag: PR URL was recorded before rejecting --method"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" \
+    "legacy-method-flag: gh pr merge was invoked despite the unsupported flag"
+  pass "fm-pr-merge rejects legacy --method before recording state"
 }
 
 test_parses_pr_url_for_gh() {
@@ -295,5 +304,5 @@ test_malformed_url_refuses_before_merge
 test_rejects_unsafe_url_segments_before_recording
 test_repo_override_args_refuse_before_recording
 test_explicit_merge_method_not_overridden
-test_method_equals_merge_method_not_overridden
+test_legacy_method_flag_refuses_before_recording
 test_parses_pr_url_for_gh
