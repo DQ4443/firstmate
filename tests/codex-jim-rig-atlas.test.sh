@@ -118,6 +118,11 @@ for name in pdw lavish rig-atlas; do
   mkdir -p "$fixture/.agents/skills/$name/scripts"
   printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/$name/scripts/load-bearing.sh"
 done
+mkdir -p "$fixture/.agents/skills/orient/references" "$fixture/.agents/skills/orient/scripts"
+printf '%s\n' '---' 'name: orient' 'description: Fixture domain skill.' '---' '' '# Orient' >"$fixture/.agents/skills/orient/SKILL.md"
+printf '# Evals for orient\n' >"$fixture/.agents/skills/orient/evals.md"
+printf '# Orient evidence rules\n' >"$fixture/.agents/skills/orient/references/evidence.md"
+printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/orient/scripts/check.sh"
 
 generate() {
   python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
@@ -130,12 +135,15 @@ generate --verify >"$tmp/verify.out"
 [ ! -f "$tmp/state/rig-atlas-portable.md" ] || fail "portable twin unexpectedly exists"
 [ "$(wc -c <"$tmp/state/rig-atlas.md" | tr -d ' ')" -gt 100000 ] || fail "atlas collapsed into a summary"
 
-python3 - "$tmp/state/rig-atlas.md" <<'PY'
+python3 - "$tmp/state/rig-atlas.md" "$tmp/state/rig-atlas.integrity.json" <<'PY'
+import hashlib
+import json
 import pathlib
 import re
 import sys
 
 text = pathlib.Path(sys.argv[1]).read_text()
+integrity = json.loads(pathlib.Path(sys.argv[2]).read_text())
 headings = [
     "## 0. Current-state atlas",
     "## 1. System model",
@@ -151,6 +159,21 @@ headings = [
 ]
 positions = [text.index(heading) for heading in headings]
 assert positions == sorted(positions)
+domain_heading = "## Auxiliary and domain skill inventory"
+assert domain_heading in text
+assert text.index(domain_heading) < text.index("## Appendix A: nine spine skills and their live references")
+appendix_a = text.split("## Appendix A: nine spine skills and their live references", 1)[1].split("## Appendix B:", 1)[0]
+assert len(re.findall(r"^### `\.agents/skills/[^/]+/SKILL\.md`$", appendix_a, re.M)) == 9
+for relative in (
+    ".agents/skills/orient/SKILL.md",
+    ".agents/skills/orient/evals.md",
+    ".agents/skills/orient/references/evidence.md",
+    ".agents/skills/orient/scripts/check.sh",
+):
+    digest = hashlib.sha256((pathlib.Path(sys.argv[1]).parents[1] / "repo" / relative).read_bytes()).hexdigest()
+    assert f"`{relative}`" in text
+    assert digest in text
+    assert integrity["inputs"][relative] == digest
 assert len(re.findall(r"^#### `memory/", text, re.M)) == 47
 assert len(re.findall(r"^- `source-full-only-", text, re.M)) == 47
 assert len(re.findall(r"^- `source-withheld-exclude-", text, re.M)) == 41
@@ -162,6 +185,14 @@ assert ".codex/hooks.json" in text
 for name in ("pdw", "lavish", "rig-atlas"):
     assert f".agents/skills/{name}/scripts/load-bearing.sh" in text
 PY
+
+cp "$fixture/.agents/skills/orient/scripts/check.sh" "$tmp/orient-check.saved"
+printf '\n# MUTATED AUXILIARY INPUT\n' >>"$fixture/.agents/skills/orient/scripts/check.sh"
+if generate --verify >"$tmp/auxiliary-skill-drift.out" 2>&1; then
+  fail "auxiliary skill input drift passed verification"
+fi
+cp "$tmp/orient-check.saved" "$fixture/.agents/skills/orient/scripts/check.sh"
+generate >/dev/null
 
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" >"$tmp/adaptation.out"
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" --verify >"$tmp/adaptation-verify.out"

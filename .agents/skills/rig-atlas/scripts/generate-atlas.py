@@ -24,7 +24,26 @@ def sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
+def auxiliary_skill_files(root: Path) -> list[Path]:
+    skill_root = root / ".agents" / "skills"
+    files: list[Path] = []
+    if not skill_root.is_dir():
+        return files
+    for primary in sorted(skill_root.glob("*/SKILL.md")):
+        skill_dir = primary.parent
+        if skill_dir.name in SPINE:
+            continue
+        files.append(primary)
+        evals = skill_dir / "evals.md"
+        if evals.is_file():
+            files.append(evals)
+        for directory in (skill_dir / "references", skill_dir / "scripts"):
+            if directory.is_dir():
+                files.extend(sorted(path for path in directory.rglob("*") if path.is_file()))
+    return sorted(files)
+
+
+def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]]:
     skills: list[Path] = []
     missing: list[str] = []
     for skill in SPINE:
@@ -62,7 +81,7 @@ def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]
     hooks = root / ".codex" / "hooks"
     if hooks.is_dir():
         harness.extend(sorted(path for path in hooks.rglob("*") if path.is_file()))
-    return sorted(skills), sorted(roles), sorted(harness)
+    return sorted(skills), auxiliary_skill_files(root), sorted(roles), sorted(harness)
 
 
 def append_files(lines: list[str], heading: str, root: Path, files: list[Path]) -> None:
@@ -72,11 +91,26 @@ def append_files(lines: list[str], heading: str, root: Path, files: list[Path]) 
         lines.extend(["", f"### `{relative}`", "", "````text", path.read_text(encoding="utf-8").rstrip(), "````"])
 
 
+def append_inventory(lines: list[str], root: Path, files: list[Path]) -> None:
+    lines.extend([
+        "",
+        "## Auxiliary and domain skill inventory",
+        "",
+        "Non-spine skills stay outside Appendix A. Their live files are deterministic integrity inputs.",
+        "",
+        "| Live input | SHA-256 |",
+        "| --- | --- |",
+    ])
+    for path in files:
+        relative = path.relative_to(root)
+        lines.append(f"| `{relative}` | `{sha_bytes(path.read_bytes())}` |")
+
+
 def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[str, str]]:
     inventory, source_bodies, main_prose = AUDIT.inspect(source)
     if inventory["errors"]:
         raise ValueError(f"source audit failed: {inventory['errors']}")
-    skills, roles, harness = required_live_files(root)
+    skills, auxiliary_skills, roles, harness = required_live_files(root)
     memory_dir = state / "portable-memory"
     memory_inputs: list[Path] = []
     for name in inventory["include_both"]:
@@ -98,6 +132,7 @@ def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[s
     lines = [adapted_prose, "", "## Adaptation manifest", "", "The source prose and all include-both memories use explicit human and harness substitutions.", ""]
     for rule, count in sorted(substitutions.items()):
         lines.append(f"- `{rule}`: {count}")
+    append_inventory(lines, root, auxiliary_skills)
     append_files(lines, "## Appendix A: nine spine skills and their live references", root, skills)
     append_files(lines, "## Appendix B: three Codex role definitions", root, roles)
     append_files(lines, "## Appendix C: live Codex harness configuration and hooks", root, harness)
@@ -118,7 +153,7 @@ def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[s
         generator_label = generator
     lines.extend(["", "## Appendix E: this document's generator", "", f"Tracked generator: `{generator_label}`.", "", "````python", generator.read_text(encoding="utf-8").rstrip(), "````", ""])
     output = "\n".join(lines).encode()
-    inputs = {str(path.relative_to(root)): sha_bytes(path.read_bytes()) for path in skills + roles + harness}
+    inputs = {str(path.relative_to(root)): sha_bytes(path.read_bytes()) for path in skills + auxiliary_skills + roles + harness}
     inputs.update({f"state/rig/portable-memory/{path.name}": sha_bytes(path.read_bytes()) for path in memory_inputs})
     inputs["source"] = inventory["source_sha256"]
     return output, inputs
