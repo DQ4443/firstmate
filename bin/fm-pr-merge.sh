@@ -7,16 +7,15 @@
 # `done: PR <url> checks green` line, which no-mistakes only emits once its CI
 # step turns green. Repos that intentionally run no CI on PRs (CI only on
 # pushes to the default branch) never emit that line, so a merge performed by
-# hand-running `gh-axi pr merge` - the common shape of a yolo-authorized merge -
+# hand-running `gh pr merge` - the common shape of a yolo-authorized merge -
 # can skip the recording step entirely. Teardown then has nothing to look up for
 # a squash-merge-then-delete-branch flow and false-refuses provably landed work.
 # This script makes recording part of the merge itself, so it cannot be skipped
 # by omission. Use it for every PR merge (captain-requested or yolo-authorized),
-# in place of calling `gh-axi pr merge` directly.
+# in place of calling `gh pr merge` directly.
 #
-# gh-axi pr merge expects a PR number and --repo <owner>/<repo>; it does not
-# parse a full https://github.com/<owner>/<repo>/pull/<n> URL. This script
-# parses the URL and invokes gh-axi in the form it accepts.
+# This script parses the full PR URL and invokes gh with an explicit PR number
+# and repository.
 #
 # Merge method: defaults to --squash when the caller passes none of --squash,
 # --merge, --rebase, or --method after the optional -- separator. An explicit
@@ -24,12 +23,12 @@
 # Extra args must not include --repo or -R because the repo is parsed from the
 # PR URL.
 #
-# Usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh-axi pr merge args>]
+# Usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh pr merge args>]
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ID=${1:?usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh-axi pr merge args>]}
-URL=${2:?usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh-axi pr merge args>]}
+ID=${1:?usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh pr merge args>]}
+URL=${2:?usage: fm-pr-merge.sh <task-id> <pr-url> [-- <extra gh pr merge args>]}
 shift 2
 [ "${1:-}" = "--" ] && shift
 
@@ -87,4 +86,4 @@ if ! caller_has_merge_method "$@"; then
   merge_args=(--squash)
 fi
 
-gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" ${merge_args[@]+"${merge_args[@]}"} "$@"
+gh pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" ${merge_args[@]+"${merge_args[@]}"} "$@"
