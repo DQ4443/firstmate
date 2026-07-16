@@ -98,6 +98,16 @@ Every monitor or wake payload records the current loop count, re-panel threshold
 Notify only when the pull request becomes ready for the merge decision, loop 4 triggers a re-panel, loop 16 triggers HOLD, a hard continuous-integration failure appears, or a new CodeRabbit finding arrives.
 Work on another independent task while the loop waits.
 
+Read the exact head SHA before and after each status inspection with `gh pr view <number> --repo <owner>/<repo> --json headRefOid --jq .headRefOid`.
+Discard the observation and retry when the head changes during inspection.
+Read check state with `gh pr checks --json name,state,bucket,link,description` and parse each check's `bucket` value.
+Never infer PASS from the JSON command exit status because `gh pr checks` can exit nonzero for pending or failing checks while still returning valid JSON.
+When the normal checks view is incomplete or a legacy status must be disambiguated, use `gh api graphql` to query `Commit.statusCheckRollup` and request its `contexts` union with inline fragments for both `CheckRun` and `StatusContext`.
+The REST fallback must query the exact-SHA combined commit status with `gh api repos/<owner>/<repo>/commits/<sha>/status` and exact-SHA check runs with `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`, then reconcile those results instead of treating either endpoint as the whole rollup.
+CodeRabbit PASS requires at least one matching CodeRabbit context and requires all matching CodeRabbit contexts to report a pass or success state on the unchanged head.
+A missing, pending, skipped, cancelled, neutral, stale, or failing CodeRabbit context is not PASS.
+Query unresolved review threads separately through the approved native `gh api graphql` interface because check state cannot prove thread resolution.
+
 Verify every CodeRabbit or human review comment against the actual current diff.
 Never dismiss a comment as pre-existing without checking it.
 Fix confirmed findings in an isolated writing worktree and commit explicit paths.
