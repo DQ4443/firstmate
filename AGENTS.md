@@ -81,6 +81,8 @@ Do not restate their procedures here.
 - `$submit` owns the human-gated pull-request tail, CodeRabbit loop, and closing report, but never merges product code.
 - `$rig-atlas` owns complete generated documentation of the live rig and its fail-closed portable edition.
 
+Load `$orient` when David invokes it or asks for the bigger picture, definition of success, or decision-relevant task status.
+
 Use `$build` for every non-trivial change.
 Use `$pdw` for every delegated multi-step task, including thin teams.
 Use `$scout` before design when the question is what to build or whether an option is worth building.
