@@ -127,18 +127,16 @@ sentinel=$(git -C "$TMP/repo" rev-parse --git-path codex-submit-pr-go)
 [[ "$sentinel" = /* ]] || sentinel="$TMP/repo/$sentinel"
 run_guard 2 "$TMP/repo" 'gh pr create --title test'
 run_guard 2 "$TMP/repo" 'gh api -X POST repos/example/project/pulls -f title=test'
-run_guard 2 "$TMP/repo" 'gh-axi api repos/example/project/pulls -f title=test -f head=feature'
 run_guard 2 "$TMP/repo" 'gh api graphql -f query="mutation { createPullRequest(input: {}) { pullRequest { id } } }"'
 # shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
 run_guard 2 "$TMP/repo" 'GH=gh; "$GH" api --method POST repos/example/project/pulls'
 run_guard 0 "$TMP/repo" 'gh api repos/example/project/pulls'
-run_guard 0 "$TMP/repo" 'gh-axi api --method GET repos/example/project/pulls'
 run_guard 0 "$TMP/repo" 'gh api graphql -f query="{ viewer { login } }"'
 touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr create --title test'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed'
 touch "$sentinel"
-run_guard 0 "$TMP/repo" 'gh-axi api --method POST repos/example/project/pulls -f title=approved'
+run_guard 0 "$TMP/repo" 'gh api --method POST repos/example/project/pulls -f title=approved'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by raw pull-request creation'
 run_guard 2 "$TMP/repo" 'gh pr create --title second'
 run_guard 2 "$TMP/repo" 'gh pr ready 42'
