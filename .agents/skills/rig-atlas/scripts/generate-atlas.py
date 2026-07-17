@@ -53,9 +53,6 @@ def walked_skill_files(skill_dir: Path) -> list[Path]:
 
 def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
     relative = skill_dir.relative_to(root)
-    environment = os.environ.copy()
-    environment["GIT_CONFIG_GLOBAL"] = os.devnull
-    environment["GIT_CONFIG_NOSYSTEM"] = "1"
     command = [
         "git",
         "-C",
@@ -70,13 +67,11 @@ def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
             [*command, "--cached", "--", str(relative)],
             check=False,
             capture_output=True,
-            env=environment,
         )
         untracked = subprocess.run(
             [*command, "--others", "--exclude-standard", "--", str(relative)],
             check=False,
             capture_output=True,
-            env=environment,
         )
     except OSError:
         return None

@@ -137,9 +137,10 @@ git -C "$fixture" init -q
 git -C "$fixture" add -f .agents/skills/orient/fixtures/tracked.tmp
 printf '*.md\n' >"$tmp/global-ignore"
 git config -f "$tmp/global-gitconfig" core.excludesFile "$tmp/global-ignore"
+git config -f "$tmp/global-gitconfig" --add safe.directory "$fixture"
 
 generate() {
-  GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+  GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
     python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
 }
 
