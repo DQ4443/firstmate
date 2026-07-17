@@ -33,13 +33,7 @@ def auxiliary_skill_files(root: Path) -> list[Path]:
         skill_dir = primary.parent
         if skill_dir.name in SPINE:
             continue
-        files.append(primary)
-        evals = skill_dir / "evals.md"
-        if evals.is_file():
-            files.append(evals)
-        for directory in (skill_dir / "references", skill_dir / "scripts"):
-            if directory.is_dir():
-                files.extend(sorted(path for path in directory.rglob("*") if path.is_file()))
+        files.extend(sorted(path for path in skill_dir.rglob("*") if path.is_file()))
     return sorted(files)
 
 

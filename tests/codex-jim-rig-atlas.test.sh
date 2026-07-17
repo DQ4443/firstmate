@@ -118,9 +118,10 @@ for name in pdw lavish rig-atlas; do
   mkdir -p "$fixture/.agents/skills/$name/scripts"
   printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/$name/scripts/load-bearing.sh"
 done
-mkdir -p "$fixture/.agents/skills/orient/references" "$fixture/.agents/skills/orient/scripts"
+mkdir -p "$fixture/.agents/skills/orient/fixtures" "$fixture/.agents/skills/orient/references" "$fixture/.agents/skills/orient/scripts"
 printf '%s\n' '---' 'name: orient' 'description: Fixture domain skill.' '---' '' '# Orient' >"$fixture/.agents/skills/orient/SKILL.md"
 printf '# Evals for orient\n' >"$fixture/.agents/skills/orient/evals.md"
+printf '# Orient regression fixture\n' >"$fixture/.agents/skills/orient/fixtures/corrected.md"
 printf '# Orient evidence rules\n' >"$fixture/.agents/skills/orient/references/evidence.md"
 printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/orient/scripts/check.sh"
 
@@ -167,6 +168,7 @@ assert len(re.findall(r"^### `\.agents/skills/[^/]+/SKILL\.md`$", appendix_a, re
 for relative in (
     ".agents/skills/orient/SKILL.md",
     ".agents/skills/orient/evals.md",
+    ".agents/skills/orient/fixtures/corrected.md",
     ".agents/skills/orient/references/evidence.md",
     ".agents/skills/orient/scripts/check.sh",
 ):
@@ -192,6 +194,14 @@ if generate --verify >"$tmp/auxiliary-skill-drift.out" 2>&1; then
   fail "auxiliary skill input drift passed verification"
 fi
 cp "$tmp/orient-check.saved" "$fixture/.agents/skills/orient/scripts/check.sh"
+generate >/dev/null
+
+cp "$fixture/.agents/skills/orient/fixtures/corrected.md" "$tmp/orient-fixture.saved"
+printf '\nMUTATED FIXTURE INPUT\n' >>"$fixture/.agents/skills/orient/fixtures/corrected.md"
+if generate --verify >"$tmp/auxiliary-fixture-drift.out" 2>&1; then
+  fail "auxiliary skill fixture drift passed verification"
+fi
+cp "$tmp/orient-fixture.saved" "$fixture/.agents/skills/orient/fixtures/corrected.md"
 generate >/dev/null
 
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" >"$tmp/adaptation.out"

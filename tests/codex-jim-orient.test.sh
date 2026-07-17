@@ -51,7 +51,7 @@ verify_skill() {
 
 verify_output_structure() {
   local file=$1
-  local heading_lines headings first_nonblank bigger success current next bigger_text
+  local heading_lines headings first_nonblank bigger success current next bigger_text bigger_first
   heading_lines=$(grep -En '^#{1,6}[[:space:]]+' "$file" || true)
   headings=$(printf '%s\n' "$heading_lines" | cut -d: -f2-)
   [[ "$headings" == $'## Bigger picture\n## Success\n## Current status\n## Next steps' ]] || return 1
@@ -63,6 +63,8 @@ verify_output_structure() {
   [[ "$first_nonblank" == "$bigger" ]] || return 1
   bigger_text=$(sed -n "$((bigger + 1)),$((success - 1))p" "$file")
   [[ -n "${bigger_text//[[:space:]]/}" ]] || return 1
+  bigger_first=$(printf '%s\n' "$bigger_text" | grep -m1 '[^[:space:]]')
+  printf '%s\n' "$bigger_first" | grep -Eq '^[[:space:]]*ENG-[0-9]+' && return 1
   printf '%s\n' "$bigger_text" |
     grep -Eiq 'blocked|blocker|dependenc|depends on|waiting|awaiting|pending|in progress|must finish first|branch|commit|head [0-9a-f]|evidence|E[0-5]|PR #[0-9]+|merged' && return 1
   [[ "$bigger" -lt "$success" && "$success" -lt "$current" && "$current" -lt "$next" ]] || return 1
@@ -135,6 +137,14 @@ if verify_output_structure "$TMP/status-first.md"; then
   fail 'status language before the practical goal survived the structure verifier'
 fi
 
+cp "$GOOD_FIXTURE" "$TMP/ticket-mechanism-first.md"
+sed -i.bak '/^## Bigger picture$/a\
+ENG-330 carries a selected mode into forward simulation.' "$TMP/ticket-mechanism-first.md"
+rm -f "$TMP/ticket-mechanism-first.md.bak"
+if verify_output_structure "$TMP/ticket-mechanism-first.md"; then
+  fail 'ticket-mechanism-first Bigger picture survived the structure verifier'
+fi
+
 cp "$GOOD_FIXTURE" "$TMP/dependency-first.md"
 sed -i.bak '/^## Bigger picture$/a\
 ENG-330 depends on ENG-331.' "$TMP/dependency-first.md"
@@ -151,7 +161,7 @@ rm -f "$TMP/extra-heading.md.bak"
 if verify_output_structure "$TMP/extra-heading.md"; then
   fail 'an extra heading survived the structure verifier'
 fi
-printf 'ok - missing, out-of-order, status-first, dependency-first, and extra-heading near misses fail closed\n'
+printf 'ok - missing, out-of-order, status-first, ticket-mechanism-first, dependency-first, and extra-heading near misses fail closed\n'
 
 cp "$SKILL" "$TMP/skill.md"
 sed -i.bak '/End with a literal `NEXT_STEP:` line\./d' "$TMP/skill.md"

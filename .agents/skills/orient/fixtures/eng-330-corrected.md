@@ -1,7 +1,7 @@
 ## Bigger picture
 
-ENG-330 carries the optical mode chosen from an uploaded waveguide into a forward electromagnetic simulation.
-Practically, a user should select a mode once and see how that same mode propagates, with fields and a compact physical summary they can trust.
+A user should select an optical mode once and see how that same mode propagates, with fields and a compact physical summary they can trust.
+ENG-330 carries that chosen mode from the uploaded waveguide into the forward electromagnetic simulation.
 
 ## Success
 
