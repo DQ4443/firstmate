@@ -138,11 +138,24 @@ git -C "$fixture" add -f .agents/skills/orient/fixtures/tracked.tmp
 printf '*.md\n*.sh\n' >"$fixture/.git/info/exclude"
 printf '*.md\n' >"$tmp/global-ignore"
 git config -f "$tmp/global-gitconfig" core.excludesFile "$tmp/global-ignore"
+set +e
+GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$fixture" status >"$tmp/assume-owner-probe.out" 2>&1
+assume_owner_rc=$?
+set -e
+assume_owner_env=
+if [ "$assume_owner_rc" -ne 0 ] && grep -qi 'dubious ownership' "$tmp/assume-owner-probe.out"; then
+  assume_owner_env=1
+fi
 git config -f "$tmp/global-gitconfig" --add safe.directory "$fixture"
 
 generate() {
-  GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
-    python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  if [ "$assume_owner_env" = 1 ]; then
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+      python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  else
+    GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+      python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  fi
 }
 
 generate >"$tmp/generate.out"
