@@ -156,14 +156,14 @@ remove_grok_turnend_auth() {
   rm -f "$hooks_dir/$token"
 }
 
-# Resolve the PR number for a worktree branch via gh-axi. Echoes the number on a
+# Resolve the PR number for a worktree branch via gh. Echoes the number on a
 # single match and returns 0; returns non-zero on no match or any lookup failure,
 # so the caller treats it as "no PR found" (fail-safe).
 pr_number_from_branch() {
-  local branch=$1 out n
+  local branch=$1 n
   [ -n "$branch" ] && [ "$branch" != HEAD ] || return 1
-  out=$( cd "$WT" && gh-axi pr list --state all --head "$branch" --limit 1 2>/dev/null ) || return 1
-  n=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\),.*/\1/p' | head -1)
+  n=$(cd "$WT" && gh pr list --state all --head "$branch" --limit 1 --json number \
+    --jq 'if length == 1 then .[0].number else empty end' 2>/dev/null) || return 1
   [ -n "$n" ] || return 1
   printf '%s' "$n"
 }
@@ -232,17 +232,16 @@ EOF
 # current work is not contained in the PR head, no PR is found, or any gh error
 # occurs - the caller then falls back to the content check.
 pr_is_merged() {
-  local branch=$1 target view state head current
+  local branch=$1 target parsed state head current
   if [ -n "$PR_URL" ]; then
     target=$PR_URL
   else
     target=$(pr_number_from_branch "$branch") || return 1
   fi
   [ -n "$target" ] || return 1
-  view=$(cd "$WT" && gh pr view "$target" --json state,headRefOid -q '.state + "\t" + .headRefOid' 2>/dev/null) || return 1
-  state=${view%%$'\t'*}
-  head=${view#*$'\t'}
-  [ "$state" != "$view" ] || return 1
+  parsed=$(cd "$WT" && gh pr view "$target" --json state,headRefOid \
+    --jq '[.state, .headRefOid] | @tsv' 2>/dev/null) || return 1
+  IFS=$'\t' read -r state head <<< "$parsed"
   case "$state" in
     MERGED|merged) ;;
     *) return 1 ;;

@@ -20,7 +20,10 @@ David suspects firstmate has drifted from reality: a ghosted thread, a stalled i
 
 5. Backlog vs reality. data/backlog.md is the source of truth for what is in flight, not this conversation. Every In-flight entry with a runId: confirm it is actually running; resume a stalled one via resumeFromRunId rather than redoing finished phases. Reconcile section placement (In progress = ball with firstmate; Your word = waiting on David).
 
-6. PR and CI awareness. Refresh open PRs and CI for the active repos (`gh pr list --repo <repo> --state open --json number,title,statusCheckRollup,reviewDecision,mergeStateStatus`). Surface only what needs David: a red check on his PR, a review that unblocks a merge, a newly CLEAN mergeable PR. Never merge, push, or comment from this sweep.
+6. PR and CI awareness. Refresh open pull requests for the active repos with `gh pr list --repo <repo> --state open --json number,title,reviewDecision,mergeStateStatus`, then inspect each returned pull request with `gh pr checks --repo <repo> <number> --json name,state,bucket,link,description`.
+Keep the list query to PR metadata, then inspect checks per pull request and parse their `bucket` values. This is an intentional per-PR bucket policy, not a `gh pr list` capability claim.
+Surface only what needs David: a red check on his pull request, a review that unblocks a merge, or a newly CLEAN mergeable pull request.
+Never merge, push, or comment from this sweep.
 
 7. Report. One concise digest, PT timestamps: what is waiting on David, what was stalled and what you did about it, anything newly needing his decision. Say nothing about healthy items. If everything is clean, say so in a single line.
 

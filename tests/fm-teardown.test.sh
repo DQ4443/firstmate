@@ -34,6 +34,7 @@
 #   (o) fm-pr-check rerun after HEAD moved                      -> no stale pr_head
 #   (p) fm-pr-check when local HEAD lags                        -> record remote PR head
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
+#   (r) merged PR discovery works without an external jq binary -> ALLOW  (native gh --jq)
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -69,26 +70,19 @@ SH
 # tmux kill-window etc.: succeed silently.
 exit 0
 SH
-  # Default gh-axi mock: no PR is associated with the branch, and viewing any PR
+  # Default gh mock: no PR is associated with the branch, and viewing any PR
   # number fails. This keeps the landed-work check hermetic (never reaching the real
-  # gh-axi) and represents the common "no GitHub PR" baseline. Tests that need a
+  # gh) and represents the common "no GitHub PR" baseline. Tests that need a
   # merged PR or a lookup error override this file with the helpers below.
-  cat > "$fakebin/gh-axi" <<'SH'
-#!/usr/bin/env bash
-case "${1:-} ${2:-}" in
-  "pr list") printf '%s\n' "count: 0 (showing first 0)" "pull_requests[]: []" ; exit 0 ;;
-  "pr view") echo "error: pull request not found" >&2 ; exit 1 ;;
-esac
-exit 0
-SH
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
+  "pr list") printf '%s\n' '[]' ; exit 0 ;;
   "pr view") echo "error: pull request not found" >&2 ; exit 1 ;;
 esac
 exit 0
 SH
-  chmod +x "$fakebin/treehouse" "$fakebin/tmux" "$fakebin/gh-axi" "$fakebin/gh"
+  chmod +x "$fakebin/treehouse" "$fakebin/tmux" "$fakebin/gh"
 
   # Bare origin so the clone has an `origin` remote and origin/HEAD.
   git init -q --bare "$case_dir/origin.git"
@@ -182,22 +176,19 @@ land_on_origin_main() {
 # Override GitHub lookups to report PR 7 as merged with the supplied head.
 add_gh_pr_merged_for_head() {
   local case_dir=$1 head=$2
-  cat > "$case_dir/fakebin/gh-axi" <<'SH'
-#!/usr/bin/env bash
-case "${1:-} ${2:-}" in
-  "pr list")
-    printf '%s\n' "count: 1 (showing first 1)" "pull_requests[1]{number,state}:" "  7,merged" ; exit 0 ;;
-  "pr view")
-    printf '%s\n' "pull_request:" "  number: 7" "  state: merged" '  merged: "2026-06-26T00:00:00Z"' ; exit 0 ;;
-esac
-exit 0
-SH
   cat > "$case_dir/fakebin/gh" <<SH
 #!/usr/bin/env bash
 case "\${1:-} \${2:-}" in
+  "pr list")
+    case " \$* " in
+      *" --jq "*) printf '%s\n' '7' ; exit 0 ;;
+      *) printf '%s\n' '[{"number":7}]' ; exit 0 ;;
+    esac
+    ;;
   "pr view")
     case " \$* " in
-      *"state,headRefOid"*) printf '%s\t%s\n' 'MERGED' '$head' ; exit 0 ;;
+      *"state,headRefOid"*" --jq "*) printf '%s\t%s\n' 'MERGED' '$head' ; exit 0 ;;
+      *"state,headRefOid"*) printf '%s\n' '{"state":"MERGED","headRefOid":"$head"}' ; exit 0 ;;
       *"headRefOid"*) printf '%s\n' '$head' ; exit 0 ;;
     esac
     ;;
@@ -205,7 +196,7 @@ esac
 echo "error: pull request not found" >&2
 exit 1
 SH
-  chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
+  chmod +x "$case_dir/fakebin/gh"
 }
 
 append_pr_meta_for_current_head() {
@@ -240,20 +231,15 @@ land_equivalent_patch_on_origin_branch() {
   git -C "$case_dir/project" rev-parse "refs/remotes/origin/$branch"
 }
 
-# Override gh-axi so every call fails, simulating an API/network error.
-add_gh_axi_error() {
+# Override gh so every call fails, simulating an API/network error.
+add_gh_error() {
   local case_dir=$1
-  cat > "$case_dir/fakebin/gh-axi" <<'SH'
-#!/usr/bin/env bash
-echo "error: gh-axi unavailable" >&2
-exit 1
-SH
   cat > "$case_dir/fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "error: gh unavailable" >&2
 exit 1
 SH
-  chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
+  chmod +x "$case_dir/fakebin/gh"
 }
 
 # Run teardown with PATH mocking. Args: case_dir [extra args...]
@@ -382,7 +368,7 @@ test_no_mistakes_truly_unpushed_refuses() {
   local case_dir rc
   case_dir=$(make_case nm-unpushed)
   write_meta "$case_dir" no-mistakes ship
-  # Real content that is not pushed, has no PR (default gh-axi mock), and never
+  # Real content that is not pushed, has no PR (default gh mock), and never
   # landed on origin/main: genuinely unlanded work that must still refuse.
   wt_commit_file "$case_dir" feature.txt hello "unpushed work"
 
@@ -408,6 +394,12 @@ test_squash_merged_branch_deleted_allows() {
   append_pr_meta_for_current_head "$case_dir"
   pr_head=$(git -C "$case_dir/wt" rev-parse HEAD)
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
+  cat > "$case_dir/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+echo "external jq must not be called by native-gh teardown" >&2
+exit 127
+SH
+  chmod +x "$case_dir/fakebin/jq"
 
   set +e
   run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
@@ -456,6 +448,12 @@ test_no_pr_recorded_discovers_merged_pr_by_branch_allows() {
   pr_head=$(commit_tree_from_wt_head "$case_dir" "$local_head" "no-mistakes auto-fix")
   land_on_origin_main "$case_dir" feature.txt hello
   add_gh_pr_merged_for_head "$case_dir" "$pr_head"
+  cat > "$case_dir/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+echo "external jq must not be called by native-gh teardown" >&2
+exit 127
+SH
+  chmod +x "$case_dir/fakebin/jq"
   # No append_pr_meta_* call: state/task-x1.meta has no pr= or pr_head= line.
 
   ! grep -qE '^(pr|pr_head)=' "$case_dir/state/task-x1.meta" \
@@ -575,7 +573,7 @@ test_content_in_default_fallback_allows() {
   local case_dir rc
   case_dir=$(make_case content-landed)
   write_meta "$case_dir" no-mistakes ship
-  # No pr= recorded and the default gh-axi mock reports no PR, so the merged-PR path
+  # No pr= recorded and the default gh mock reports no PR, so the merged-PR path
   # cannot fire and the content check must carry it. The branch adds feature.txt, and
   # the same net change has independently landed on origin/main via a squash commit.
   wt_commit_file "$case_dir" feature.txt hello "add feature"
@@ -643,7 +641,7 @@ test_gh_error_and_content_absent_refuses() {
   # Real content not pushed, the PR lookup errors, and origin/main never gained the
   # content. The fail-safe must refuse rather than allow on a transient gh failure.
   wt_commit_file "$case_dir" feature.txt hello "add feature"
-  add_gh_axi_error "$case_dir"
+  add_gh_error "$case_dir"
 
   set +e
   run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
