@@ -33,6 +33,24 @@ if grep -in "$retired_tool" "${owned_files[@]/#/$ROOT/}"; then
 fi
 pass 'owned policy and documentation use native GitHub CLI guidance'
 
+if [[ -e "$ROOT/.github/workflows/no-mistakes-required.yml" ]]; then
+  fail 'retired no-mistakes provenance workflow is still active'
+fi
+
+provenance_marker='Updates from [git push no-mistakes](https://github.com/kunchenguid/no-mistakes)'
+if grep -FRq -- "$provenance_marker" "$ROOT/.github/workflows"; then
+  fail 'an active workflow still requires the retired no-mistakes provenance marker'
+fi
+
+ci="$ROOT/.github/workflows/ci.yml"
+grep -Fq 'name: Lint shell scripts' "$ci" \
+  || fail 'CI no longer retains the shell lint safety gate'
+grep -Fq 'name: Behavior tests' "$ci" \
+  || fail 'CI no longer retains the behavior test safety gate'
+grep -Fq 'name: Repo invariants' "$ci" \
+  || fail 'CI no longer retains the repository invariant safety gate'
+pass 'native GitHub pull requests retain the unrelated CI safety gates'
+
 submit="$ROOT/.agents/skills/submit/SKILL.md"
 sync="$ROOT/.agents/skills/sync/SKILL.md"
 
