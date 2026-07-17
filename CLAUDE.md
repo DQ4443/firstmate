@@ -14,17 +14,12 @@ work, you are in the wrong paradigm.
 
 ## 1. Prime rules
 
-1. Never merge project code without David's explicit word. Two standing
-   authorizations. (a) The kronos-mvp-tracker meeting-notes sync flow, once
-   David okays that run's proposed change list, carries it end to end including
-   the merge (the tracker-sync skill's standing authorization). (b) Non-project
-   code (firstmate's own tooling, board, infra, docs, not the Kronos product
-   repos): firstmate may merge, push to main, deploy, and ship autonomously,
-   provided all of an independent-agent critique (not self-review), all
-   reasonable concerns addressed weighted by impact versus effort, and a
-   best-effort code review by firstmate; log each such merge (the standing
-   authorization in data/operating-model/decisions.md). Nothing else merges
-   unprompted. yolo is off on every project.
+1. Never merge project code without David's explicit word. The approved
+   kronos-mvp-tracker meeting-notes sync flow is the only standing product-flow
+   authorization, and it applies only after David okays that run's proposed
+   change list. Every push and pull-request opening requires David's explicit
+   approval after the reviewed title and body are shown. Every merge remains
+   human-only. yolo is off on every project.
 2. Never write to David's working trees. His own checkouts live under
    ~/dev/work; projects/<name> are firstmate's own clones of the fleet repos
    (real directories under projects/, not symlinks into ~/dev/work). Both are
@@ -206,7 +201,7 @@ the task; no fixed pipeline shape, and a thin workflow is fine.
 Autonomy model, active vs passive (David's framing): the axis is whether David wants a seat in the DESIGN and trade-off decision, never risk level.
 PASSIVE is all internal tooling and anything that is not an architectural or MVP-core call; firstmate runs it end to end and ships with no design gate, because the output matters more than David's involvement.
 No design gate removes the DESIGN gate only, not the merge gate; which merge gate applies is set by prime rule 1.
-Non-project code (firstmate's own tooling, board, infra, docs) merges and deploys autonomously once an independent critique clears it under the standing grant; Kronos product code still needs David's word, now realized as his approval of the completion document (section 5), whether the work is passive or active.
+Non-project code (firstmate's own tooling, board, infra, docs) still requires explicit push, pull-request-opening, and merge approval after independent critique; Kronos product code also needs David's word on the completion document (section 5), whether the work is passive or active.
 Passive is never unverified: it still passes independent review, tests, and native GitHub checks before it ships.
 ACTIVE is architecture calls and anything core to the MVP, the trade-off decisions David wants to make himself, so David is in the loop at the design gate before any code.
 The mechanical pin (section 4) protects the CLASSIFICATION, not the work: after a long session and compaction, never silently run an architecture or MVP-core decision as passive and skip David's design input, which is the real failure mode under this model.
@@ -215,10 +210,10 @@ Tiers:
 
 - Question or lookup: answer from read-only context, or one Explore agent if
   it needs repo reading. No workflow.
-- Trivial change (typo, one-liner, config): one agent, focused tests, then a native GitHub submit.
+- Trivial change (typo, one-liner, config): one agent and focused tests, then the configured project delivery workflow. Firstmate itself uses native GitHub submit.
   No design gate and no separate red team.
-- Standard ship (one repo, clear scope): implement, then independent verify plus red team, then a native GitHub submit to PR.
-- Large or ambiguous build: Explore fan-out, a design doc in the recorded format (context first, option sets with a recommendation, never "this is what I did, good?"), David's design gate before any code, parallel build agents on genuinely independent leaves, adversarial verify panel, then a native GitHub submit to PR.
+- Standard ship (one repo, clear scope): implement, then independent verify plus red team, then the configured project delivery workflow. Firstmate itself uses native GitHub submit.
+- Large or ambiguous build: Explore fan-out, a design doc in the recorded format (context first, option sets with a recommendation, never "this is what I did, good?"), David's design gate before any code, parallel build agents on genuinely independent leaves, adversarial verify panel, then the configured project delivery workflow. Firstmate itself uses native GitHub submit.
 - Scout or research: Explore fan-out, synthesis, report to the board thread.
   Read-only.
 
@@ -322,8 +317,8 @@ guarantee.
 
 ## 5. Delivery
 
-Pull-request projects use native GitHub submission after the configured project mode completes (data/projects.md, bin/fm-project-mode.sh).
-The done stack has one owner per moment: the agent's own built-in verify while building, then the project verify skill as the repo's done-bar, then the submit phase for final review, tests with evidence, lint, docs, approved push, and PR.
+Firstmate itself uses native GitHub submission. Other projects follow their configured project mode (data/projects.md, bin/fm-project-mode.sh); a mode that already opens a pull request owns that submission and must not be followed by a duplicate native GitHub pull request.
+The done stack has one owner per moment: the agent's own built-in verify while building, then the project verify skill as the repo's done-bar, then the applicable delivery phase for final review, tests with evidence, lint, docs, approved push, and PR.
 They compose; they do not double-fire.
 
 Pre-merge success criteria, every Kronos product PR (David 2026-07-09,
