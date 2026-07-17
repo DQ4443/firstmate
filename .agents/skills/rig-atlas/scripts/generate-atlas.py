@@ -7,6 +7,8 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,7 +26,80 @@ def sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
+TRANSIENT_DIRS = {"__pycache__", "state", "data", ".lavish", ".no-mistakes"}
+
+
+def transient_skill_file(skill_dir: Path, candidate: Path) -> bool:
+    local = candidate.relative_to(skill_dir)
+    return (
+        any(part in TRANSIENT_DIRS for part in local.parts)
+        or candidate.name in {".DS_Store", ".env"}
+        or candidate.suffix == ".pyc"
+        or candidate.name.endswith(("~", ".swp", ".swo", ".tmp"))
+    )
+
+
+def git_skill_files(root: Path, skill_dir: Path) -> list[Path]:
+    relative = skill_dir.relative_to(root)
+    command = [
+        "git",
+        "-C",
+        str(root),
+        "ls-files",
+        "-z",
+    ]
+    try:
+        tracked = subprocess.run(
+            [*command, "--cached", "--", str(relative)],
+            check=False,
+            capture_output=True,
+        )
+        untracked = subprocess.run(
+            [*command, "--others", "--exclude-per-directory=.gitignore", "--", str(relative)],
+            check=False,
+            capture_output=True,
+        )
+    except OSError as error:
+        raise ValueError("cannot inventory skill files without a usable Git index") from error
+    if tracked.returncode != 0 or untracked.returncode != 0:
+        raise ValueError("cannot inventory skill files without a usable Git index")
+
+    tracked_files = {
+        root / os.fsdecode(item)
+        for item in tracked.stdout.split(b"\0")
+        if item
+    }
+    untracked_files = {
+        root / os.fsdecode(item)
+        for item in untracked.stdout.split(b"\0")
+        if item
+    }
+    return sorted(
+        candidate
+        for candidate in tracked_files | untracked_files
+        if candidate.is_file()
+        and (candidate in tracked_files or not transient_skill_file(skill_dir, candidate))
+    )
+
+
+def visible_skill_files(root: Path, skill_dir: Path) -> list[Path]:
+    return git_skill_files(root, skill_dir)
+
+
+def auxiliary_skill_files(root: Path) -> list[Path]:
+    skill_root = root / ".agents" / "skills"
+    files: list[Path] = []
+    if not skill_root.is_dir():
+        return files
+    for primary in sorted(skill_root.glob("*/SKILL.md")):
+        skill_dir = primary.parent
+        if skill_dir.name in SPINE:
+            continue
+        files.extend(visible_skill_files(root, skill_dir))
+    return sorted(files)
+
+
+def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path], list[Path]]:
     skills: list[Path] = []
     missing: list[str] = []
     for skill in SPINE:
@@ -62,7 +137,7 @@ def required_live_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]
     hooks = root / ".codex" / "hooks"
     if hooks.is_dir():
         harness.extend(sorted(path for path in hooks.rglob("*") if path.is_file()))
-    return sorted(skills), sorted(roles), sorted(harness)
+    return sorted(skills), auxiliary_skill_files(root), sorted(roles), sorted(harness)
 
 
 def append_files(lines: list[str], heading: str, root: Path, files: list[Path]) -> None:
@@ -72,11 +147,26 @@ def append_files(lines: list[str], heading: str, root: Path, files: list[Path]) 
         lines.extend(["", f"### `{relative}`", "", "````text", path.read_text(encoding="utf-8").rstrip(), "````"])
 
 
+def append_inventory(lines: list[str], root: Path, files: list[Path]) -> None:
+    lines.extend([
+        "",
+        "## Auxiliary and domain skill inventory",
+        "",
+        "Non-spine skills stay outside Appendix A. Their live files are deterministic integrity inputs.",
+        "",
+        "| Live input | SHA-256 |",
+        "| --- | --- |",
+    ])
+    for path in files:
+        relative = path.relative_to(root)
+        lines.append(f"| `{relative}` | `{sha_bytes(path.read_bytes())}` |")
+
+
 def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[str, str]]:
     inventory, source_bodies, main_prose = AUDIT.inspect(source)
     if inventory["errors"]:
         raise ValueError(f"source audit failed: {inventory['errors']}")
-    skills, roles, harness = required_live_files(root)
+    skills, auxiliary_skills, roles, harness = required_live_files(root)
     memory_dir = state / "portable-memory"
     memory_inputs: list[Path] = []
     for name in inventory["include_both"]:
@@ -98,6 +188,7 @@ def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[s
     lines = [adapted_prose, "", "## Adaptation manifest", "", "The source prose and all include-both memories use explicit human and harness substitutions.", ""]
     for rule, count in sorted(substitutions.items()):
         lines.append(f"- `{rule}`: {count}")
+    append_inventory(lines, root, auxiliary_skills)
     append_files(lines, "## Appendix A: nine spine skills and their live references", root, skills)
     append_files(lines, "## Appendix B: three Codex role definitions", root, roles)
     append_files(lines, "## Appendix C: live Codex harness configuration and hooks", root, harness)
@@ -118,7 +209,7 @@ def expected_atlas(root: Path, state: Path, source: Path) -> tuple[bytes, dict[s
         generator_label = generator
     lines.extend(["", "## Appendix E: this document's generator", "", f"Tracked generator: `{generator_label}`.", "", "````python", generator.read_text(encoding="utf-8").rstrip(), "````", ""])
     output = "\n".join(lines).encode()
-    inputs = {str(path.relative_to(root)): sha_bytes(path.read_bytes()) for path in skills + roles + harness}
+    inputs = {str(path.relative_to(root)): sha_bytes(path.read_bytes()) for path in skills + auxiliary_skills + roles + harness}
     inputs.update({f"state/rig/portable-memory/{path.name}": sha_bytes(path.read_bytes()) for path in memory_inputs})
     inputs["source"] = inventory["source_sha256"]
     return output, inputs

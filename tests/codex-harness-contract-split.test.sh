@@ -80,7 +80,7 @@ import re
 import sys
 
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-expected = {"build", "pdw", "scout", "explore", "websearch", "lavish", "oat", "submit", "rig-atlas"}
+expected = {"build", "pdw", "scout", "explore", "websearch", "lavish", "oat", "submit", "rig-atlas", "orient"}
 
 def valid(value):
     modules = set(re.findall(r"\$([a-z][a-z0-9-]*)", value))

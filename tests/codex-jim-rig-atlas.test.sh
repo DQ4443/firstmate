@@ -118,9 +118,44 @@ for name in pdw lavish rig-atlas; do
   mkdir -p "$fixture/.agents/skills/$name/scripts"
   printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/$name/scripts/load-bearing.sh"
 done
+mkdir -p "$fixture/.agents/skills/orient/fixtures" "$fixture/.agents/skills/orient/references" "$fixture/.agents/skills/orient/scripts"
+printf '%s\n' '---' 'name: orient' 'description: Fixture domain skill.' '---' '' '# Orient' >"$fixture/.agents/skills/orient/SKILL.md"
+printf '# Evals for orient\n' >"$fixture/.agents/skills/orient/evals.md"
+printf '# Orient regression fixture\n' >"$fixture/.agents/skills/orient/fixtures/corrected.md"
+printf '# Orient evidence rules\n' >"$fixture/.agents/skills/orient/references/evidence.md"
+printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/orient/scripts/check.sh"
+printf '%s\n' '.DS_Store' '__pycache__/' '*~' 'projects/' >"$fixture/.gitignore"
+mkdir -p "$fixture/.agents/skills/orient/__pycache__"
+printf 'ignored macOS metadata\n' >"$fixture/.agents/skills/orient/.DS_Store"
+printf 'ignored bytecode\n' >"$fixture/.agents/skills/orient/__pycache__/orient.pyc"
+printf 'ignored editor backup\n' >"$fixture/.agents/skills/orient/evals.md~"
+mkdir -p "$fixture/.agents/skills/orient/projects/runtime"
+printf 'ignored repository-local runtime\n' >"$fixture/.agents/skills/orient/projects/runtime/cache.json"
+printf 'tracked transient contract\n' >"$fixture/.agents/skills/orient/fixtures/tracked.tmp"
+printf 'untracked transient scratch\n' >"$fixture/.agents/skills/orient/fixtures/scratch.tmp"
+git -C "$fixture" init -q
+git -C "$fixture" add -f .agents/skills/orient/fixtures/tracked.tmp
+printf '*.md\n*.sh\n' >"$fixture/.git/info/exclude"
+printf '*.md\n' >"$tmp/global-ignore"
+git config -f "$tmp/global-gitconfig" core.excludesFile "$tmp/global-ignore"
+set +e
+GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$fixture" status >"$tmp/assume-owner-probe.out" 2>&1
+assume_owner_rc=$?
+set -e
+assume_owner_env=
+if [ "$assume_owner_rc" -ne 0 ] && grep -qi 'dubious ownership' "$tmp/assume-owner-probe.out"; then
+  assume_owner_env=1
+fi
+git config -f "$tmp/global-gitconfig" --add safe.directory "$fixture"
 
 generate() {
-  python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  if [ "$assume_owner_env" = 1 ]; then
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+      python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  else
+    GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+      python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  fi
 }
 
 generate >"$tmp/generate.out"
@@ -130,12 +165,30 @@ generate --verify >"$tmp/verify.out"
 [ ! -f "$tmp/state/rig-atlas-portable.md" ] || fail "portable twin unexpectedly exists"
 [ "$(wc -c <"$tmp/state/rig-atlas.md" | tr -d ' ')" -gt 100000 ] || fail "atlas collapsed into a summary"
 
-python3 - "$tmp/state/rig-atlas.md" <<'PY'
+python_bin=$(command -v python3)
+mkdir -p "$tmp/no-git-bin"
+set +e
+PATH="$tmp/no-git-bin" "$python_bin" "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/no-git-state" --source "$source_file" >"$tmp/no-git.out" 2>&1
+no_git_rc=$?
+set -e
+if [ "$no_git_rc" -eq 0 ]; then
+  fail "atlas generation accepted an unprovable non-Git inventory"
+fi
+[ "$no_git_rc" -eq 2 ] || fail "non-Git inventory refusal did not use the controlled CLI exit"
+grep -q 'cannot inventory skill files without a usable Git index' "$tmp/no-git.out" || fail "non-Git inventory refusal was not explicit"
+if grep -q 'Traceback' "$tmp/no-git.out"; then
+  fail "non-Git inventory refusal leaked a traceback"
+fi
+
+python3 - "$tmp/state/rig-atlas.md" "$tmp/state/rig-atlas.integrity.json" <<'PY'
+import hashlib
+import json
 import pathlib
 import re
 import sys
 
 text = pathlib.Path(sys.argv[1]).read_text()
+integrity = json.loads(pathlib.Path(sys.argv[2]).read_text())
 headings = [
     "## 0. Current-state atlas",
     "## 1. System model",
@@ -151,6 +204,32 @@ headings = [
 ]
 positions = [text.index(heading) for heading in headings]
 assert positions == sorted(positions)
+domain_heading = "## Auxiliary and domain skill inventory"
+assert domain_heading in text
+assert text.index(domain_heading) < text.index("## Appendix A: nine spine skills and their live references")
+appendix_a = text.split("## Appendix A: nine spine skills and their live references", 1)[1].split("## Appendix B:", 1)[0]
+assert len(re.findall(r"^### `\.agents/skills/[^/]+/SKILL\.md`$", appendix_a, re.M)) == 9
+for relative in (
+    ".agents/skills/orient/SKILL.md",
+    ".agents/skills/orient/evals.md",
+    ".agents/skills/orient/fixtures/corrected.md",
+    ".agents/skills/orient/fixtures/tracked.tmp",
+    ".agents/skills/orient/references/evidence.md",
+    ".agents/skills/orient/scripts/check.sh",
+):
+    digest = hashlib.sha256((pathlib.Path(sys.argv[1]).parents[1] / "repo" / relative).read_bytes()).hexdigest()
+    assert f"`{relative}`" in text
+    assert digest in text
+    assert integrity["inputs"][relative] == digest
+for ignored in (
+    ".agents/skills/orient/.DS_Store",
+    ".agents/skills/orient/__pycache__/orient.pyc",
+    ".agents/skills/orient/evals.md~",
+    ".agents/skills/orient/fixtures/scratch.tmp",
+    ".agents/skills/orient/projects/runtime/cache.json",
+):
+    assert ignored not in text
+    assert ignored not in integrity["inputs"]
 assert len(re.findall(r"^#### `memory/", text, re.M)) == 47
 assert len(re.findall(r"^- `source-full-only-", text, re.M)) == 47
 assert len(re.findall(r"^- `source-withheld-exclude-", text, re.M)) == 41
@@ -162,6 +241,25 @@ assert ".codex/hooks.json" in text
 for name in ("pdw", "lavish", "rig-atlas"):
     assert f".agents/skills/{name}/scripts/load-bearing.sh" in text
 PY
+
+cp "$fixture/.agents/skills/orient/scripts/check.sh" "$tmp/orient-check.saved"
+printf '\n# MUTATED AUXILIARY INPUT\n' >>"$fixture/.agents/skills/orient/scripts/check.sh"
+if generate --verify >"$tmp/auxiliary-skill-drift.out" 2>&1; then
+  fail "auxiliary skill input drift passed verification"
+fi
+cp "$tmp/orient-check.saved" "$fixture/.agents/skills/orient/scripts/check.sh"
+generate >/dev/null
+
+cp "$fixture/.agents/skills/orient/fixtures/corrected.md" "$tmp/orient-fixture.saved"
+printf '\nMUTATED FIXTURE INPUT\n' >>"$fixture/.agents/skills/orient/fixtures/corrected.md"
+if generate --verify >"$tmp/auxiliary-fixture-drift.out" 2>&1; then
+  fail "auxiliary skill fixture drift passed verification"
+fi
+cp "$tmp/orient-fixture.saved" "$fixture/.agents/skills/orient/fixtures/corrected.md"
+generate >/dev/null
+
+printf 'changed ignored metadata\n' >>"$fixture/.agents/skills/orient/.DS_Store"
+generate --verify >/dev/null || fail "ignored auxiliary artifact changed verification"
 
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" >"$tmp/adaptation.out"
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" --verify >"$tmp/adaptation-verify.out"
