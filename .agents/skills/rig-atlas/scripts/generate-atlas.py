@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +25,50 @@ def sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def visible_skill_files(root: Path, skill_dir: Path) -> list[Path]:
+    relative = skill_dir.relative_to(root)
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                str(relative),
+            ],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        result = None
+    if result is not None and result.returncode == 0:
+        return sorted(
+            candidate
+            for item in result.stdout.split(b"\0")
+            if item
+            for candidate in [root / item.decode("utf-8")]
+            if candidate.is_file()
+        )
+
+    def transient(candidate: Path) -> bool:
+        local = candidate.relative_to(skill_dir)
+        return (
+            "__pycache__" in local.parts
+            or candidate.name == ".DS_Store"
+            or candidate.suffix == ".pyc"
+            or candidate.name.endswith(("~", ".swp", ".swo", ".tmp"))
+        )
+
+    return sorted(
+        path for path in skill_dir.rglob("*") if path.is_file() and not transient(path)
+    )
+
+
 def auxiliary_skill_files(root: Path) -> list[Path]:
     skill_root = root / ".agents" / "skills"
     files: list[Path] = []
@@ -33,7 +78,7 @@ def auxiliary_skill_files(root: Path) -> list[Path]:
         skill_dir = primary.parent
         if skill_dir.name in SPINE:
             continue
-        files.extend(sorted(path for path in skill_dir.rglob("*") if path.is_file()))
+        files.extend(visible_skill_files(root, skill_dir))
     return sorted(files)
 
 

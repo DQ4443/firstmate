@@ -124,6 +124,12 @@ printf '# Evals for orient\n' >"$fixture/.agents/skills/orient/evals.md"
 printf '# Orient regression fixture\n' >"$fixture/.agents/skills/orient/fixtures/corrected.md"
 printf '# Orient evidence rules\n' >"$fixture/.agents/skills/orient/references/evidence.md"
 printf '#!/bin/sh\nexit 0\n' >"$fixture/.agents/skills/orient/scripts/check.sh"
+printf '%s\n' '.DS_Store' '__pycache__/' '*~' >"$fixture/.gitignore"
+mkdir -p "$fixture/.agents/skills/orient/__pycache__"
+printf 'ignored macOS metadata\n' >"$fixture/.agents/skills/orient/.DS_Store"
+printf 'ignored bytecode\n' >"$fixture/.agents/skills/orient/__pycache__/orient.pyc"
+printf 'ignored editor backup\n' >"$fixture/.agents/skills/orient/evals.md~"
+git -C "$fixture" init -q
 
 generate() {
   python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
@@ -176,6 +182,13 @@ for relative in (
     assert f"`{relative}`" in text
     assert digest in text
     assert integrity["inputs"][relative] == digest
+for ignored in (
+    ".agents/skills/orient/.DS_Store",
+    ".agents/skills/orient/__pycache__/orient.pyc",
+    ".agents/skills/orient/evals.md~",
+):
+    assert ignored not in text
+    assert ignored not in integrity["inputs"]
 assert len(re.findall(r"^#### `memory/", text, re.M)) == 47
 assert len(re.findall(r"^- `source-full-only-", text, re.M)) == 47
 assert len(re.findall(r"^- `source-withheld-exclude-", text, re.M)) == 41
@@ -203,6 +216,9 @@ if generate --verify >"$tmp/auxiliary-fixture-drift.out" 2>&1; then
 fi
 cp "$tmp/orient-fixture.saved" "$fixture/.agents/skills/orient/fixtures/corrected.md"
 generate >/dev/null
+
+printf 'changed ignored metadata\n' >>"$fixture/.agents/skills/orient/.DS_Store"
+generate --verify >/dev/null || fail "ignored auxiliary artifact changed verification"
 
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" >"$tmp/adaptation.out"
 python3 "$scripts/adaptation-audit.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" --verify >"$tmp/adaptation-verify.out"
