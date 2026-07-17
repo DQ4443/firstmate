@@ -130,9 +130,12 @@ printf 'ignored macOS metadata\n' >"$fixture/.agents/skills/orient/.DS_Store"
 printf 'ignored bytecode\n' >"$fixture/.agents/skills/orient/__pycache__/orient.pyc"
 printf 'ignored editor backup\n' >"$fixture/.agents/skills/orient/evals.md~"
 git -C "$fixture" init -q
+printf '*.md\n' >"$tmp/global-ignore"
+git config -f "$tmp/global-gitconfig" core.excludesFile "$tmp/global-ignore"
 
 generate() {
-  python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
+  GIT_CONFIG_GLOBAL="$tmp/global-gitconfig" \
+    python3 "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/state" --source "$source_file" "$@"
 }
 
 generate >"$tmp/generate.out"
