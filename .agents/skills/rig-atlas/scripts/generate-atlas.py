@@ -39,26 +39,12 @@ def transient_skill_file(skill_dir: Path, candidate: Path) -> bool:
     )
 
 
-def walked_skill_files(skill_dir: Path) -> list[Path]:
-    files: list[Path] = []
-    for current, directories, names in os.walk(skill_dir, topdown=True, followlinks=False):
-        directories[:] = sorted(name for name in directories if name not in TRANSIENT_DIRS)
-        current_path = Path(current)
-        for name in sorted(names):
-            candidate = current_path / name
-            if candidate.is_file() and not transient_skill_file(skill_dir, candidate):
-                files.append(candidate)
-    return sorted(files)
-
-
-def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
+def git_skill_files(root: Path, skill_dir: Path) -> list[Path]:
     relative = skill_dir.relative_to(root)
     command = [
         "git",
         "-C",
         str(root),
-        "-c",
-        f"core.excludesFile={os.devnull}",
         "ls-files",
         "-z",
     ]
@@ -69,14 +55,14 @@ def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
             capture_output=True,
         )
         untracked = subprocess.run(
-            [*command, "--others", "--exclude-standard", "--", str(relative)],
+            [*command, "--others", "--exclude-per-directory=.gitignore", "--", str(relative)],
             check=False,
             capture_output=True,
         )
-    except OSError:
-        return None
+    except OSError as error:
+        raise ValueError("cannot inventory skill files without a usable Git index") from error
     if tracked.returncode != 0 or untracked.returncode != 0:
-        return None
+        raise ValueError("cannot inventory skill files without a usable Git index")
 
     tracked_files = {
         root / os.fsdecode(item)
@@ -97,8 +83,7 @@ def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
 
 
 def visible_skill_files(root: Path, skill_dir: Path) -> list[Path]:
-    git_files = git_skill_files(root, skill_dir)
-    return git_files if git_files is not None else walked_skill_files(skill_dir)
+    return git_skill_files(root, skill_dir)
 
 
 def auxiliary_skill_files(root: Path) -> list[Path]:

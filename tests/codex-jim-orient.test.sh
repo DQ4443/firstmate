@@ -100,6 +100,7 @@ printf 'ok - realistic build, blocked-decision, submit-gate, and near-miss evals
 
 contains "$ROOT/README.md" '| `/orient`' || fail 'README skill discovery entry is missing'
 contains "$ROOT/AGENTS.md" 'Load `$orient`' || fail 'AGENTS orient trigger is missing'
+contains "$ROOT/AGENTS.md" '`$orient` is the explicit exception: follow its four-section purpose-first structure and do not put status before `## Bigger picture`.' || fail 'AGENTS purpose-first exception is missing'
 printf 'ok - orient is discoverable from README and the operating contract\n'
 
 if grep -En '[—–]|[⚡⚙🔁📦]' "$SKILL" "$EVALS"; then

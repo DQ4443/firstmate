@@ -135,6 +135,7 @@ printf 'tracked transient contract\n' >"$fixture/.agents/skills/orient/fixtures/
 printf 'untracked transient scratch\n' >"$fixture/.agents/skills/orient/fixtures/scratch.tmp"
 git -C "$fixture" init -q
 git -C "$fixture" add -f .agents/skills/orient/fixtures/tracked.tmp
+printf '*.md\n*.sh\n' >"$fixture/.git/info/exclude"
 printf '*.md\n' >"$tmp/global-ignore"
 git config -f "$tmp/global-gitconfig" core.excludesFile "$tmp/global-ignore"
 git config -f "$tmp/global-gitconfig" --add safe.directory "$fixture"
@@ -150,6 +151,21 @@ generate --verify >"$tmp/verify.out"
 [ -f "$tmp/state/rig-atlas.integrity.json" ] || fail "integrity record missing"
 [ ! -f "$tmp/state/rig-atlas-portable.md" ] || fail "portable twin unexpectedly exists"
 [ "$(wc -c <"$tmp/state/rig-atlas.md" | tr -d ' ')" -gt 100000 ] || fail "atlas collapsed into a summary"
+
+python_bin=$(command -v python3)
+mkdir -p "$tmp/no-git-bin"
+set +e
+PATH="$tmp/no-git-bin" "$python_bin" "$scripts/generate-atlas.py" --repo-root "$fixture" --state-dir "$tmp/no-git-state" --source "$source_file" >"$tmp/no-git.out" 2>&1
+no_git_rc=$?
+set -e
+if [ "$no_git_rc" -eq 0 ]; then
+  fail "atlas generation accepted an unprovable non-Git inventory"
+fi
+[ "$no_git_rc" -eq 2 ] || fail "non-Git inventory refusal did not use the controlled CLI exit"
+grep -q 'cannot inventory skill files without a usable Git index' "$tmp/no-git.out" || fail "non-Git inventory refusal was not explicit"
+if grep -q 'Traceback' "$tmp/no-git.out"; then
+  fail "non-Git inventory refusal leaked a traceback"
+fi
 
 python3 - "$tmp/state/rig-atlas.md" "$tmp/state/rig-atlas.integrity.json" <<'PY'
 import hashlib
