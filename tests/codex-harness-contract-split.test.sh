@@ -4,8 +4,8 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 agents="$root/AGENTS.md"
 claude="$root/CLAUDE.md"
-pre_split_blob=4d16b2cd0fd7cfaaca3a226244411d0f878140f3
-pre_split_sha256=26fe8e24d6a68e249071908cb3cbb20944249cb20a1b307bdd9703a218d37bee
+frozen_blob=1c9ad585a7053f2f93439e027bc249976b5a1b9f
+frozen_sha256=c104ed0bc14ee3b02941afd1216a7ac9d2d28dcae0d400ff0cd3fa67af2dd6d0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
@@ -16,12 +16,12 @@ fail() {
 
 [ -f "$claude" ] || fail "CLAUDE.md is not a regular file"
 [ ! -L "$claude" ] || fail "CLAUDE.md remains a symlink"
-git cat-file blob "$pre_split_blob" >"$tmp/pre-split-agents.md"
-cmp -s "$claude" "$tmp/pre-split-agents.md" || fail "CLAUDE.md differs from the pre-split AGENTS blob"
-[ "$(shasum -a 256 "$claude" | awk '{print $1}')" = "$pre_split_sha256" ] || fail "CLAUDE.md digest changed"
+git cat-file blob "$frozen_blob" >"$tmp/frozen-claude.md"
+cmp -s "$claude" "$tmp/frozen-claude.md" || fail "CLAUDE.md differs from its frozen blob"
+[ "$(shasum -a 256 "$claude" | awk '{print $1}')" = "$frozen_sha256" ] || fail "CLAUDE.md digest changed"
 [ "$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$agents")" != "$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$claude")" ] || fail "harness contracts share an inode"
 cmp -s "$agents" "$claude" && fail "AGENTS.md did not diverge from the frozen contract"
-echo "ok - frozen contract is byte-identical and mechanically unlinked"
+echo "ok - frozen contract is digest-pinned and mechanically unlinked"
 
 if grep -En 'Workflow|Skill\(|ScheduleWakeup|\.agents/skills-spine' "$agents"; then
   fail "AGENTS.md contains a retired harness carrier"

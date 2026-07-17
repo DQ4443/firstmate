@@ -33,6 +33,54 @@ if grep -in "$retired_tool" "${owned_files[@]/#/$ROOT/}"; then
 fi
 pass 'owned policy and documentation use native GitHub CLI guidance'
 
+if find "$ROOT/.github/workflows" -maxdepth 1 -type f -iname '*no-mistakes*' -print -quit \
+  | grep -q .; then
+  fail 'retired no-mistakes provenance workflow is still active'
+fi
+
+retired_provenance_pattern='git[[:space:]]+push[[:space:]]+no-mistakes|(raised|submitted)[[:space:]]+(via|through)[[:space:]]+no-mistakes|no-mistakes[-_ ]required|require[[:space:]]+no-mistakes|no-mistakes[^[:alnum:]]*(signature|provenance)|(signature|provenance)[^[:alnum:]]*no-mistakes|(https://github\.com/|git@github\.com:)[^/[:space:]]+/no-mistakes(\.git)?'
+if grep -ERiq -- "$retired_provenance_pattern" "$ROOT/.github/workflows"; then
+  fail 'an active workflow still requires the retired no-mistakes provenance marker'
+fi
+
+ci="$ROOT/.github/workflows/ci.yml"
+require_ci_job() {
+  local job_id=$1
+  local expected_name=$2
+  local failure=$3
+
+  awk -v target="$job_id" -v expected="$expected_name" '
+    /^[^[:space:]#][^:]*:/ {
+      in_jobs = ($0 ~ /^jobs:[[:space:]]*(#.*)?$/)
+      current = 0
+      next
+    }
+    in_jobs && /^  [[:alnum:]_-]+:[[:space:]]*(#.*)?$/ {
+      job = $0
+      sub(/^  /, "", job)
+      sub(/:.*/, "", job)
+      current = (job == target)
+      next
+    }
+    in_jobs && current && /^    name:[[:space:]]*/ {
+      value = $0
+      sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*$/, "", value)
+      if ((substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") ||
+          (substr(value, 1, 1) == "\047" && substr(value, length(value), 1) == "\047")) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      found = (value == expected)
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$ci" || fail "$failure"
+}
+
+require_ci_job lint 'Lint shell scripts' 'CI no longer retains the shell lint safety gate'
+require_ci_job tests 'Behavior tests' 'CI no longer retains the behavior test safety gate'
+require_ci_job invariants 'Repo invariants' 'CI no longer retains the repository invariant safety gate'
+pass 'native GitHub pull requests retain the unrelated CI safety gates'
+
 submit="$ROOT/.agents/skills/submit/SKILL.md"
 sync="$ROOT/.agents/skills/sync/SKILL.md"
 
