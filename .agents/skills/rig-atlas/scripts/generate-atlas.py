@@ -7,6 +7,8 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,20 +26,84 @@ def sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def visible_skill_files(skill_dir: Path) -> list[Path]:
-    def transient(candidate: Path) -> bool:
-        local = candidate.relative_to(skill_dir)
-        return (
-            any(part in {"__pycache__", "state", "data", ".lavish", ".no-mistakes"} for part in local.parts)
-            or candidate.name == ".DS_Store"
-            or candidate.name == ".env"
-            or candidate.suffix == ".pyc"
-            or candidate.name.endswith(("~", ".swp", ".swo", ".tmp"))
-        )
+TRANSIENT_DIRS = {"__pycache__", "state", "data", ".lavish", ".no-mistakes"}
 
-    return sorted(
-        path for path in skill_dir.rglob("*") if path.is_file() and not transient(path)
+
+def transient_skill_file(skill_dir: Path, candidate: Path) -> bool:
+    local = candidate.relative_to(skill_dir)
+    return (
+        any(part in TRANSIENT_DIRS for part in local.parts)
+        or candidate.name in {".DS_Store", ".env"}
+        or candidate.suffix == ".pyc"
+        or candidate.name.endswith(("~", ".swp", ".swo", ".tmp"))
     )
+
+
+def walked_skill_files(skill_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    for current, directories, names in os.walk(skill_dir, topdown=True, followlinks=False):
+        directories[:] = sorted(name for name in directories if name not in TRANSIENT_DIRS)
+        current_path = Path(current)
+        for name in sorted(names):
+            candidate = current_path / name
+            if candidate.is_file() and not transient_skill_file(skill_dir, candidate):
+                files.append(candidate)
+    return sorted(files)
+
+
+def git_skill_files(root: Path, skill_dir: Path) -> list[Path] | None:
+    relative = skill_dir.relative_to(root)
+    environment = os.environ.copy()
+    environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    command = [
+        "git",
+        "-C",
+        str(root),
+        "-c",
+        f"core.excludesFile={os.devnull}",
+        "ls-files",
+        "-z",
+    ]
+    try:
+        tracked = subprocess.run(
+            [*command, "--cached", "--", str(relative)],
+            check=False,
+            capture_output=True,
+            env=environment,
+        )
+        untracked = subprocess.run(
+            [*command, "--others", "--exclude-standard", "--", str(relative)],
+            check=False,
+            capture_output=True,
+            env=environment,
+        )
+    except OSError:
+        return None
+    if tracked.returncode != 0 or untracked.returncode != 0:
+        return None
+
+    tracked_files = {
+        root / os.fsdecode(item)
+        for item in tracked.stdout.split(b"\0")
+        if item
+    }
+    untracked_files = {
+        root / os.fsdecode(item)
+        for item in untracked.stdout.split(b"\0")
+        if item
+    }
+    return sorted(
+        candidate
+        for candidate in tracked_files | untracked_files
+        if candidate.is_file()
+        and (candidate in tracked_files or not transient_skill_file(skill_dir, candidate))
+    )
+
+
+def visible_skill_files(root: Path, skill_dir: Path) -> list[Path]:
+    git_files = git_skill_files(root, skill_dir)
+    return git_files if git_files is not None else walked_skill_files(skill_dir)
 
 
 def auxiliary_skill_files(root: Path) -> list[Path]:
@@ -49,7 +115,7 @@ def auxiliary_skill_files(root: Path) -> list[Path]:
         skill_dir = primary.parent
         if skill_dir.name in SPINE:
             continue
-        files.extend(visible_skill_files(skill_dir))
+        files.extend(visible_skill_files(root, skill_dir))
     return sorted(files)
 
 
