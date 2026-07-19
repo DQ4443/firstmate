@@ -87,7 +87,7 @@ decision=$(
     # timestamp, is not an emergency.
     | ([ ($d.slaStatus | lc), ($d.slaType | lc), ($d.sla.status | lc) ]) as $sla_fields
     | (($sla_fields | map(select(test("breach"))) | length) > 0) as $sla_breach_field
-    | (($sla_fields | map(select(test("high[_ ]?risk"))) | length) > 0) as $sla_risk_field
+    | (($sla_fields | map(select(test("high[_ -]?risk"))) | length) > 0) as $sla_risk_field
     | (($type == "issuesla")
         or ($action | test("^(set|high[_-]?risk|breached)$"))
         or $sla_breach_field or $sla_risk_field) as $sla_event
