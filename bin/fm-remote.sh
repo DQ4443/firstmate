@@ -6,10 +6,10 @@
 # interactive claude. This script is a THIN controller: every subcommand is one
 # or a few ssh calls and returns promptly, holding no long-lived local process.
 # The box owns the session; the Mac side only launches, peeks, steers, and tears
-# down. launch runs a bounded (~30s) local poll of the remote pane to accept the
-# one-time folder-trust dialog and confirm claude's input prompt is up before it
-# delivers the brief pointer; that poll is a sequence of one-shot ssh captures,
-# not a held process.
+# down. launch runs a bounded local loop of one-shot ssh pane captures to accept
+# the one-time folder-trust dialog and DELIVER-VERIFY the brief pointer (see
+# LAUNCH DESIGN); that loop is a sequence of one-shot ssh captures, not a held
+# process.
 #
 # The steer/launch delivery mechanics mirror bin/fm-send.sh's proven tmux TUI
 # delivery: the text is typed ONCE in literal mode (send-keys -l), a short settle
@@ -21,17 +21,29 @@
 # a not-yet-trusted folder shows a trust dialog BEFORE it consumes an initial
 # prompt argument, so a brief passed as claude's argv is swallowed by the dialog
 # and lost. Instead launch (a) writes the brief file, (b) starts claude with NO
-# prompt argument, (c) polls the pane and accepts the trust dialog if it appears,
-# then (d) delivers a short pointer prompt over the live TUI telling claude to
-# read and execute the brief file. The brief never rides claude's argv, so the
-# dialog cannot eat it.
+# prompt argument (plus --add-dir <brief-dir> so the brief, which lives outside
+# the working dir, reads without a permission prompt), (c) accepts the trust
+# dialog if it appears, then (d) delivers a short pointer prompt over the live
+# TUI telling claude to read and execute the brief file. The brief never rides
+# claude's argv, so the dialog cannot eat it.
+#
+# DELIVERY-VERIFIED SENDING (not readiness-sniffing): claude 2.1.132's TUI never
+# renders a stable "? for shortcuts" readiness sentinel, so a one-shot poll for
+# it always times out and the pointer is sent blind and DROPPED. Instead launch
+# loops (bounded): each pass captures the pane, accepts a visible trust dialog,
+# and if the pointer is not yet delivered either submits a pointer already typed
+# in the input box (Enter alone) or types a fresh pointer, then re-captures and
+# checks for EVIDENCE OF SUBMISSION (the pointer no longer sitting in the input
+# box, plus tool-use / read / working activity). The detectors below were
+# derived empirically against claude 2.1.132's actual rendering.
 #
 # INPUT VALIDATION: <task> becomes a tmux session name and is interpolated into
 # every remote command, so each subcommand rejects any task outside
-# [A-Za-z0-9._-]. --dir and --claude-args are likewise interpolated into the
-# remote launch command, so they are validated against a safe charset / rejected
-# for shell metacharacters before use. This blocks remote command injection
-# through a hostile task name, working dir, or claude flag string.
+# [A-Za-z0-9._-] (and any leading '-', which would read as a flag). --dir and
+# --claude-args are likewise interpolated into the remote launch command, so
+# they are validated against a strict ALLOWLIST charset before use. This blocks
+# remote command injection through a hostile task name, working dir, or claude
+# flag string.
 #
 # Subcommands:
 #   launch <task> [--dir <remote-dir>] [--claude-args "<flags>"] <brief...>
@@ -52,8 +64,11 @@ SSH_HOST="${FM_REMOTE_HOST:-thinkpad}"
 DEFAULT_DIR='$HOME/dev/personal/firstmate'
 # shellcheck disable=SC2016
 BRIEF_DIR='$HOME/fm/briefs'
-# Bounded local poll for the launch trust-dialog / input-prompt handshake.
-LAUNCH_WAIT="${FM_REMOTE_LAUNCH_WAIT:-30}"
+# Bounded delivery-verified launch handshake (see LAUNCH DESIGN). ATTEMPTS is the
+# max number of pointer sends; SEND_WAIT is the settle after each send before the
+# pane is re-checked for evidence of submission.
+LAUNCH_ATTEMPTS="${FM_REMOTE_LAUNCH_ATTEMPTS:-4}"
+LAUNCH_SEND_WAIT="${FM_REMOTE_LAUNCH_SEND_WAIT:-4}"
 
 usage() {
   cat >&2 <<'EOF'
@@ -88,10 +103,12 @@ EOF
 die() { printf 'error: %s\n' "$1" >&2; exit 2; }
 
 # <task> is a tmux session name and is spliced into every remote command, so it
-# must be a safe token. Reject anything outside [A-Za-z0-9._-] (and the empty
-# string) before it can reach the box.
+# must be a safe token. Reject anything outside [A-Za-z0-9._-], the empty string,
+# and any leading '-' (which tmux/ssh would read as a flag) before it can reach
+# the box.
 validate_task() {  # <task>
   case "$1" in
+    -*) die "invalid task name '$1' (must not start with '-')" ;;
     ''|*[!A-Za-z0-9._-]*) die "invalid task name '$1' (allowed: letters, digits, . _ -)" ;;
   esac
 }
@@ -115,15 +132,18 @@ validate_dir() {  # <dir>
   esac
 }
 
-# --claude-args is interpolated into the inner `sh -c` command tmux runs. Allow
-# ordinary flag strings (spaces and leading dashes), but reject the characters
-# that would chain or substitute a command: `;`, backtick, `$(`, and newlines.
+# --claude-args is interpolated into the inner `sh -c` command tmux runs, so a
+# blocklist is unsafe (it missed && || | & < > ( ) etc.). Use a strict ALLOWLIST
+# mirroring validate_dir: permit only ordinary flag strings, meaning letters,
+# digits, spaces, and . _ = / - (spaces separate flags, leading dashes flag them,
+# '=' for --flag=value). Reject everything else, including quotes, & | < > ( ),
+# backtick, $, and newlines, so no shell metacharacter can chain or substitute a
+# command.
 validate_claude_args() {  # <args>
-  local nl=$'\n'
-  # The single-quoted needles below are literal on purpose (SC2016).
-  # shellcheck disable=SC2016
+  # The space and '-' in the class below are literal: '-' sits right after '!' so
+  # it is not a range, and the space is an ordinary allowed character.
   case "$1" in
-    *';'*|*'`'*|*'$('*|*"$nl"*) die "invalid --claude-args value (';' backtick '\$(' and newlines are not allowed): $1" ;;
+    *[!-A-Za-z0-9._=/\ ]*) die "invalid --claude-args value (allowed: letters, digits, space and . _ = / -): $1" ;;
   esac
 }
 
@@ -153,6 +173,39 @@ ssh_run() {  # <remote-cmd>
 ssh_exec() {  # <remote-cmd>
   # shellcheck disable=SC2029
   ssh "$SSH_HOST" "$1"
+}
+
+# --- launch pane detectors (derived empirically against claude 2.1.132) -------
+# claude 2.1.132's TUI renders the folder-trust dialog with a "Quick safety
+# check" heading and a "Yes, I trust this folder" option (the older "do you
+# trust" / "trust the files in this" wordings no longer appear), so match any of
+# them case-insensitively.
+launch_pane_is_trust() {  # <pane>
+  printf '%s' "$1" | grep -qiE 'trust this folder|quick safety check|do you trust|trust the files in this'
+}
+
+# The launch pointer is still sitting UNSENT in the input box when the last
+# prompt line (the '❯' line nearest the bottom) still holds the pointer's tail:
+# send-keys -l typed it but the Enter has not landed. After submission the
+# pointer scrolls up into history and the bottom '❯' line is the (empty) input
+# box, so the last '❯' line no longer carries the tail.
+launch_pointer_sitting() {  # <pane>
+  local last_prompt
+  last_prompt=$(printf '%s\n' "$1" | grep -F '❯' | tail -n1)
+  case "$last_prompt" in
+    *'execute it as your brief.'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Evidence the pointer was SUBMITTED: post-submission activity that never appears
+# in the idle prompt or in the pointer text itself ("Read the file" in the
+# pointer is deliberately excluded; only "Read <n> file" / "Reading <n>" from an
+# actual tool call match). Any of a working spinner, a tool-use bullet, a read of
+# the brief, a tool-result glyph, or a permission prompt counts.
+launch_delivered() {  # <pane>
+  ! launch_pointer_sitting "$1" || return 1
+  printf '%s' "$1" | grep -qiE 'esc to interrupt|churned for|working…|reading [0-9]|read [0-9]+ file|⎿|do you want to proceed|● (bash|read|write|edit|update|web|task|grep|glob|search|fetch|mcp|kill|todo)'
 }
 
 # Recognize --dry-run ONLY as a leading global flag, before the command word.
@@ -220,9 +273,12 @@ cmd_launch() {
 
   # Start claude with NO prompt argument (see LAUNCH DESIGN header): the brief is
   # delivered as a pointer over the live TUI after the trust dialog is handled,
-  # so the dialog cannot swallow it. claude-args (validated) precede nothing else.
-  local inner="claude"
-  [ -n "$claude_args" ] && inner="claude $claude_args"
+  # so the dialog cannot swallow it. --add-dir <brief-dir> makes the brief file
+  # (which lives outside the working dir) readable without a permission prompt,
+  # so a fully hands-off launch does not stall on the Read approval. claude-args
+  # (validated) follow. BRIEF_DIR keeps its literal $HOME for remote expansion.
+  local inner="claude --add-dir $BRIEF_DIR"
+  [ -n "$claude_args" ] && inner="$inner $claude_args"
   local launch_cmd="tmux new -d -s $ses -c $remote_dir '$inner'"
 
   # The pointer prompt claude reads once its input is up. Delivered with the same
@@ -236,7 +292,7 @@ cmd_launch() {
     printf '# brief -> %s on %s:\n%s\n' "$brief_path" "$SSH_HOST" "$brief"
     printf 'printf %%s <brief> | ssh %s %s\n' "$SSH_HOST" "$(shell_quote "$write_cmd")"
     printf 'ssh %s %s\n' "$SSH_HOST" "$launch_cmd"
-    printf 'ssh %s %s   # poll: accept trust dialog (Enter), wait for input prompt\n' \
+    printf 'ssh %s %s   # delivery-verified loop: capture, accept trust dialog (Enter), check for submission\n' \
       "$SSH_HOST" "$(shell_quote "tmux capture-pane -p -t $ses")"
     printf 'ssh %s %s\n' "$SSH_HOST" "$pointer_cmd"
     return 0
@@ -248,40 +304,53 @@ cmd_launch() {
   printf '%s' "$brief" | ssh "$SSH_HOST" "$write_cmd"
   ssh_run "$launch_cmd"
 
-  # Bounded local poll of the remote pane (one-shot ssh captures, no held
-  # process). Accept the one-time folder-trust dialog with Enter if it appears,
-  # and stop once claude's input prompt ("? for shortcuts") is up.
-  local waited=0 pane trust_done=0 ready=0
-  while [ "$waited" -lt "$LAUNCH_WAIT" ]; do
-    sleep 1
-    waited=$((waited + 1))
+  # Delivery-verified handshake (see LAUNCH DESIGN). Bounded loop of one-shot ssh
+  # pane captures, no held process: accept the one-time folder-trust dialog, then
+  # DELIVER the pointer and confirm it was actually submitted, retrying the send
+  # if the pane shows no evidence of submission. A hard iteration cap keeps a
+  # slow or wedged box from spinning.
+  local pane sends=0 iter=0 delivered=0 trust_done=0
+  local max_iter=$((LAUNCH_ATTEMPTS * 2 + 4))
+  while [ "$iter" -lt "$max_iter" ] && [ "$delivered" -eq 0 ] && [ "$sends" -lt "$LAUNCH_ATTEMPTS" ]; do
+    iter=$((iter + 1))
     pane=$(ssh_exec "tmux capture-pane -p -t $ses" 2>/dev/null || true)
-    if [ "$trust_done" -eq 0 ] && printf '%s' "$pane" | grep -qi 'do you trust\|trust the files in this'; then
+    # Accept the folder-trust dialog with Enter (once) and let the TUI redraw.
+    if [ "$trust_done" -eq 0 ] && launch_pane_is_trust "$pane"; then
       ssh_exec "tmux send-keys -t $ses Enter" >/dev/null 2>&1 || true
       trust_done=1
+      sleep 2
       continue
     fi
-    if printf '%s' "$pane" | grep -qF '? for shortcuts'; then
-      ready=1
-      break
+    # Already delivered (e.g. a prior send landed)? Done.
+    if launch_delivered "$pane"; then delivered=1; break; fi
+    # Not yet at the input prompt (still booting): wait and re-check without
+    # burning a send.
+    if ! printf '%s' "$pane" | grep -qF '❯'; then
+      sleep 2
+      continue
     fi
+    # Ready: submit. If a pointer is already typed but unsent, just press Enter;
+    # otherwise type a fresh pointer (literal send, settle, Enter).
+    if launch_pointer_sitting "$pane"; then
+      ssh_exec "tmux send-keys -t $ses Enter" >/dev/null 2>&1 || true
+    else
+      ssh_exec "$pointer_cmd" >/dev/null 2>&1 || true
+    fi
+    sends=$((sends + 1))
+    sleep "$LAUNCH_SEND_WAIT"
+    pane=$(ssh_exec "tmux capture-pane -p -t $ses" 2>/dev/null || true)
+    if launch_delivered "$pane"; then delivered=1; break; fi
   done
 
-  # Deliver the pointer over the live TUI (literal send, settle, Enter).
-  ssh_exec "$pointer_cmd" >/dev/null 2>&1 || true
-
-  # One final capture to confirm the input was consumed rather than left sitting
-  # behind a still-open trust or sign-in prompt.
-  sleep 1
-  pane=$(ssh_exec "tmux capture-pane -p -t $ses" 2>/dev/null || true)
-  if printf '%s' "$pane" | grep -qi 'do you trust\|trust the files in this\|sign in to\|log in to'; then
+  if [ "$delivered" -eq 1 ]; then
+    printf 'launched %s on %s (brief: %s); pointed claude at the brief file and verified the pointer was submitted\n' \
+      "$ses" "$SSH_HOST" "$brief_path"
+  elif printf '%s' "$pane" | grep -qiE 'trust this folder|quick safety check|do you trust|trust the files in this|sign in to|log in to'; then
     printf 'warning: launched tmux %s on %s (brief written to %s) but it appears stuck on a trust or sign-in prompt; peek to verify (fm-remote.sh peek %s)\n' \
       "$ses" "$SSH_HOST" "$brief_path" "$task" >&2
-  elif [ "$ready" -eq 1 ]; then
-    printf 'launched %s on %s (brief: %s); pointed claude at the brief file\n' "$ses" "$SSH_HOST" "$brief_path"
   else
-    printf 'warning: launched tmux %s on %s (brief written to %s) but claude did not reach its input prompt within %ss; peek to verify (fm-remote.sh peek %s)\n' \
-      "$ses" "$SSH_HOST" "$brief_path" "$LAUNCH_WAIT" "$task" >&2
+    printf 'warning: launched tmux %s on %s (brief written to %s) but could not confirm the pointer was submitted after %s attempt(s); peek to verify (fm-remote.sh peek %s)\n' \
+      "$ses" "$SSH_HOST" "$brief_path" "$sends" "$task" >&2
   fi
 }
 

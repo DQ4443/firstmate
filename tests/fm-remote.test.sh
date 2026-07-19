@@ -60,20 +60,22 @@ assert_has "launch: brief mkdir+cat to per-task path" "$out" 'mkdir -p $HOME/fm/
 assert_has "launch: detached tmux session named fm-<task>" "$out" 'tmux new -d -s fm-demo'
 assert_has "launch: default remote dir" "$out" '-c $HOME/dev/personal/firstmate'
 # The brief must NOT ride claude's argv (the trust dialog would swallow it);
-# claude starts bare and the brief is delivered as a pointer over the TUI.
-assert_has "launch: claude starts with no prompt argument" "$out" "-c \$HOME/dev/personal/firstmate 'claude'"
+# claude starts with no prompt argument and the brief is delivered as a pointer
+# over the TUI. --add-dir <brief-dir> makes the out-of-cwd brief readable without
+# a permission prompt so the launch is hands-off.
+assert_has "launch: claude starts with no prompt argument and --add-dir the brief dir" "$out" "-c \$HOME/dev/personal/firstmate 'claude --add-dir \$HOME/fm/briefs'"
 assert_lacks "launch: brief is not passed as claude argv" "$out" '$(cat $HOME/fm/briefs/demo.md)'
-assert_has "launch: polls the pane for the trust/input prompt" "$out" 'tmux capture-pane -p -t fm-demo'
+assert_has "launch: delivery-verified loop captures the pane" "$out" 'tmux capture-pane -p -t fm-demo'
 assert_has "launch: delivers a pointer prompt over the TUI" "$out" "tmux send-keys -t fm-demo -l 'You are FM session fm-demo. Read the file ~/fm/briefs/demo.md and execute it as your brief.'"
 assert_has "launch: pointer submitted with Enter" "$out" 'tmux send-keys -t fm-demo Enter'
 assert_has "launch: dry-run shows the brief that would be written" "$out" 'Build the thing and test it'
-pass "launch dry-run prints the brief write, bare claude launch, and pointer delivery"
+pass "launch dry-run prints the brief write, --add-dir claude launch, and pointer delivery"
 
 # --- launch: --dir and --claude-args ------------------------------------------
 
 out=$("$BIN" --dry-run launch build7 --dir '$HOME/work/foo' --claude-args '--model opus --verbose' "do the work")
 assert_has "launch --dir: custom working dir" "$out" '-c $HOME/work/foo'
-assert_has "launch --claude-args: flags reach the bare claude launch" "$out" "'claude --model opus --verbose'"
+assert_has "launch --claude-args: flags follow --add-dir on the claude launch" "$out" "'claude --add-dir \$HOME/fm/briefs --model opus --verbose'"
 assert_lacks "launch --claude-args: brief still not on claude argv" "$out" '$(cat $HOME/fm/briefs/build7.md)'
 assert_has "launch --claude-args: pointer references the per-task brief" "$out" 'Read the file ~/fm/briefs/build7.md'
 assert_has "launch --dir: session name still fm-<task>" "$out" 'tmux new -d -s fm-build7'
@@ -82,7 +84,7 @@ pass "launch dry-run threads --dir and --claude-args into the tmux command"
 # --dir/--claude-args may also appear after the brief-less flags in --key=value form.
 out=$("$BIN" --dry-run launch kv --dir=$'$HOME/x' --claude-args='--foo' "brief text")
 assert_has "launch =form: --dir=" "$out" '-c $HOME/x'
-assert_has "launch =form: --claude-args=" "$out" "'claude --foo'"
+assert_has "launch =form: --claude-args=" "$out" "'claude --add-dir \$HOME/fm/briefs --foo'"
 assert_has "launch =form: pointer references the per-task brief" "$out" 'Read the file ~/fm/briefs/kv.md'
 pass "launch dry-run accepts --dir= and --claude-args= forms"
 
@@ -162,18 +164,34 @@ expect_fail "steer: injection task rejected" --dry-run steer 'a;b' "hi"
 expect_fail "kill: injection task rejected" --dry-run kill 'a;b'
 expect_fail "attach: injection task rejected" --dry-run attach 'a;b'
 
+# A leading '-' in a task would read as a tmux/ssh flag, not a session name.
+expect_fail "launch: task starting with a dash" --dry-run launch -n "brief"
+expect_fail "peek: task starting with a dash" --dry-run peek -n
+expect_fail "kill: task starting with a dash" --dry-run kill -x
+
 # --dir is interpolated unquoted on the remote; a command substitution must die.
 expect_fail "launch --dir with a command substitution" --dry-run launch demo --dir '$(whoami)' "brief"
 expect_fail "launch --dir with a semicolon" --dry-run launch demo --dir 'a;b' "brief"
-# --claude-args is interpolated into the inner sh -c; a command chain must die.
+# --claude-args is interpolated into the inner sh -c and is now allowlisted, so
+# EVERY shell metacharacter must die, not just the few an old blocklist caught.
 expect_fail "launch --claude-args with a semicolon" --dry-run launch demo --claude-args '; rm -rf /' "brief"
 expect_fail "launch --claude-args with a backtick" --dry-run launch demo --claude-args '`id`' "brief"
+expect_fail "launch --claude-args with an && chain (old blocklist bypass)" --dry-run launch demo --claude-args "a' && id && '" "brief"
+expect_fail "launch --claude-args with a bare && chain" --dry-run launch demo --claude-args '&& id' "brief"
+expect_fail "launch --claude-args with a pipe" --dry-run launch demo --claude-args '| id' "brief"
+expect_fail "launch --claude-args with a redirect" --dry-run launch demo --claude-args '> /tmp/x' "brief"
+expect_fail "launch --claude-args with a subshell paren" --dry-run launch demo --claude-args '(id)' "brief"
+expect_fail "launch --claude-args with a dollar" --dry-run launch demo --claude-args '$x' "brief"
+expect_fail "launch --claude-args with a single quote" --dry-run launch demo --claude-args "a'b" "brief"
+expect_fail "launch --claude-args with a background &" --dry-run launch demo --claude-args 'x & y' "brief"
 
-# A legitimate remote $HOME dir and ordinary flag string still pass.
+# A legitimate remote $HOME dir and ordinary flag strings still pass.
 out=$("$BIN" --dry-run launch ok --dir '$HOME/w' --claude-args '--model opus' "brief")
 assert_has "launch: valid $HOME dir accepted" "$out" '-c $HOME/w'
-assert_has "launch: valid claude flags accepted" "$out" "'claude --model opus'"
-pass "launch accepts a valid remote \$HOME dir and a plain flag string"
+assert_has "launch: valid claude flags accepted" "$out" "'claude --add-dir \$HOME/fm/briefs --model opus'"
+out=$("$BIN" --dry-run launch ok --claude-args '--allowedTools Bash' "brief")
+assert_has "launch: --allowedTools Bash flag string accepted" "$out" "'claude --add-dir \$HOME/fm/briefs --allowedTools Bash'"
+pass "launch accepts a valid remote \$HOME dir and plain flag strings, rejects every metacharacter"
 
 # --- usage / validation errors ------------------------------------------------
 
