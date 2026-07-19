@@ -101,3 +101,9 @@ The tmux-crewmate stack (non-Claude harness dispatch, or an agent that must outl
 | `fm-x-dismiss.sh`  | Dismiss or dry-run preview a skipped X mention without replying                                                                          |
 | `fm-x-link.sh`     | Link a spawned task to its originating X mention in `state/<id>.meta`                                                                    |
 | `fm-x-followup.sh` | Detect, post, and manage completion follow-ups for an X-linked task                                                                      |
+
+## Housekeeping intake (2026-07-19)
+
+The two-leg housekeeping intake daemon (Linear webhook + Gmail Pub/Sub pull) lives under bin/housekeeping/ with its deploy kit in deploy/housekeeping/.
+bin/fm-linear-event-server.mjs and bin/fm-linear-event-worker.sh are its Linear leg.
+Full script-by-script reference: docs/housekeeping-intake.md.
