@@ -58,10 +58,18 @@ const port = Number.parseInt(
   10,
 );
 
-// Verification and dedup limits, kept exactly as the vetted intake: a hard 1MiB
-// body cap and a 60 second webhookTimestamp freshness window.
+// Verification and dedup limits: a hard 1MiB body cap and a generous
+// webhookTimestamp freshness window. Replay is already fully handled by the
+// O_EXCL claims/ dedup dir, so a tight window buys no protection and only 401s
+// healthy-but-late deliveries under clock skew or Linear delivery latency, and
+// every such 401 counts toward Linear's three-strikes webhook auto-disable. The
+// window defaults to 15 minutes and is env-tunable; set it to 0 to accept any
+// timestamp and rely on the claims dir alone for replay defense.
 const maxBody = 1048576;
-const maxAgeMs = 60000;
+const maxAgeMs = Number.parseInt(
+  process.env.FM_HK_LINEAR_MAX_AGE_MS || "900000",
+  10,
+);
 const allowedOrg = process.env.FM_HK_LINEAR_ORGANIZATION_ID || "";
 const workerTimeoutMs = Number.parseInt(
   process.env.FM_HK_LINEAR_WORKER_TIMEOUT_MS || "180000",
@@ -193,8 +201,13 @@ async function receive(req, res, secret) {
     return;
   }
   const timestamp = Number(event.webhookTimestamp);
+  if (!Number.isFinite(timestamp)) {
+    res.writeHead(401).end();
+    return;
+  }
   if (
-    !Number.isFinite(timestamp) ||
+    Number.isFinite(maxAgeMs) &&
+    maxAgeMs > 0 &&
     Math.abs(Date.now() - timestamp) > maxAgeMs
   ) {
     res.writeHead(401).end();

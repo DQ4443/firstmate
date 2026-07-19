@@ -79,3 +79,55 @@ expect_code 0 $? "second reconcile exit"
 [ -z "$out" ] || fail "second reconcile was not silent: $out"
 [ "$(find "$hk/queue/incoming" -type f -name '*.json' | wc -l | tr -d ' ')" = 1 ] || fail "second run duplicated an event"
 pass "reconcile dedups against the queue on a second run"
+
+# --- pagination: the sweep must drain every page in one run --------------------
+# A single-page fetch (first: 250, no `after` walk) that advanced the cursor to
+# the page's newest updatedAt would permanently skip older un-fetched misses,
+# defeating the reconcile in the exact scenario it exists for (a webhook
+# auto-disabled while more than one page of issues changed in a window). The
+# paginating mock only returns the second-page miss when handed the endCursor.
+kill "$mock_pid" 2>/dev/null; wait "$mock_pid" 2>/dev/null || true
+hk="$work/hk-pag"
+mkdir -p "$hk/secrets"
+printf 'fake-key\n' > "$hk/secrets/linear-api-key"
+chmod 600 "$hk/secrets/linear-api-key"
+
+port=$(( 40000 + RANDOM % 20000 ))
+cat > "$work/mock-pag.mjs" <<'JS'
+import { createServer } from "node:http";
+const port = Number(process.argv[2]);
+createServer((req, res) => {
+  let b = "";
+  req.on("data", (c) => (b += c));
+  req.on("end", () => {
+    const after = (JSON.parse(b || "{}").variables || {}).after;
+    res.writeHead(200, { "content-type": "application/json" });
+    if (!after) {
+      res.end(JSON.stringify({ data: { issues: {
+        nodes: [{ id: "issue-page1", identifier: "ENG-9", title: "Recent", url: "http://x/9", updatedAt: "2026-07-19T12:00:00Z", assignee: null, state: { name: "Todo" } }],
+        pageInfo: { hasNextPage: true, endCursor: "CUR1" },
+      } } }));
+    } else if (after === "CUR1") {
+      res.end(JSON.stringify({ data: { issues: {
+        nodes: [{ id: "issue-page2", identifier: "ENG-2", title: "Older miss", url: "http://x/2", updatedAt: "2026-07-19T09:00:00Z", assignee: null, state: { name: "Done" } }],
+        pageInfo: { hasNextPage: false, endCursor: "CUR2" },
+      } } }));
+    } else {
+      res.end(JSON.stringify({ data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } }));
+    }
+  });
+}).listen(port, "127.0.0.1");
+JS
+node "$work/mock-pag.mjs" "$port" &
+mock_pid=$!
+for _ in $(seq 1 100); do
+  curl -fsS -X POST "http://127.0.0.1:$port/" -d '{}' >/dev/null 2>&1 && break
+  sleep 0.05
+done
+
+out=$(FM_HK_ROOT="$hk" FM_HK_LINEAR_GRAPHQL="http://127.0.0.1:$port/graphql" "$reconcile" 2>&1)
+expect_code 0 $? "paginating reconcile exit"
+assert_contains "$out" "synthesized 2 missed digest event" "both pages are drained in one run"
+[ -n "$(find "$hk/queue/incoming" -type f -name '*issue-page1*.json')" ] || fail "first-page issue was not synthesized"
+[ -n "$(find "$hk/queue/incoming" -type f -name '*issue-page2*.json')" ] || fail "second-page issue was skipped (pagination regression)"
+pass "reconcile walks every page instead of dropping the second-page miss"

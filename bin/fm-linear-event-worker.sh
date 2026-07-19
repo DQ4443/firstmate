@@ -8,6 +8,13 @@
 # straight into the contract's queue/incoming (and alerts/pending for blockers).
 set -eu
 
+# Everything this worker writes (normalized events, blocker alerts, the log, and
+# the directories holding them) carries Linear content and must stay owner-only.
+# The fallback path here runs when the shared classifier is absent, so it cannot
+# lean on hk-classify.mjs's 0600 writes; a restrictive umask makes every file
+# and directory created below owner-only regardless.
+umask 077
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HK_ROOT="${FM_HK_ROOT:-$HOME/fm-state/housekeeping}"
 CLASSIFY_BIN="${FM_HK_CLASSIFY_BIN:-$SCRIPT_DIR/housekeeping/hk-classify.mjs}"
@@ -33,11 +40,14 @@ log_line() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "$log_file"
 }
 
-# Atomic write: tmp in the same directory, then rename. Content on stdin.
+# Atomic write: tmp in the same directory, then rename. Content on stdin. The
+# tmp is forced to 0600 before the rename so the destination is owner-only even
+# if the caller loosened the umask; the file holds Linear event or alert content.
 atomic_write() {
   local target=$1 tmp
   tmp="$target.tmp.$$.$(date +%s 2>/dev/null || echo 0)"
   cat > "$tmp"
+  chmod 600 "$tmp"
   mv -f "$tmp" "$target"
 }
 
