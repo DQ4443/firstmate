@@ -33,11 +33,10 @@ JSON
 run_worker "$hk" "$ev" >/dev/null
 queued=$(find "$hk/queue/incoming" -type f -name '*.json')
 [ -n "$queued" ] || fail "digest event did not land in queue/incoming"
-event=$(cat "$queued")
-assert_contains "$event" '"severity":"digest"' "state change is a digest"
-assert_contains "$event" '"id":"issue-111"' "event carries the entity id"
-assert_contains "$event" '"kind":"issue"' "event kind is issue"
-assert_contains "$event" '"detail":"State: In Progress"' "detail names the new state"
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "state change is a digest"
+jq -e '.id == "issue-111"' "$queued" >/dev/null || fail "event carries the entity id"
+jq -e '.kind == "issue"' "$queued" >/dev/null || fail "event kind is issue"
+jq -e '.detail == "State: In Progress"' "$queued" >/dev/null || fail "detail names the new state"
 [ "$(find "$hk/alerts/pending" -type f 2>/dev/null | wc -l | tr -d ' ')" = 0 ] || fail "digest raised an alert"
 pass "state change on a David-assigned issue routes to queue as a digest"
 
@@ -77,9 +76,9 @@ cat > "$ev" <<'JSON'
  "webhookTimestamp":1784150000000}
 JSON
 run_worker "$hk" "$ev" >/dev/null
-event=$(cat "$(find "$hk/queue/incoming" -type f -name '*.json')")
-assert_contains "$event" '"severity":"digest"' "a non-mention comment is a digest"
-assert_contains "$event" 'Comment on ENG-42' "comment title names the issue"
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "a non-mention comment is a digest"
+jq -e '.title | contains("Comment on ENG-42")' "$queued" >/dev/null || fail "comment title names the issue"
 pass "comment without a David mention is kept as a digest"
 
 # --- blocker: SLA breach raises an alert whose first line is a sentence ------
@@ -90,8 +89,8 @@ cat > "$ev" <<'JSON'
  "webhookTimestamp":1784150000000}
 JSON
 run_worker "$hk" "$ev" >/dev/null
-event=$(cat "$(find "$hk/queue/incoming" -type f -name '*.json')")
-assert_contains "$event" '"severity":"blocker"' "SLA breach is a blocker"
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+jq -e '.severity == "blocker"' "$queued" >/dev/null || fail "SLA breach is a blocker"
 alert=$(find "$hk/alerts/pending" -type f -name '*.txt')
 [ -n "$alert" ] || fail "SLA blocker did not raise a pending alert"
 first_line=$(head -1 "$alert")
