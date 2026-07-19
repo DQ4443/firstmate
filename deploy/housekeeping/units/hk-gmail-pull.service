@@ -1,0 +1,33 @@
+# Housekeeping FM: Gmail Pub/Sub StreamingPull consumer.
+# Long-running outbound streaming pull; no ingress.
+# ConditionPathExists keeps this unit dead-quiet until the OAuth bootstrap has
+# written secrets/google-token.json, so enabling it before bootstrap is harmless.
+# After bootstrap, start it once with: systemctl --user start hk-gmail-pull
+[Unit]
+Description=Housekeeping FM Gmail Pub/Sub pull consumer (Gemini notes only)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/fm-state/housekeeping/secrets/google-token.json
+
+[Service]
+Type=simple
+WorkingDirectory=%h/firstmate
+Environment=FM_HK_ROOT=%h/fm-state/housekeeping
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-gmail-pull.mjs
+Restart=always
+RestartSec=5
+
+# Hardening (mandatory four plus cheap kernel-surface reductions).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/fm-state/housekeeping
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target

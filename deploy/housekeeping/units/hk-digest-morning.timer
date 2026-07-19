@@ -1,0 +1,13 @@
+# Fires the morning digest at 09:00 America/Los_Angeles.
+# Persistent=true catches up a missed run after the box was asleep at 09:00.
+[Unit]
+Description=Housekeeping FM morning digest timer (09:00 America/Los_Angeles)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 America/Los_Angeles
+Persistent=true
+Unit=hk-digest@morning.service
+
+[Install]
+WantedBy=timers.target

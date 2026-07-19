@@ -1,0 +1,32 @@
+# Housekeeping FM: Linear webhook intake server.
+# Long-running HMAC-gated HTTP listener on 127.0.0.1:4481, fed by the public
+# Tailscale Funnel on port 8443 path /linear (see funnel-setup.sh).
+# FM_HK_ROOT is baked to the default here; a custom root is applied by
+# install.sh as a generated drop-in that overrides Environment and ReadWritePaths.
+[Unit]
+Description=Housekeeping FM Linear webhook intake (HMAC-gated, 127.0.0.1:4481)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/firstmate
+Environment=FM_HK_ROOT=%h/fm-state/housekeeping
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node %h/firstmate/bin/fm-linear-event-server.mjs
+Restart=always
+RestartSec=5
+
+# Hardening (mandatory four plus cheap kernel-surface reductions).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/fm-state/housekeeping
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
