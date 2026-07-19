@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.linear-events</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__FIRSTMATE_ROOT__/bin/fm-linear-event-server.mjs</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__FIRSTMATE_ROOT__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FM_HK_ROOT</key>
+    <string>__FM_HK_ROOT__</string>
+    <key>FM_HK_LINEAR_ADDR</key>
+    <string>127.0.0.1:4481</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__FM_HK_ROOT__/linear/service.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__FM_HK_ROOT__/linear/service.stderr.log</string>
+</dict>
+</plist>
