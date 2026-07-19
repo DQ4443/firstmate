@@ -33,11 +33,10 @@ JSON
 run_worker "$hk" "$ev" >/dev/null
 queued=$(find "$hk/queue/incoming" -type f -name '*.json')
 [ -n "$queued" ] || fail "digest event did not land in queue/incoming"
-event=$(cat "$queued")
-assert_contains "$event" '"severity":"digest"' "state change is a digest"
-assert_contains "$event" '"id":"issue-111"' "event carries the entity id"
-assert_contains "$event" '"kind":"issue"' "event kind is issue"
-assert_contains "$event" '"detail":"State: In Progress"' "detail names the new state"
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "state change is a digest"
+jq -e '.id == "issue-111"' "$queued" >/dev/null || fail "event carries the entity id"
+jq -e '.kind == "issue"' "$queued" >/dev/null || fail "event kind is issue"
+jq -e '.detail == "State: In Progress"' "$queued" >/dev/null || fail "detail names the new state"
 [ "$(find "$hk/alerts/pending" -type f 2>/dev/null | wc -l | tr -d ' ')" = 0 ] || fail "digest raised an alert"
 pass "state change on a David-assigned issue routes to queue as a digest"
 
@@ -77,27 +76,64 @@ cat > "$ev" <<'JSON'
  "webhookTimestamp":1784150000000}
 JSON
 run_worker "$hk" "$ev" >/dev/null
-event=$(cat "$(find "$hk/queue/incoming" -type f -name '*.json')")
-assert_contains "$event" '"severity":"digest"' "a non-mention comment is a digest"
-assert_contains "$event" 'Comment on ENG-42' "comment title names the issue"
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "a non-mention comment is a digest"
+jq -e '.title | contains("Comment on ENG-42")' "$queued" >/dev/null || fail "comment title names the issue"
 pass "comment without a David mention is kept as a digest"
 
 # --- blocker: SLA breach raises an alert whose first line is a sentence ------
+# Fallback path: the classifier is absent, so the worker owns queue and alert
+# placement itself.
 hk="$work/hk5"; ev="$work/ev5.json"
 cat > "$ev" <<'JSON'
 {"type":"Issue","action":"update","actor":{"name":"System"},
  "data":{"id":"issue-555","identifier":"ENG-99","title":"Critical path","url":"https://linear.app/x/ENG-99","slaStatus":"breached"},
  "webhookTimestamp":1784150000000}
 JSON
-run_worker "$hk" "$ev" >/dev/null
-event=$(cat "$(find "$hk/queue/incoming" -type f -name '*.json')")
-assert_contains "$event" '"severity":"blocker"' "SLA breach is a blocker"
+run_worker "$hk" "$ev" FM_HK_CLASSIFY_BIN="$work/no-such-classifier" >/dev/null
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+jq -e '.severity == "blocker"' "$queued" >/dev/null || fail "SLA breach is a blocker"
+jq -e '.kind == "IssueSLA"' "$queued" >/dev/null || fail "SLA breach keeps kind IssueSLA"
+jq -e '.action == "breached"' "$queued" >/dev/null || fail "SLA breach carries the breached action"
 alert=$(find "$hk/alerts/pending" -type f -name '*.txt')
 [ -n "$alert" ] || fail "SLA blocker did not raise a pending alert"
 first_line=$(head -1 "$alert")
 assert_contains "$first_line" "Linear blocker: ENG-99 Critical path" "alert first line is the sentence"
 assert_contains "$first_line" "SLA breached" "alert sentence names the SLA state"
 pass "SLA breach raises a blocker alert with a sentence first line"
+
+# --- blocker: the SLA handoff survives the installed classifier --------------
+# The classifier recomputes severity from kind and action, so the worker must
+# hand it kind IssueSLA plus the SLA action rather than issue/update.
+hk="$work/hk5b"; ev="$work/ev5b.json"
+cat > "$ev" <<'JSON'
+{"type":"IssueSLA","action":"highRisk","actor":{"name":"System"},
+ "data":{"id":"issue-556","identifier":"ENG-100","title":"Slipping","url":"https://linear.app/x/ENG-100"},
+ "webhookTimestamp":1784150000000}
+JSON
+run_worker "$hk" "$ev" >/dev/null 2>&1
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+[ -n "$queued" ] || fail "classifier did not store the SLA event"
+jq -e '.severity == "blocker"' "$queued" >/dev/null || fail "classifier stored the high-risk SLA event as a blocker"
+jq -e '.kind == "IssueSLA"' "$queued" >/dev/null || fail "stored SLA event keeps kind IssueSLA"
+jq -e '.action == "highRisk"' "$queued" >/dev/null || fail "stored SLA event carries the highRisk action"
+[ "$(find "$hk/alerts/pending" -type f 2>/dev/null | wc -l | tr -d ' ')" = 1 ] || fail "classifier did not raise the SLA alert"
+pass "high-risk SLA webhook routes through the classifier as a blocker with an alert"
+
+# --- digest: an SLA being set is not an emergency ----------------------------
+hk="$work/hk5c"; ev="$work/ev5c.json"
+cat > "$ev" <<'JSON'
+{"type":"IssueSLA","action":"set","actor":{"name":"System"},
+ "data":{"id":"issue-557","identifier":"ENG-101","title":"Fresh SLA","url":"https://linear.app/x/ENG-101"},
+ "webhookTimestamp":1784150000000}
+JSON
+run_worker "$hk" "$ev" >/dev/null 2>&1
+queued=$(find "$hk/queue/incoming" -type f -name '*.json')
+[ -n "$queued" ] || fail "SLA-set event did not land in queue/incoming"
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "SLA set is a digest, not a blocker"
+jq -e '.kind == "IssueSLA" and .action == "set"' "$queued" >/dev/null || fail "SLA-set event keeps kind IssueSLA and the set action"
+[ "$(find "$hk/alerts/pending" -type f 2>/dev/null | wc -l | tr -d ' ')" = 0 ] || fail "SLA set wrongly raised an alert"
+pass "SLA set stays a digest with no alert"
 
 # --- delegation: hk-classify.mjs owns routing when present ------------------
 hk="$work/hk6"; ev="$work/ev6.json"

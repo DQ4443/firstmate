@@ -60,11 +60,10 @@ done
 [ -n "$queued" ] || fail "no housekeeping event landed in queue/incoming"
 pass "normalized event lands in queue/incoming"
 
-event=$(cat "$queued")
-assert_contains "$event" '"source":"linear"' "queued event carries the linear source"
-assert_contains "$event" '"id":"issue-e2e-1"' "queued event carries the stable id"
-assert_contains "$event" '"severity":"digest"' "state change classifies as digest"
-assert_contains "$event" 'ENG-777' "queued event carries the issue identifier"
+jq -e '.source == "linear"' "$queued" >/dev/null || fail "queued event carries the linear source"
+jq -e '.id == "issue-e2e-1"' "$queued" >/dev/null || fail "queued event carries the stable id"
+jq -e '.severity == "digest"' "$queued" >/dev/null || fail "state change classifies as digest"
+jq -e '.title | contains("ENG-777")' "$queued" >/dev/null || fail "queued event carries the issue identifier"
 pass "queued event matches the housekeeping schema"
 
 [ "$(find "$hk_root/linear/done" -type f -name '*.json' | wc -l | tr -d ' ')" = 1 ] || fail "raw delivery was not archived to linear/done"

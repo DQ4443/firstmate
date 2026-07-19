@@ -78,11 +78,23 @@ decision=$(
     | (.data // {}) as $d
     | (.updatedFrom // {}) as $from
 
-    # SLA blocker signal: only an explicit breached or high-risk status counts,
-    # never a mere future slaBreachesAt timestamp. Checked defensively across
-    # the plausible payload fields.
-    | ([ $type, $action, ($d.slaStatus | lc), ($d.slaType | lc), ($d.sla.status | lc) ]
-        | map(select(test("breach|high[_ ]?risk"))) | length > 0) as $sla_blocker
+    # SLA signal. The dedicated convenience webhook is type IssueSLA with
+    # action set/highRisk/breached; older issue payloads carry the state in
+    # slaStatus/slaType/sla.status. The classifier recomputes severity from
+    # kind and action, so an SLA event must keep kind IssueSLA and its SLA
+    # action instead of flattening to issue/update. Only breached or high-risk
+    # is a blocker: an SLA merely being set, or a future slaBreachesAt
+    # timestamp, is not an emergency.
+    | ([ ($d.slaStatus | lc), ($d.slaType | lc), ($d.sla.status | lc) ]) as $sla_fields
+    | (($sla_fields | map(select(test("breach"))) | length) > 0) as $sla_breach_field
+    | (($sla_fields | map(select(test("high[_ -]?risk"))) | length) > 0) as $sla_risk_field
+    | (($type == "issuesla")
+        or ($action | test("^(set|high[_-]?risk|breached)$"))
+        or $sla_breach_field or $sla_risk_field) as $sla_event
+    | (if ($action == "breached") or $sla_breach_field then "breached"
+       elif ($action | test("^high[_-]?risk$")) or $sla_risk_field then "highRisk"
+       else "set" end) as $sla_action
+    | ($sla_event and ($sla_action != "set")) as $sla_blocker
 
     # Assignee of the entity, either the expanded object id or the flat id.
     | (($d.assignee.id // $d.assigneeId) // null) as $assignee_id
@@ -115,7 +127,7 @@ decision=$(
     # Short detail line, deterministic per change kind.
     | (if $type == "comment" then
          (($d.body // "") | gsub("\\s+"; " ") | .[0:140])
-       elif $sla_blocker then
+       elif $sla_event then
          ("SLA " + ([ ($d.slaStatus // ""), ($d.slaType // ""), (.action // "") ]
            | map(select(. != "")) | (.[0] // "at risk")))
        elif (($type == "issue") and ($from | has("stateId"))) then
@@ -131,8 +143,10 @@ decision=$(
         source: "linear",
         id: ($d.id // .id // ""),
         ts: event_ts,
-        kind: (if $type == "" then "linear" else $type end),
-        action: $norm_action,
+        kind: (if $sla_event then "IssueSLA"
+               elif $type == "" then "linear"
+               else $type end),
+        action: (if $sla_event then $sla_action else $norm_action end),
         actor: $actor,
         title: $title,
         url: $url,
