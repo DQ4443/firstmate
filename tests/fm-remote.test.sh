@@ -52,28 +52,38 @@ expect_fail() {
   pass "$label"
 }
 
-# --- launch: session name, brief path, detached tmux, claude prompt -----------
+# --- launch: session name, brief path, detached tmux, pointer flow ------------
 
 out=$("$BIN" --dry-run launch demo "Build the thing" "and test it")
 assert_has "launch: brief written via ssh stdin" "$out" 'printf %s <brief> | ssh testbox'
 assert_has "launch: brief mkdir+cat to per-task path" "$out" 'mkdir -p $HOME/fm/briefs && cat > $HOME/fm/briefs/demo.md'
 assert_has "launch: detached tmux session named fm-<task>" "$out" 'tmux new -d -s fm-demo'
 assert_has "launch: default remote dir" "$out" '-c $HOME/dev/personal/firstmate'
-assert_has "launch: claude receives the brief as initial prompt" "$out" 'claude "$(cat $HOME/fm/briefs/demo.md)"'
-pass "launch dry-run prints the brief write and detached tmux launch"
+# The brief must NOT ride claude's argv (the trust dialog would swallow it);
+# claude starts bare and the brief is delivered as a pointer over the TUI.
+assert_has "launch: claude starts with no prompt argument" "$out" "-c \$HOME/dev/personal/firstmate 'claude'"
+assert_lacks "launch: brief is not passed as claude argv" "$out" '$(cat $HOME/fm/briefs/demo.md)'
+assert_has "launch: polls the pane for the trust/input prompt" "$out" 'tmux capture-pane -p -t fm-demo'
+assert_has "launch: delivers a pointer prompt over the TUI" "$out" "tmux send-keys -t fm-demo -l 'You are FM session fm-demo. Read the file ~/fm/briefs/demo.md and execute it as your brief.'"
+assert_has "launch: pointer submitted with Enter" "$out" 'tmux send-keys -t fm-demo Enter'
+assert_has "launch: dry-run shows the brief that would be written" "$out" 'Build the thing and test it'
+pass "launch dry-run prints the brief write, bare claude launch, and pointer delivery"
 
 # --- launch: --dir and --claude-args ------------------------------------------
 
 out=$("$BIN" --dry-run launch build7 --dir '$HOME/work/foo' --claude-args '--model opus --verbose' "do the work")
 assert_has "launch --dir: custom working dir" "$out" '-c $HOME/work/foo'
-assert_has "launch --claude-args: flags precede the prompt" "$out" 'claude --model opus --verbose "$(cat $HOME/fm/briefs/build7.md)"'
+assert_has "launch --claude-args: flags reach the bare claude launch" "$out" "'claude --model opus --verbose'"
+assert_lacks "launch --claude-args: brief still not on claude argv" "$out" '$(cat $HOME/fm/briefs/build7.md)'
+assert_has "launch --claude-args: pointer references the per-task brief" "$out" 'Read the file ~/fm/briefs/build7.md'
 assert_has "launch --dir: session name still fm-<task>" "$out" 'tmux new -d -s fm-build7'
 pass "launch dry-run threads --dir and --claude-args into the tmux command"
 
 # --dir/--claude-args may also appear after the brief-less flags in --key=value form.
 out=$("$BIN" --dry-run launch kv --dir=$'$HOME/x' --claude-args='--foo' "brief text")
 assert_has "launch =form: --dir=" "$out" '-c $HOME/x'
-assert_has "launch =form: --claude-args=" "$out" 'claude --foo "$(cat $HOME/fm/briefs/kv.md)"'
+assert_has "launch =form: --claude-args=" "$out" "'claude --foo'"
+assert_has "launch =form: pointer references the per-task brief" "$out" 'Read the file ~/fm/briefs/kv.md'
 pass "launch dry-run accepts --dir= and --claude-args= forms"
 
 # --- ls -----------------------------------------------------------------------
@@ -125,11 +135,45 @@ out=$("$BIN" --dry-run kill demo)
 assert_has "kill: kill-session on fm-<task>" "$out" 'ssh testbox tmux kill-session -t fm-demo'
 pass "kill dry-run kills the fm-<task> session"
 
-# --- --dry-run is positional-agnostic -----------------------------------------
+# --- --dry-run is a LEADING flag only -----------------------------------------
 
-out=$("$BIN" kill demo --dry-run)
-assert_has "--dry-run after subcommand still dry" "$out" 'ssh testbox tmux kill-session -t fm-demo'
-pass "--dry-run works when it trails the subcommand"
+# --dry-run is recognized only before the command word. After the command it is
+# an ordinary argument, so `kill demo --dry-run` is a real (non-dry) kill with an
+# extra argument and must fail its arity check rather than silently going dry.
+expect_fail "--dry-run after the command is not a global flag" kill demo --dry-run
+
+# The point of the leading-only rule: a brief may contain the literal --dry-run
+# without being turned into a no-op. In the dry-run harness the token must survive
+# verbatim into the brief that would be written.
+out=$("$BIN" --dry-run launch demo please run in --dry-run mode)
+assert_has "brief keeps a literal --dry-run token" "$out" 'please run in --dry-run mode'
+assert_has "brief-with-token still launches for real" "$out" 'tmux new -d -s fm-demo'
+pass "--dry-run is leading-only; a --dry-run inside the brief is not swallowed"
+
+# --- injection: task name and flag-value validation ---------------------------
+
+# A task name is a tmux session name spliced into every remote command, so any
+# shell metacharacter in it must be rejected before an ssh call is built.
+expect_fail "launch: task with a semicolon" --dry-run launch 'a;b' "brief"
+expect_fail "launch: task with a space" --dry-run launch 'a b' "brief"
+expect_fail "launch: task with a command substitution" --dry-run launch 'x$(y)' "brief"
+expect_fail "peek: injection task rejected" --dry-run peek 'a;b'
+expect_fail "steer: injection task rejected" --dry-run steer 'a;b' "hi"
+expect_fail "kill: injection task rejected" --dry-run kill 'a;b'
+expect_fail "attach: injection task rejected" --dry-run attach 'a;b'
+
+# --dir is interpolated unquoted on the remote; a command substitution must die.
+expect_fail "launch --dir with a command substitution" --dry-run launch demo --dir '$(whoami)' "brief"
+expect_fail "launch --dir with a semicolon" --dry-run launch demo --dir 'a;b' "brief"
+# --claude-args is interpolated into the inner sh -c; a command chain must die.
+expect_fail "launch --claude-args with a semicolon" --dry-run launch demo --claude-args '; rm -rf /' "brief"
+expect_fail "launch --claude-args with a backtick" --dry-run launch demo --claude-args '`id`' "brief"
+
+# A legitimate remote $HOME dir and ordinary flag string still pass.
+out=$("$BIN" --dry-run launch ok --dir '$HOME/w' --claude-args '--model opus' "brief")
+assert_has "launch: valid $HOME dir accepted" "$out" '-c $HOME/w'
+assert_has "launch: valid claude flags accepted" "$out" "'claude --model opus'"
+pass "launch accepts a valid remote \$HOME dir and a plain flag string"
 
 # --- usage / validation errors ------------------------------------------------
 
