@@ -131,8 +131,11 @@ issue_key() {
   printf '%s' "${key:-Other}"
 }
 
-# Build the digest block in a temp file.
-tmp="$(mktemp)"
+# Build the digest block in a temp file in the digests dir (same filesystem as
+# the target, so the mv into place is atomic and preserves the 0600 mode).
+# mktemp creates the file 0600; the digest carries distilled meeting notes and
+# grouped Linear items, so it must never be world-readable, not even briefly.
+tmp="$(mktemp "$digests/.digest.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
 {
@@ -169,12 +172,19 @@ trap 'rm -f "$tmp"' EXIT
   fi
 } >"$tmp"
 
-# Append to an existing slot file, else create it.
+# Append to an existing slot file, else create it. The digest is kept 0600 in
+# both paths: the create path moves the already-0600 temp file into place (no
+# world-readable window), and the append path re-asserts 0600 after writing.
 if [ -s "$outfile" ]; then
-  printf '\n' >>"$outfile"
-  cat "$tmp" >>"$outfile"
+  {
+    printf '\n'
+    cat "$tmp"
+  } >>"$outfile"
+  chmod 600 "$outfile"
+  rm -f "$tmp"
 else
-  cat "$tmp" >"$outfile"
+  chmod 600 "$tmp"
+  mv "$tmp" "$outfile"
 fi
 
 # Move folded events to processed only after the digest is written.

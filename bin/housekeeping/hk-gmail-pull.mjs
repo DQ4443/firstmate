@@ -221,19 +221,33 @@ async function processHistory(startHistoryId, labelId, token) {
 // resync the cursor to the mailbox's current historyId.
 async function resyncFromMessages(labelId, token) {
   log("hk-gmail-pull", { status: "resync-start" });
-  let url = "/messages?maxResults=25";
-  if (labelId) url += `&labelIds=${encodeURIComponent(labelId)}`;
-  const list = await gmailGet(url, token);
-  for (const m of list.messages || []) {
-    const { event, kind } = await buildMessageEvent(m.id, token);
-    if (kind === "notes") await enrichNotes(event);
-    // Dedup in hk-classify prevents reprocessing anything already stored.
-    await pipeToClassify(event);
-  }
+  // Page through the full labelled list. A resync exists precisely to recover
+  // from a long outage, so it must not cap at one page: any messages beyond the
+  // first page would be skipped forever once the cursor jumps to now below.
+  let pageToken = null;
+  let processed = 0;
+  do {
+    let url = "/messages?maxResults=100";
+    if (labelId) url += `&labelIds=${encodeURIComponent(labelId)}`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const list = await gmailGet(url, token);
+    for (const m of list.messages || []) {
+      const { event, kind } = await buildMessageEvent(m.id, token);
+      if (kind === "notes") await enrichNotes(event);
+      // Dedup in hk-classify prevents reprocessing anything already stored.
+      await pipeToClassify(event);
+      processed += 1;
+    }
+    pageToken = list.nextPageToken || null;
+  } while (pageToken);
   const profile = await gmailGet("", token);
   if (profile.historyId)
     await writeCursor("gmail-history-id", profile.historyId);
-  log("hk-gmail-pull", { status: "resync-done", historyId: profile.historyId });
+  log("hk-gmail-pull", {
+    status: "resync-done",
+    historyId: profile.historyId,
+    processed,
+  });
 }
 
 // Handle one Pub/Sub notification: advance from the stored cursor.

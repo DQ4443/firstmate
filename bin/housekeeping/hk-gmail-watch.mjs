@@ -155,7 +155,15 @@ export async function registerWatch() {
     labelIds: [labelId],
     labelFilterBehavior: "INCLUDE",
   });
-  await writeCursor("gmail-history-id", resp.historyId);
+  // Seed the pull cursor only on first register. A daily renew re-issues watch
+  // and returns the mailbox's *current* historyId; overwriting the cursor with
+  // it would jump the pull cursor forward to now, silently skipping every
+  // message the pull daemon had not yet processed (e.g. while it was down).
+  // The pull daemon owns advancing gmail-history-id from here on.
+  const existingHistoryId = await readCursor("gmail-history-id");
+  if (existingHistoryId == null) {
+    await writeCursor("gmail-history-id", resp.historyId);
+  }
   // watch expiration is epoch millis as a string.
   await writeCursor("gmail-watch-expiry", resp.expiration);
   await writeCursor("gmail-label-id", labelId);
