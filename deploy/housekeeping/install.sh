@@ -114,11 +114,12 @@ mkdir -p \
   "$ROOT/queue/incoming" "$ROOT/queue/processed" \
   "$ROOT/alerts/pending" "$ROOT/digests/pending" \
   "$ROOT/secrets" "$ROOT/cursors"
-# World-agnostic but private-ish dirs; secrets is strict 700.
-chmod 755 "$ROOT" "$ROOT/queue" "$ROOT/queue/incoming" "$ROOT/queue/processed" \
+# Single-user daemon: the whole runtime tree is private (700). The state holds
+# Linear issue titles/bodies, email subjects, and distilled meeting notes, so no
+# other local uid ever needs to list or read it. secrets stays 700 too.
+chmod 700 "$ROOT" "$ROOT/queue" "$ROOT/queue/incoming" "$ROOT/queue/processed" \
   "$ROOT/alerts" "$ROOT/alerts/pending" "$ROOT/digests" "$ROOT/digests/pending" \
-  "$ROOT/cursors"
-chmod 700 "$ROOT/secrets"
+  "$ROOT/cursors" "$ROOT/secrets"
 # Tighten any secret files ALREADY present to 600; never create or overwrite them.
 find "$ROOT/secrets" -type f -exec chmod 600 {} + 2>/dev/null || true
 printf 'tree ok: %s\n' "$ROOT"
@@ -156,6 +157,43 @@ rsync -a "${REPO_ROOT}/deploy/housekeeping/units/"*.service "${REMOTE}:${UNIT_DI
 rsync -a "${REPO_ROOT}/deploy/housekeeping/units/"*.timer   "${REMOTE}:${UNIT_DIR}/"
 "${SSH[@]}" "systemctl --user daemon-reload"
 log "units installed and daemon reloaded"
+
+# ---- Preflight: every unit's ExecStart target must exist on the box ---------
+# A unit whose ExecStart points at a script the sibling leg never shipped (or a
+# path that drifted) fails silently at runtime: ExecStart errors, the service
+# never runs, and nothing surfaces until a digest or renewal is quietly missed.
+# This is a cross-leg interface contract that no single-branch test exercises, so
+# stat each installed unit's ExecStart script here and warn loudly on a miss.
+step "Preflighting ExecStart targets"
+"${SSH[@]}" "bash -s" -- "$UNIT_DIR" <<'REMOTE_PREFLIGHT'
+set -u
+UDIR="$1"
+miss=0
+for unit in "$HOME/$UDIR"/hk-*.service; do
+  [ -f "$unit" ] || continue
+  line="$(grep -m1 '^ExecStart=' "$unit" 2>/dev/null || true)"
+  [ -n "$line" ] || continue
+  # The script argument is the ExecStart token under the repo (%h -> $HOME); this
+  # skips the interpreter (/usr/bin/env bash|node) and any trailing args (%i, a
+  # subcommand like "renew").
+  target=""
+  for tok in $line; do
+    case "$tok" in
+      *%h/*) target="${tok/'%h'/$HOME}"; break ;;
+    esac
+  done
+  [ -n "$target" ] || continue
+  if [ ! -e "$target" ]; then
+    printf 'MISSING ExecStart target: %s -> %s\n' "$(basename "$unit")" "$target" >&2
+    miss=$((miss + 1))
+  fi
+done
+if [ "$miss" -gt 0 ]; then
+  printf 'WARNING: %s unit(s) point at a missing ExecStart script (leg not landed yet, or path drift).\n' "$miss" >&2
+else
+  printf 'preflight ok: all installed unit ExecStart targets present\n'
+fi
+REMOTE_PREFLIGHT
 
 # ---- Enable timers and long-running services -------------------------------
 step "Enabling timers"

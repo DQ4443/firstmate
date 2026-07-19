@@ -14,7 +14,7 @@ Type=oneshot
 WorkingDirectory=%h/firstmate
 Environment=FM_HK_ROOT=%h/fm-state/housekeeping
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-gmail-watch-renew.mjs
+ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-gmail-watch.mjs renew
 
 # Hardening (mandatory four plus cheap kernel-surface reductions).
 NoNewPrivileges=true

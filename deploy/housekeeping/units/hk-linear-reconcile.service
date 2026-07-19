@@ -13,7 +13,7 @@ Type=oneshot
 WorkingDirectory=%h/firstmate
 Environment=FM_HK_ROOT=%h/fm-state/housekeeping
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-linear-reconcile.mjs
+ExecStart=/usr/bin/env bash %h/firstmate/bin/housekeeping/hk-linear-reconcile.sh
 
 # Hardening (mandatory four plus cheap kernel-surface reductions).
 NoNewPrivileges=true
