@@ -1,0 +1,26 @@
+# Housekeeping FM: Linear reconcile sweep (missed-webhook safety net).
+# Every 6 hours it re-reads Linear via the API and folds in anything the webhook
+# dropped, using the cursor in cursors/linear-reconcile-cursor. Silent unless it
+# finds divergence. Oneshot, driven by hk-linear-reconcile.timer.
+[Unit]
+Description=Housekeeping FM Linear reconcile sweep (every 6h)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/firstmate
+Environment=FM_HK_ROOT=%h/fm-state/housekeeping
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-linear-reconcile.mjs
+
+# Hardening (mandatory four plus cheap kernel-surface reductions).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/fm-state/housekeeping
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true

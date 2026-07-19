@@ -1,0 +1,26 @@
+# Housekeeping FM: digest builder, templated by slot.
+# %i is the slot passed by the timer: "morning" or "afternoon". The builder
+# folds queued digest events into digests/pending/<date>-<slot>.md; an empty
+# digest is never emitted. Oneshot, driven by the two hk-digest-*.timer units.
+[Unit]
+Description=Housekeeping FM digest builder (%i slot)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/firstmate
+Environment=FM_HK_ROOT=%h/fm-state/housekeeping
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-digest.mjs %i
+
+# Hardening (mandatory four plus cheap kernel-surface reductions).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/fm-state/housekeeping
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true

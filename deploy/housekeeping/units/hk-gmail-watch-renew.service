@@ -1,0 +1,27 @@
+# Housekeeping FM: daily Gmail users.watch() renewal.
+# users.watch() expires about every 7 days; this renews it daily so the mailbox
+# push registration never lapses. Oneshot, driven by hk-gmail-watch-renew.timer.
+# ConditionPathExists keeps it quiet until the OAuth bootstrap has run.
+[Unit]
+Description=Housekeeping FM Gmail watch renewal (daily)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/fm-state/housekeeping/secrets/google-token.json
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/firstmate
+Environment=FM_HK_ROOT=%h/fm-state/housekeeping
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node %h/firstmate/bin/housekeeping/hk-gmail-watch-renew.mjs
+
+# Hardening (mandatory four plus cheap kernel-surface reductions).
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/fm-state/housekeeping
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
