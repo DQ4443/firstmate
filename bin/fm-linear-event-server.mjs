@@ -1,24 +1,72 @@
 #!/usr/bin/env node
 
+// Linear leg of the housekeeping intake daemon.
+// Receives signed Linear webhooks, verifies them, dedups by delivery, persists
+// the raw body, and hands each verified delivery to the worker. Every path
+// derives from FM_HK_ROOT (default $HOME/fm-state/housekeeping) so the server,
+// the worker, and the reconcile sweep all agree on one runtime tree.
+
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, open, readFile, readdir, rename, rmdir, unlink } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rmdir,
+  unlink,
+} from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import os from "node:os";
 import path from "node:path";
 
-const host = process.env.FM_LINEAR_EVENT_HOST || "127.0.0.1";
-const port = Number.parseInt(process.env.FM_LINEAR_EVENT_PORT || "4481", 10);
-const stateDir = process.env.FM_LINEAR_EVENT_STATE || path.join(process.cwd(), "state", "linear-events");
-const secretFile = process.env.FM_LINEAR_EVENT_SECRET_FILE || path.join(stateDir, "webhook-secret");
-const worker = process.env.FM_LINEAR_EVENT_WORKER || path.join(process.cwd(), "bin", "fm-linear-event-worker.sh");
-const maxBody = Number.parseInt(process.env.FM_LINEAR_EVENT_MAX_BODY || "1048576", 10);
-const maxAgeMs = Number.parseInt(process.env.FM_LINEAR_EVENT_MAX_AGE_MS || "60000", 10);
-const allowedOrg = process.env.FM_LINEAR_EVENT_ORGANIZATION_ID || "";
-const inboxDir = path.join(stateDir, "inbox");
-const doneDir = path.join(stateDir, "done");
-const failedDir = path.join(stateDir, "failed");
-const claimsDir = path.join(stateDir, "claims");
-const logFile = path.join(stateDir, "events.log");
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+
+// Runtime tree. FM_HK_ROOT is the single source of truth; the worker and the
+// reconcile sweep default to the same path, and the server re-exports the
+// resolved value into the worker's environment so a defaulted root can never
+// drift between the two processes.
+const hkRoot =
+  process.env.FM_HK_ROOT || path.join(os.homedir(), "fm-state", "housekeeping");
+const secretFile =
+  process.env.FM_HK_LINEAR_SECRET_FILE ||
+  path.join(hkRoot, "secrets", "linear-webhook-secret");
+const worker =
+  process.env.FM_HK_LINEAR_WORKER ||
+  path.join(scriptDir, "fm-linear-event-worker.sh");
+
+// Raw-delivery staging for the Linear leg, kept apart from the contract's
+// normalized queue/ tree. inbox holds accepted-but-unprocessed raw bodies,
+// done holds processed raw bodies (the reconcile sweep reads these), failed
+// holds deliveries the worker could not normalize, claims dedups Linear-Delivery.
+const linearDir = path.join(hkRoot, "linear");
+const inboxDir = path.join(linearDir, "inbox");
+const doneDir = path.join(linearDir, "done");
+const failedDir = path.join(linearDir, "failed");
+const claimsDir = path.join(linearDir, "claims");
+const logFile = path.join(linearDir, "events.log");
+
+// Listen address. FM_HK_LINEAR_ADDR is host:port; split on the last colon so an
+// explicit host is preserved, defaulting to the documented 127.0.0.1:4481.
+const listenAddr = process.env.FM_HK_LINEAR_ADDR || "127.0.0.1:4481";
+const lastColon = listenAddr.lastIndexOf(":");
+const host = lastColon > 0 ? listenAddr.slice(0, lastColon) : "127.0.0.1";
+const port = Number.parseInt(
+  lastColon > 0 ? listenAddr.slice(lastColon + 1) : listenAddr,
+  10,
+);
+
+// Verification and dedup limits, kept exactly as the vetted intake: a hard 1MiB
+// body cap and a 60 second webhookTimestamp freshness window.
+const maxBody = 1048576;
+const maxAgeMs = 60000;
+const allowedOrg = process.env.FM_HK_LINEAR_ORGANIZATION_ID || "";
+const workerTimeoutMs = Number.parseInt(
+  process.env.FM_HK_LINEAR_WORKER_TIMEOUT_MS || "180000",
+  10,
+);
 
 let queue = Promise.resolve();
 
@@ -28,7 +76,7 @@ function fail(message) {
 }
 
 async function appendLog(message) {
-  await mkdir(stateDir, { recursive: true });
+  await mkdir(linearDir, { recursive: true });
   const fh = await open(logFile, "a", 0o600);
   try {
     await fh.appendFile(`${new Date().toISOString()} ${message}\n`);
@@ -71,7 +119,7 @@ function runWorker(file) {
   return new Promise((resolve, reject) => {
     const child = spawn(worker, [file], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, FM_HK_ROOT: hkRoot },
     });
     let stderr = "";
     child.stderr.on("data", (chunk) => {
@@ -80,7 +128,7 @@ function runWorker(file) {
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       setTimeout(() => child.kill("SIGKILL"), 2000).unref();
-    }, Number.parseInt(process.env.FM_LINEAR_EVENT_WORKER_TIMEOUT_MS || "180000", 10));
+    }, workerTimeoutMs);
     child.on("error", reject);
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
@@ -99,7 +147,11 @@ function enqueue(file) {
       await appendLog(`processed ${base}`);
     } catch (error) {
       await rename(file, path.join(failedDir, base)).catch(() => {});
-      await appendLog(`failed ${base}: ${String(error.message || error).replaceAll("\n", " ").slice(0, 600)}`);
+      await appendLog(
+        `failed ${base}: ${String(error.message || error)
+          .replaceAll("\n", " ")
+          .slice(0, 600)}`,
+      );
     }
   });
 }
@@ -141,7 +193,10 @@ async function receive(req, res, secret) {
     return;
   }
   const timestamp = Number(event.webhookTimestamp);
-  if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > maxAgeMs) {
+  if (
+    !Number.isFinite(timestamp) ||
+    Math.abs(Date.now() - timestamp) > maxAgeMs
+  ) {
     res.writeHead(401).end();
     return;
   }
@@ -152,7 +207,8 @@ async function receive(req, res, secret) {
 
   const key = deliveryKey(req, body);
   const file = path.join(inboxDir, `${key}.json`);
-  for (const dir of [inboxDir, doneDir, failedDir, claimsDir]) await mkdir(dir, { recursive: true });
+  for (const dir of [inboxDir, doneDir, failedDir, claimsDir])
+    await mkdir(dir, { recursive: true });
   try {
     await mkdir(path.join(claimsDir, key));
   } catch (error) {
@@ -172,20 +228,33 @@ async function receive(req, res, secret) {
   enqueue(file);
 }
 
-if (!Number.isInteger(port) || port < 1 || port > 65535) fail("invalid port");
+if (!Number.isInteger(port) || port < 1 || port > 65535)
+  fail(`invalid listen address: ${listenAddr}`);
 const secret = (await readFile(secretFile, "utf8").catch(() => "")).trim();
 if (!secret) fail(`missing webhook secret: ${secretFile}`);
-for (const dir of [stateDir, inboxDir, doneDir, failedDir, claimsDir]) await mkdir(dir, { recursive: true });
+for (const dir of [linearDir, inboxDir, doneDir, failedDir, claimsDir])
+  await mkdir(dir, { recursive: true });
 
+// Startup drain: reprocess any raw delivery persisted before a crash. This
+// consumes only already-received, already-persisted bodies; it never reaches
+// out to Linear.
 for (const name of await readdir(inboxDir)) {
   if (/^[0-9a-f]{64}\.json$/.test(name)) enqueue(path.join(inboxDir, name));
 }
 
 const server = createServer((req, res) => {
   receive(req, res, secret).catch(async (error) => {
-    await appendLog(`request error: ${String(error.message || error).replaceAll("\n", " ").slice(0, 600)}`).catch(() => {});
+    await appendLog(
+      `request error: ${String(error.message || error)
+        .replaceAll("\n", " ")
+        .slice(0, 600)}`,
+    ).catch(() => {});
     if (!res.headersSent) res.writeHead(500);
     res.end();
   });
 });
-server.listen(port, host, () => process.stdout.write(`fm-linear-event-server listening on http://${host}:${port}\n`));
+server.listen(port, host, () =>
+  process.stdout.write(
+    `fm-linear-event-server listening on http://${host}:${port}\n`,
+  ),
+);

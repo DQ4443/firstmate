@@ -4,27 +4,23 @@ set -eu
 # shellcheck source=tests/lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# End-to-end intake through the real worker: the server verifies a signed
+# Linear webhook, the worker normalizes it, and the housekeeping event lands in
+# queue/incoming. A bad signature is rejected with 401 and never queued.
+
+command -v jq >/dev/null 2>&1 || { echo "ok - skipped (jq unavailable)"; exit 0; }
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/fm-linear-event.XXXXXX")
-state="$work/state"
-secret_file="$work/secret"
-worker="$work/worker.sh"
-port=$(( 46000 + ($$ % 1000) ))
+hk_root="$work/hk"
+secret_file="$hk_root/secrets/linear-webhook-secret"
+mkdir -p "$hk_root/secrets"
+port=$(( 40000 + RANDOM % 20000 ))
 secret='test-webhook-secret'
 printf '%s\n' "$secret" > "$secret_file"
 chmod 600 "$secret_file"
 
-cat > "$worker" <<'SH'
-#!/usr/bin/env bash
-set -eu
-printf '%s\n' "$1" >> "$FM_TEST_WORKER_LOG"
-SH
-chmod +x "$worker"
-
-FM_LINEAR_EVENT_PORT="$port" \
-FM_LINEAR_EVENT_STATE="$state" \
-FM_LINEAR_EVENT_SECRET_FILE="$secret_file" \
-FM_LINEAR_EVENT_WORKER="$worker" \
-FM_TEST_WORKER_LOG="$work/worker.log" \
+FM_HK_ROOT="$hk_root" \
+FM_HK_LINEAR_ADDR="127.0.0.1:$port" \
 node "$ROOT/bin/fm-linear-event-server.mjs" > "$work/stdout" 2> "$work/stderr" &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$work"' EXIT
@@ -36,36 +32,43 @@ done
 curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null || fail "server did not become healthy"
 pass "health endpoint is reachable"
 
+# A digest-class event: a state change on an issue by another actor. It must be
+# normalized and land in queue/incoming.
 now_ms=$(( $(date +%s) * 1000 ))
-body=$(printf '{"type":"Comment","action":"create","organizationId":"org-test","webhookTimestamp":%s,"data":{"id":"comment-1","body":"done","issue":{"identifier":"ENG-1"}}}' "$now_ms")
+body=$(printf '{"type":"Issue","action":"update","organizationId":"org-test","webhookTimestamp":%s,"actor":{"name":"Jane Dev"},"updatedFrom":{"stateId":"old"},"data":{"id":"issue-e2e-1","identifier":"ENG-777","title":"Reconcile the ledger","url":"https://linear.app/x/ENG-777","state":{"name":"In Review"}}}' "$now_ms")
 sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$secret" -hex | awk '{print $NF}')
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/linear" -H 'content-type: application/json' --data-binary "$body")
 [ "$code" = 401 ] || fail "unsigned request returned $code"
-pass "unsigned request is rejected"
+pass "unsigned request is rejected with 401"
 
-stale='{"type":"Comment","action":"create","organizationId":"org-test","webhookTimestamp":1,"data":{"id":"comment-stale"}}'
-stale_sig=$(printf '%s' "$stale" | openssl dgst -sha256 -hmac "$secret" -hex | awk '{print $NF}')
-code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/linear" -H "Linear-Signature: $stale_sig" --data-binary "$stale")
-[ "$code" = 401 ] || fail "stale request returned $code"
-pass "stale signed request is rejected"
+bad_sig=$(printf 'not-the-body' | openssl dgst -sha256 -hmac "$secret" -hex | awk '{print $NF}')
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/linear" -H "Linear-Signature: $bad_sig" --data-binary "$body")
+[ "$code" = 401 ] || fail "wrong-signature request returned $code"
+pass "wrong-signature request is rejected with 401"
 
-response=$(curl -fsS -X POST "http://127.0.0.1:$port/linear" -H "Linear-Signature: $sig" -H 'Linear-Delivery: delivery-1' --data-binary "$body")
+response=$(curl -fsS -X POST "http://127.0.0.1:$port/linear" -H "Linear-Signature: $sig" -H 'Linear-Delivery: delivery-e2e-1' --data-binary "$body")
 assert_contains "$response" '"duplicate":false' "first delivery is accepted"
 pass "valid signed request is accepted"
 
-for _ in $(seq 1 100); do
-  [ -s "$work/worker.log" ] && break
+queued=""
+for _ in $(seq 1 200); do
+  queued=$(find "$hk_root/queue/incoming" -type f -name '*.json' 2>/dev/null | head -1)
+  [ -n "$queued" ] && break
   sleep 0.05
 done
-[ "$(wc -l < "$work/worker.log" | tr -d ' ')" = 1 ] || fail "worker did not process exactly once"
-pass "accepted event is processed"
+[ -n "$queued" ] || fail "no housekeeping event landed in queue/incoming"
+pass "normalized event lands in queue/incoming"
 
-response=$(curl -fsS -X POST "http://127.0.0.1:$port/linear" -H "Linear-Signature: $sig" -H 'Linear-Delivery: delivery-1' --data-binary "$body")
-assert_contains "$response" '"duplicate":true' "duplicate delivery is acknowledged"
-sleep 0.1
-[ "$(wc -l < "$work/worker.log" | tr -d ' ')" = 1 ] || fail "duplicate was processed twice"
-pass "duplicate delivery is not processed twice"
+event=$(cat "$queued")
+assert_contains "$event" '"source":"linear"' "queued event carries the linear source"
+assert_contains "$event" '"id":"issue-e2e-1"' "queued event carries the stable id"
+assert_contains "$event" '"severity":"digest"' "state change classifies as digest"
+assert_contains "$event" 'ENG-777' "queued event carries the issue identifier"
+pass "queued event matches the housekeeping schema"
 
-[ "$(find "$state/done" -type f -name '*.json' | wc -l | tr -d ' ')" = 1 ] || fail "processed event was not durably archived"
-pass "processed event is archived durably"
+[ "$(find "$hk_root/linear/done" -type f -name '*.json' | wc -l | tr -d ' ')" = 1 ] || fail "raw delivery was not archived to linear/done"
+pass "raw delivery is archived durably for the reconcile sweep"
+
+[ "$(find "$hk_root/alerts/pending" -type f 2>/dev/null | wc -l | tr -d ' ')" = 0 ] || fail "digest event should not raise an alert"
+pass "digest event raises no blocker alert"

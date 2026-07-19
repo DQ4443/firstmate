@@ -13,20 +13,10 @@
   <string>__FIRSTMATE_ROOT__</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>FM_LINEAR_EVENT_HOST</key>
-    <string>127.0.0.1</string>
-    <key>FM_LINEAR_EVENT_PORT</key>
-    <string>4481</string>
-    <key>FM_LINEAR_EVENT_STATE</key>
-    <string>__FIRSTMATE_ROOT__/state/linear-events</string>
-    <key>FM_LINEAR_EVENT_SECRET_FILE</key>
-    <string>__FIRSTMATE_ROOT__/state/linear-events/webhook-secret</string>
-    <key>FM_LINEAR_EVENT_WORKER</key>
-    <string>__FIRSTMATE_ROOT__/bin/fm-linear-event-worker.sh</string>
-    <key>FM_LINEAR_EVENT_CLAUDE</key>
-    <string>__CLAUDE__</string>
-    <key>FM_ROOT_OVERRIDE</key>
-    <string>__FIRSTMATE_LIVE_ROOT__</string>
+    <key>FM_HK_ROOT</key>
+    <string>__FM_HK_ROOT__</string>
+    <key>FM_HK_LINEAR_ADDR</key>
+    <string>127.0.0.1:4481</string>
     <key>PATH</key>
     <string>__PATH__</string>
   </dict>
@@ -37,8 +27,8 @@
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>__FIRSTMATE_ROOT__/state/linear-events/service.stdout.log</string>
+  <string>__FM_HK_ROOT__/linear/service.stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>__FIRSTMATE_ROOT__/state/linear-events/service.stderr.log</string>
+  <string>__FM_HK_ROOT__/linear/service.stderr.log</string>
 </dict>
 </plist>
