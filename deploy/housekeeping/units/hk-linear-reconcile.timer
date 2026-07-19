@@ -1,0 +1,13 @@
+# Fires hk-linear-reconcile.service every 6 hours (00:00, 06:00, 12:00, 18:00 local).
+# Persistent=true catches up a missed sweep after the box was asleep.
+[Unit]
+Description=Housekeeping FM Linear reconcile timer (every 6h)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+Unit=hk-linear-reconcile.service
+
+[Install]
+WantedBy=timers.target

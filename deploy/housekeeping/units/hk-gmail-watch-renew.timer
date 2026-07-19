@@ -1,0 +1,13 @@
+# Fires hk-gmail-watch-renew.service daily at 03:15 America/Los_Angeles.
+# Persistent=true catches up a missed run (box asleep at 03:15) on next wake.
+[Unit]
+Description=Housekeeping FM Gmail watch renewal timer (daily 03:15 America/Los_Angeles)
+Documentation=file:%h/firstmate/docs/housekeeping-intake.md
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/Los_Angeles
+Persistent=true
+Unit=hk-gmail-watch-renew.service
+
+[Install]
+WantedBy=timers.target
