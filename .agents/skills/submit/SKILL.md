@@ -1,6 +1,6 @@
 ---
 name: submit
-description: Run the pull request tail after a change has been implemented and validated. Sync the real merge diff, review it adversarially, hold for explicit push and pull-request approval, babysit the open pull request, and close through Lavish without merging.
+description: Run the pull request tail after a change has been implemented and validated. Sync the real merge diff, review it adversarially, then in PASSIVE mode auto-push and auto-open the pull request at E2-green and drive the evidence to E5 (ACTIVE mode holds for explicit push and pull-request approval), babysit the open pull request, and close through Lavish, holding only for the merge word and never merging.
 ---
 
 # $submit: sync, adversarial panel, push, open pull request, babysit to green, closing report
@@ -84,8 +84,9 @@ Debug evidence includes recorded session identifiers, screenshots, or log excerp
 Validation includes exact commands and pass counts.
 Risk names what could still fail and the exact hunks worth human attention.
 
-Show the drafted title and body to the human and HOLD for explicit approval to push and open the pull request.
-After approval, push only the reviewed branch and open the pull request through the repository's approved GitHub tool.
+PASSIVE mode (David, 2026-07-20, standing): do NOT hold at E2 for pull-request approval.
+Once validation is E2-green, push the reviewed branch and open the pull request automatically, then keep looping the evidence to E5 (adversarial refute panel at the PR head, plus the deployed E3 proof where stageable), and hold ONLY for David's merge word.
+ACTIVE mode keeps the original gate: show the drafted title and body to the human and HOLD for explicit approval to push and open the pull request; after approval, push only the reviewed branch and open the pull request through the repository's approved GitHub tool.
 If a proven installed guard requires a one-shot submit sentinel, use only the sentinel documented by that guard immediately before opening the pull request.
 Do not invent a sentinel or bypass an unproven guard.
 Leave the pull request open.
@@ -101,7 +102,7 @@ Work on another independent task while the loop waits.
 Verify every CodeRabbit or human review comment against the actual current diff.
 Never dismiss a comment as pre-existing without checking it.
 Fix confirmed findings in an isolated writing worktree and commit explicit paths.
-HOLD for explicit human approval before every subsequent push, review reply, or review-thread resolution, then repeat.
+In ACTIVE mode, HOLD for explicit human approval before every subsequent push, review reply, or review-thread resolution, then repeat; in PASSIVE mode, fix-and-push loops run autonomously (outward review REPLIES still draft-and-hold), and the terminal hold is David's merge word.
 Resolve addressed review threads through the approved GitHub tool.
 
 ### 4. Re-panel every 4 stuck loops
@@ -128,8 +129,8 @@ The page is the merge decision surface, and `$submit` still does not merge.
 ## Constraints
 
 - Leave the pull request open.
-- Pull-request opening requires explicit human approval after the title and body are drafted.
-- Push requires that same explicit human approval and has no autonomous exception.
+- ACTIVE mode: pull-request opening and push require explicit human approval after the title and body are drafted.
+- PASSIVE mode (David 2026-07-20): push and pull-request opening at E2-green are autonomous; the loop then drives to E5 and holds only for the merge word.
 - Merge requires a separate explicit human decision and is never performed by `$submit`.
 - Give the opened pull request a risk rating and point to the exact high-risk hunks worth human review.
 - State which hunks the panel, local Codex review, and CodeRabbit already covered.
