@@ -2,6 +2,14 @@
 
 A structural backstop for the "no turn ends blind" discipline (AGENTS.md section 8), scoped to the firstmate PRIMARY session on the `claude` harness only.
 
+## Supervisors: poller primary, watcher escape hatch
+
+Under the workflow paradigm (2026-07-05) the live supervisor is the launchd poller `bin/fm-poll.sh` (job `com.firstmate.poller`, liveness beacon `state/.last-poller-beat`, plus a home-scoped singleton pid guard in `state/.poll.pid`).
+It replaced the old push-based watcher `bin/fm-watch.sh` (liveness beacon `state/.last-watcher-beat`, lock `state/.watch.lock`), which is retired for new dispatch and kept only as a documented escape hatch (AGENTS.md section 12).
+Every supervision-health check in this guard treats the two as equivalent and additive: a genuinely alive poller OR a genuinely alive watcher counts as supervised.
+So with the poller up, the guard stays silent; it fires only when NEITHER supervisor is live and work is in flight.
+This is what stops the false "TURN WOULD END BLIND" alarm the poller cutover would otherwise trip on every turn, without weakening the real blind-turn protection.
+
 ## The gap this closes
 
 `bin/fm-guard.sh` is pull-based: it warns whenever some other supervision script (`fm-peek`, `fm-send`, `fm-spawn`, `fm-teardown`, `fm-pr-check`, `fm-wake-drain`, ...) happens to run, and prints nothing otherwise.
@@ -50,14 +58,16 @@ result: "BANANA"
 
 ## Detection predicate
 
-`bin/fm-supervision-lib.sh` factors the exact "in-flight work exists, but no watcher has a fresh beacon" computation out of `bin/fm-guard.sh` into a shared function, `fm_supervision_unhealthy <state-dir> [grace-seconds]`.
-That remains the right predicate for the pull-based guard, where a brief gap after a wake fires should stay silent inside the grace window.
-It also exposes `fm_supervision_status` for callers that need the individual fields (in-flight count, beacon freshness/age, queued-wake pending) rather than just the boolean.
+`bin/fm-supervision-lib.sh` factors the exact "in-flight work exists, but no supervisor has a fresh beacon" computation out of `bin/fm-guard.sh` into a shared function, `fm_supervision_unhealthy <state-dir> [grace-seconds]`.
+"Supervised" means EITHER the poller beacon (`state/.last-poller-beat`) or the watcher beacon (`state/.last-watcher-beat`) is within the grace window, so a live poller alone keeps the predicate healthy.
+That remains the right predicate for the pull-based guard, where a brief gap after a cycle should stay silent inside the grace window.
+`fm_supervision_status` exposes the individual fields for callers that need them rather than just the boolean: in-flight count, `FM_SUP_WATCHER_FRESH`, `FM_SUP_POLLER_FRESH`, the combined `FM_SUP_SUPERVISED`, a `FM_SUP_BEACON_DESC` that names the freshest beacon (`poller 4s ago` / `watcher 12s ago` / `never`), and queued-wake pending.
 
 `bin/fm-turnend-guard.sh` deliberately uses a sharper end-of-turn predicate.
-It first uses `fm_supervision_status` to count in-flight tasks, then requires `fm_watcher_healthy <state-dir> <watch-path> [grace-seconds] [home]` from `bin/fm-wake-lib.sh`.
-That shared live-watcher check is the same one used by `bin/fm-watch-arm.sh`: the recorded `state/.watch.lock/pid` must name a live process, the lock's recorded home/path/pid-identity must match the current live pid, and `state/.last-watcher-beat` must still be within `FM_GUARD_GRACE`.
-This means a just-exited watcher with a fresh leftover beacon still blocks the Stop hook immediately, while a live but wedged watcher with an ancient beacon also blocks.
+It first uses `fm_supervision_status` to count in-flight tasks, then accepts the turn if EITHER `fm_poller_healthy <state-dir> [grace-seconds]` or `fm_watcher_healthy <state-dir> <watch-path> [grace-seconds] [home]` from `bin/fm-wake-lib.sh` reports a genuinely live supervisor.
+`fm_poller_healthy` mirrors the watcher check against the poller's own liveness record: the pid on line 1 of `state/.poll.pid` must name a live process, the process identity on line 2 (start time + command) must still match that live pid (so a recycled/reused pid fails, exactly as the poller's singleton guard treats it), and `state/.last-poller-beat` must be within `FM_GUARD_GRACE`.
+`fm_watcher_healthy` is the same check `bin/fm-watch-arm.sh` uses: the recorded `state/.watch.lock/pid` must name a live process, the lock's recorded home/path/pid-identity must match the current live pid, and `state/.last-watcher-beat` must still be within `FM_GUARD_GRACE`.
+Both are real liveness checks, not file-existence checks: a dead poller (or watcher) that left a fresh beacon behind still blocks the Stop hook, as does a live but wedged supervisor with an ancient beacon.
 
 ## Scoping to the PRIMARY only
 

@@ -10,13 +10,14 @@
 # First, always warn if the firstmate primary checkout (FM_ROOT) is on a named
 # non-default branch, because that means firstmate-on-itself work landed in the
 # primary instead of an isolated worktree.
-# Then, if any task is in flight (a state/<id>.meta exists) and the watcher's
-# liveness beacon (state/.last-watcher-beat, touched every poll cycle) is
-# missing or older than FM_GUARD_GRACE seconds, prints a loud, clearly delimited
-# banner so the agent cannot skim past it in the tool output of whatever it was
-# doing - the one channel every harness has. Normal wake handling (watcher
-# briefly down between a wake and its re-arm) stays inside the grace window and
-# stays silent. Always exits 0: the guard warns, it never blocks.
+# Then, if any task is in flight (a state/<id>.meta exists) and no supervisor has
+# a fresh liveness beacon - neither the launchd poller (state/.last-poller-beat)
+# nor the escape-hatch watcher (state/.last-watcher-beat), each touched every poll
+# cycle - within FM_GUARD_GRACE seconds, prints a loud, clearly delimited banner
+# so the agent cannot skim past it in the tool output of whatever it was doing -
+# the one channel every harness has. Normal handling (a supervisor briefly down
+# between cycles) stays inside the grace window and stays silent. Always exits 0:
+# the guard warns, it never blocks.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,37 +63,39 @@ if [ -n "$tangle_branch" ]; then
   } >&2
 fi
 
-# Compute in-flight count and watcher-beacon freshness via the shared
+# Compute in-flight count and supervisor-beacon freshness via the shared
 # grace-based predicate (bin/fm-supervision-lib.sh). Only act with tasks in
-# flight; count them so the banner can say how much is riding on an absent
-# watcher.
+# flight; count them so the banner can say how much is riding on absent
+# supervision. FM_SUP_SUPERVISED is true when EITHER the launchd poller or the
+# escape-hatch watcher has a fresh beacon, so a live poller alone stays silent.
 fm_supervision_status "$STATE" "$GRACE"
 in_flight=$FM_SUP_IN_FLIGHT
-watcher_fresh=$FM_SUP_WATCHER_FRESH
+supervised=$FM_SUP_SUPERVISED
 beacon_desc=$FM_SUP_BEACON_DESC
 [ "$in_flight" -eq 0 ] && exit 0
 
 [ -s "$FM_WAKE_QUEUE" ] && queue_pending=true
 
-# No fresh watcher with tasks in flight is the dangerous state: emit a prominent,
-# bordered banner FIRST so it reads as an alarm, not a buried stderr line.
-if [ "$watcher_fresh" = false ]; then
+# No fresh supervisor beacon with tasks in flight is the dangerous state: emit a
+# prominent, bordered banner FIRST so it reads as an alarm, not a buried stderr
+# line.
+if [ "$supervised" = false ]; then
   if [ "$READ_ONLY" -eq 1 ]; then
-    fix='Watcher repair belongs to the session holding the fleet lock; do not drain or re-arm from this read-only session.'
+    fix='Supervision repair belongs to the session holding the fleet lock; do not drain or re-arm from this read-only session.'
   elif "$queue_pending"; then
-    fix='After draining queued wakes, re-arm the watcher: run bin/fm-watch-arm.sh as the harness-tracked background task (never a shell & that gets reaped).'
+    fix='After draining queued wakes, restore supervision: verify the poller (launchctl list com.firstmate.poller), or arm the watcher escape hatch with bin/fm-watch-arm.sh as the harness-tracked background task (never a shell & that gets reaped).'
   else
-    fix='Re-arm it NOW: run bin/fm-watch-arm.sh as the harness-tracked background task (never a shell & that gets reaped).'
+    fix='Restore it NOW: verify the poller (launchctl list com.firstmate.poller), or arm the watcher escape hatch with bin/fm-watch-arm.sh as the harness-tracked background task (never a shell & that gets reaped).'
   fi
   rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   {
     printf '●%s\n' "$rule"
-    printf '●  WATCHER DOWN - SUPERVISION IS OFF\n'
-    printf '●  %s task(s) in flight, but no watcher has a fresh beacon (last beat: %s, grace %ss).\n' "$in_flight" "$beacon_desc" "$GRACE"
+    printf '●  SUPERVISION IS OFF - NO LIVE POLLER OR WATCHER\n'
+    printf '●  %s task(s) in flight, but no supervisor has a fresh beacon (last beat: %s, grace %ss).\n' "$in_flight" "$beacon_desc" "$GRACE"
     if [ "$READ_ONLY" -eq 1 ]; then
       printf '●  This read-only session should report the lapse, not repair it.\n'
     else
-      printf '●  Trust bin/fm-watch-arm.sh for the true state: it confirms a live watcher and a fresh beacon, or fails loudly.\n'
+      printf '●  Trust bin/fm-watch-arm.sh for the watcher state: it confirms a live watcher and a fresh beacon, or fails loudly.\n'
     fi
     printf '●  %s\n' "$fix"
     printf '●%s\n' "$rule"

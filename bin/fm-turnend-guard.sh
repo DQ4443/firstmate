@@ -76,14 +76,19 @@ GIT_COMMON_DIR=$(git -C "$FM_ROOT" rev-parse --git-common-dir 2>/dev/null) || ex
 
 fm_supervision_status "$STATE" "$GRACE"
 [ "$FM_SUP_IN_FLIGHT" -gt 0 ] || exit 0
+# The launchd poller (bin/fm-poll.sh) is the live supervisor; the watcher
+# (bin/fm-watch.sh) is the documented escape hatch. Either genuinely alive
+# supervisor is enough - do not block a turn just because the retired watcher is
+# down while the poller is up.
+fm_poller_healthy "$STATE" "$GRACE" && exit 0
 fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME" && exit 0
 
-REASON='tasks in flight, no live watcher - run bin/fm-watch-arm.sh as a background task before ending the turn'
+REASON='tasks in flight and neither the launchd poller nor the watcher is live - verify the poller (launchctl list com.firstmate.poller) or arm the watcher escape hatch (bin/fm-watch-arm.sh) before ending the turn'
 rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
 {
   printf '●%s\n' "$rule"
   printf '●  TURN WOULD END BLIND - SUPERVISION IS OFF\n'
-  printf '●  %s task(s) in flight, but no live watcher holds this home lock (last beat: %s).\n' "$FM_SUP_IN_FLIGHT" "$FM_SUP_BEACON_DESC"
+  printf '●  %s task(s) in flight, but no live supervisor (poller or watcher) covers this home (last beat: %s).\n' "$FM_SUP_IN_FLIGHT" "$FM_SUP_BEACON_DESC"
   printf '●  %s\n' "$REASON"
   printf '●%s\n' "$rule"
 } >&2

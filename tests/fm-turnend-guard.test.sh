@@ -5,8 +5,10 @@
 #   PREDICATE  - bin/fm-supervision-lib.sh, the shared beacon/status computation
 #                used by fm-guard.sh and by the hook's banner details.
 #   HOOK       - bin/fm-turnend-guard.sh, the Claude Code Stop hook that scopes
-#                in-flight work to the PRIMARY checkout only and requires a live,
-#                identity-matched watcher lock plus a fresh beacon.
+#                in-flight work to the PRIMARY checkout only and requires a live
+#                supervisor: either the launchd poller (identity-matched pid plus a
+#                fresh poller beacon) or the escape-hatch watcher (identity-matched
+#                lock plus a fresh watcher beacon).
 # All hermetic over temp dirs; no real Claude Code session is invoked.
 set -u
 
@@ -19,7 +21,7 @@ set -u
 TMP_ROOT=$(fm_test_tmproot fm-turnend-guard)
 fm_git_identity fmtest fmtest@example.invalid
 
-REQUIRED_REASON='tasks in flight, no live watcher - run bin/fm-watch-arm.sh as a background task before ending the turn'
+REQUIRED_REASON='tasks in flight and neither the launchd poller nor the watcher is live - verify the poller (launchctl list com.firstmate.poller) or arm the watcher escape hatch (bin/fm-watch-arm.sh) before ending the turn'
 
 # --- PREDICATE: bin/fm-supervision-lib.sh -----------------------------------
 
@@ -64,6 +66,31 @@ test_predicate_healthy_fresh_beacon() {
   fi
   [ "$FM_SUP_WATCHER_FRESH" = true ] || fail "a beacon touched just now must read as fresh"
   pass "fm_supervision_unhealthy: false with in-flight task and a fresh beacon"
+}
+
+test_predicate_healthy_fresh_poller_beacon() {
+  local state="$TMP_ROOT/pred-poller/state"
+  mkdir -p "$state"
+  : > "$state/task1.meta"
+  touch "$state/.last-poller-beat"
+  if fm_supervision_unhealthy "$state" 300; then
+    fail "predicate fired despite a fresh poller beacon (watcher absent)"
+  fi
+  [ "$FM_SUP_POLLER_FRESH" = true ] || fail "a poller beacon touched just now must read as fresh"
+  [ "$FM_SUP_WATCHER_FRESH" = false ] || fail "an absent watcher beacon must not read as fresh"
+  [ "$FM_SUP_SUPERVISED" = true ] || fail "a fresh poller beacon alone must count as supervised"
+  pass "fm_supervision_unhealthy: false with in-flight task and a fresh poller beacon (watcher absent)"
+}
+
+test_predicate_unhealthy_both_beacons_stale() {
+  local state="$TMP_ROOT/pred-both-stale/state"
+  mkdir -p "$state"
+  : > "$state/task1.meta"
+  touch -t 202001010000 "$state/.last-watcher-beat"
+  touch -t 202001010000 "$state/.last-poller-beat"
+  fm_supervision_unhealthy "$state" 300 || fail "predicate did not fire: in-flight task, both beacons far outside grace"
+  [ "$FM_SUP_SUPERVISED" = false ] || fail "two ancient beacons must not read as supervised"
+  pass "fm_supervision_unhealthy: true with in-flight task and both beacons outside the grace window"
 }
 
 test_predicate_queue_pending_flag() {
@@ -154,6 +181,13 @@ record_watcher_lock() {
   printf '%s\n' "$identity" > "$dir/state/.watch.lock/pid-identity"
 }
 
+# The poller records pid on line 1 and process identity on line 2 of
+# state/.poll.pid (bin/fm-poll.sh), the shape fm_poller_healthy reads.
+record_poller_pid() {
+  local dir=$1 pid=$2 identity=$3
+  printf '%s\n%s\n' "$pid" "$identity" > "$dir/state/.poll.pid"
+}
+
 test_hook_silent_when_no_work_in_flight() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/hook-idle")
@@ -227,6 +261,65 @@ test_hook_blocks_with_live_lock_and_stale_beacon() {
   expect_code 2 "$status" "hook must block when a live watcher lock has an ancient beacon"
   assert_contains "$out" "$REQUIRED_REASON" "block reason must contain the exact required instruction"
   pass "fm-turnend-guard: blocks on a live watcher lock with an ancient beacon"
+}
+
+test_hook_silent_with_live_poller_and_fresh_beacon() {
+  local dir pid identity out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-live-poller-fresh")
+  : > "$dir/state/task1.meta"
+  # A live poller, a matching identity, a fresh poller beacon, and NO watcher lock
+  # or watcher beacon at all: the poller alone must satisfy the guard.
+  sleep 60 &
+  pid=$!
+  identity=$(watcher_identity "$dir" "$pid") || {
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    fail "could not identify live poller holder"
+  }
+  record_poller_pid "$dir" "$pid" "$identity"
+  touch "$dir/state/.last-poller-beat"
+  out=$(run_hook "$dir" false); status=$?
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  expect_code 0 "$status" "hook must exit 0 with a live identity-matched poller and fresh poller beacon, watcher absent"
+  [ -z "$out" ] || fail "hook produced output despite a live fresh poller: $out"
+  pass "fm-turnend-guard: silent no-op with a live poller and fresh beacon (watcher absent)"
+}
+
+test_hook_blocks_with_live_poller_and_stale_beacon() {
+  local dir pid identity out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-live-poller-stale")
+  : > "$dir/state/task1.meta"
+  sleep 60 &
+  pid=$!
+  identity=$(watcher_identity "$dir" "$pid") || {
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    fail "could not identify live poller holder"
+  }
+  record_poller_pid "$dir" "$pid" "$identity"
+  touch -t 202001010000 "$dir/state/.last-poller-beat"
+  out=$(run_hook "$dir" false); status=$?
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  expect_code 2 "$status" "hook must block when a live poller has an ancient beacon"
+  assert_contains "$out" "$REQUIRED_REASON" "block reason must contain the exact required instruction"
+  pass "fm-turnend-guard: blocks on a live poller with an ancient beacon"
+}
+
+test_hook_blocks_when_poller_dead_despite_fresh_beacon() {
+  local dir dead out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-poller-dead-fresh")
+  dead=$(nonexistent_pid)
+  : > "$dir/state/task1.meta"
+  # A fresh poller beacon left by a dead poller, and no watcher: the guard reads
+  # real liveness, not file existence, so it must still block.
+  record_poller_pid "$dir" "$dead" "dead poller identity"
+  touch "$dir/state/.last-poller-beat"
+  out=$(run_hook "$dir" false); status=$?
+  expect_code 2 "$status" "hook must block when the poller pid is dead despite a fresh poller beacon"
+  assert_contains "$out" "$REQUIRED_REASON" "block reason must contain the exact required instruction"
+  pass "fm-turnend-guard: blocks on a dead poller pid even when the poller beacon is fresh"
 }
 
 test_hook_blocks_when_unhealthy_in_primary() {
@@ -366,12 +459,17 @@ test_predicate_healthy_no_inflight
 test_predicate_unhealthy_no_beacon
 test_predicate_unhealthy_stale_beacon
 test_predicate_healthy_fresh_beacon
+test_predicate_healthy_fresh_poller_beacon
+test_predicate_unhealthy_both_beacons_stale
 test_predicate_queue_pending_flag
 test_hook_silent_when_no_work_in_flight
 test_hook_blocks_when_fresh_beacon_has_no_live_lock
 test_hook_blocks_when_dead_lock_has_fresh_beacon
 test_hook_silent_with_live_lock_and_fresh_beacon
 test_hook_blocks_with_live_lock_and_stale_beacon
+test_hook_silent_with_live_poller_and_fresh_beacon
+test_hook_blocks_with_live_poller_and_stale_beacon
+test_hook_blocks_when_poller_dead_despite_fresh_beacon
 test_hook_blocks_when_unhealthy_in_primary
 test_hook_blocks_from_fm_home_state
 test_hook_ignores_repo_state_when_fm_home_set

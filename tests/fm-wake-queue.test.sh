@@ -208,25 +208,36 @@ test_drain_dedupes_obvious_duplicates() {
 }
 
 # The drain runs at the top of every wake-handling turn, so it also asserts
-# watcher liveness via fm-guard.sh: a lapsed re-arm chain then surfaces even on a
-# plain drain-and-handle turn that runs no other supervision script. It must warn
-# when work is in flight with no live watcher, and stay silent right after a
-# normal fire (a fresh beacon within grace), so it never false-alarms every wake.
-test_drain_asserts_watcher_liveness() {
+# supervision liveness via fm-guard.sh: a lapsed supervisor then surfaces even on
+# a plain drain-and-handle turn that runs no other supervision script. It must
+# warn when work is in flight with no live supervisor, and stay silent right after
+# a normal fire (a fresh beacon within grace, from EITHER the poller or the
+# escape-hatch watcher), so it never false-alarms every wake.
+test_drain_asserts_supervision_liveness() {
   local dir state err
   dir=$(make_case drain-liveness)
   state="$dir/state"
   err="$dir/drain.err"
   printf 'window=test:fm-x\nkind=ship\n' > "$state/x.meta"
   FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2> "$err" || fail "drain failed while asserting liveness"
-  grep -F 'WATCHER DOWN' "$err" >/dev/null || fail "drain did not surface the watcher-down banner with work in flight and no live watcher"
+  grep -F 'SUPERVISION IS OFF' "$err" >/dev/null || fail "drain did not surface the no-supervision banner with work in flight and no live supervisor"
   : > "$err"
   touch "$state/.last-watcher-beat"
-  FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$DRAIN" >/dev/null 2> "$err" || fail "drain failed with a fresh beacon"
-  if grep -F 'WATCHER DOWN' "$err" >/dev/null; then
-    fail "drain false-alarmed right after a normal fire (fresh beacon within grace)"
+  FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$DRAIN" >/dev/null 2> "$err" || fail "drain failed with a fresh watcher beacon"
+  if grep -F 'SUPERVISION IS OFF' "$err" >/dev/null; then
+    fail "drain false-alarmed right after a normal fire (fresh watcher beacon within grace)"
   fi
-  pass "drain asserts watcher liveness: warns on a lapse, stays silent right after a fire"
+  # The live poller is the primary supervisor: a fresh poller beacon alone, with no
+  # watcher beacon at all, must also silence the drain banner. This is the exact
+  # false alarm the workflow-paradigm cutover introduced.
+  rm -f "$state/.last-watcher-beat"
+  : > "$err"
+  touch "$state/.last-poller-beat"
+  FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$DRAIN" >/dev/null 2> "$err" || fail "drain failed with a fresh poller beacon"
+  if grep -F 'SUPERVISION IS OFF' "$err" >/dev/null; then
+    fail "drain false-alarmed while the poller beacon was fresh (watcher absent)"
+  fi
+  pass "drain asserts supervision liveness: warns on a lapse, silent with a fresh poller or watcher beacon"
 }
 
 test_concurrent_append_and_drain
@@ -236,4 +247,4 @@ test_not_working_stale_enqueue_before_suppressor
 test_check_output_is_queued
 test_atomic_double_drain
 test_drain_dedupes_obvious_duplicates
-test_drain_asserts_watcher_liveness
+test_drain_asserts_supervision_liveness

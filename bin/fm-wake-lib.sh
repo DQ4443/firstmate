@@ -76,6 +76,37 @@ fm_watcher_healthy() {
   return 0
 }
 
+# fm_poller_healthy <state> [grace]
+# The workflow-paradigm counterpart of fm_watcher_healthy: true when the launchd
+# poller (bin/fm-poll.sh) is genuinely alive for this home. It records its pid on
+# line 1 of state/.poll.pid and its process identity (start time + command, from
+# fm_pid_identity) on line 2, and touches state/.last-poller-beat at the top of
+# every sweep. Mirroring the watcher check, this requires ALL of: a live recorded
+# pid, an identity that still matches that live pid (so a recycled/reused pid
+# fails, exactly as the poller's own singleton guard treats it), and a beacon
+# fresh within grace. A stale leftover pidfile, a dead poller with a leftover
+# beacon, or a wedged poller with an ancient beacon all fail it, so this can never
+# report supervision that is not really there. Sets FM_POLLER_HEALTHY_PID on
+# success.
+FM_POLLER_HEALTHY_PID=
+fm_poller_healthy() {
+  local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} pidfile beat pid pid_id cur_id age
+  FM_POLLER_HEALTHY_PID=
+  pidfile="$state/.poll.pid"
+  beat="$state/.last-poller-beat"
+  pid=$(sed -n '1p' "$pidfile" 2>/dev/null || true)
+  pid_id=$(sed -n '2,$p' "$pidfile" 2>/dev/null || true)
+  fm_pid_alive "$pid" || return 1
+  [ -n "$pid_id" ] || return 1
+  cur_id=$(fm_pid_identity "$pid") || return 1
+  [ "$cur_id" = "$pid_id" ] || return 1
+  age=$(fm_path_age "$beat")
+  [ "$age" -lt "$grace" ] || return 1
+  # shellcheck disable=SC2034 # Read by callers after fm_poller_healthy returns.
+  FM_POLLER_HEALTHY_PID=$pid
+  return 0
+}
+
 fm_lock_clean_known_files() {
   local lockdir=$1
   rm -f \
