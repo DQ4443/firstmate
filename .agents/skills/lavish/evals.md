@@ -25,6 +25,7 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] The required decision-zone reference was read before building a decision zone.
 - [ ] The required nav-sidebar reference was read before building a checkpoint rail.
 - [ ] Browser QA rendered the page and the worker inspected the screenshot before presentation.
+- [ ] The review session used `lavish-axi <html-file> --no-open` and opened the returned URL in the owning task's Codex in-app browser without launching David's system browser.
 - [ ] QA checked overflow, clipping, overlap, diagrams, selection, typing, tabs, reply composition, and the Copy fallback.
 - [ ] Reading content is linear and only live decisions are tabbed at the end.
 - [ ] The single current-round section and every preserved earlier round began with that round's visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before its summary, evidence, or decisions.

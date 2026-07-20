@@ -6,7 +6,7 @@ The abandoned custom runtime, submit state machine, authorization schema, review
 
 ## Source of truth
 
-The source is `/Users/dq4443/Downloads/message (4).txt`.
+The source is `/Users/dq4443/Documents/message (4).txt` (moved from Downloads 2026-07; the rendered captain page is `/Users/dq4443/Documents/message (4).html`).
 Its SHA-256 is `134eb182731726ae9305d6a7a74d8a767bfb7f042201e953536ceec507f19f7c`.
 The file has 3,510 lines and is state-stamped 2026-07-10.
 The atlas and system model are at lines 1-192, the verbatim skill suite begins at line 248, the roles begin at line 1,356, the hooks begin at line 1,418, the curated portable memories occupy lines 1,678-3,055, and the self-contained generator occupies lines 3,057-3,505.

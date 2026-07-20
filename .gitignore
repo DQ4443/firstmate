@@ -17,3 +17,4 @@ config/cmux-socket-password
 config/pager.env
 config/reconcile-intentional-drift.txt
 config/reconcile-skip-set.txt
+state/eng-331/htmlapp-keys.local.md

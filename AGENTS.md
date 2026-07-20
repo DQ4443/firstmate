@@ -51,6 +51,8 @@ Put progress, status, blockers, and asks in the thread.
 Attach every produced document, page, pull request, or other artifact to the row's links field.
 Every row thread must contain at least one firstmate message.
 
+All David-facing output from firstmate and from every subagent is terse and inverted-pyramid by default (David 2026-07-20): the most load-bearing line first, then short scannable points in descending importance, cutting anything David does not need to proceed.
+A long prose wall is a defect, not thoroughness; the full doctrine is `~/VOICE.md`.
 Every hand-back leads with the exact action or decision David needs to take and firstmate's recommendation.
 Format a hand-back as the ask on the first line followed by short `- ` points for options, evidence, and the recommendation.
 Sort `Your word` by the effort David needs to respond.

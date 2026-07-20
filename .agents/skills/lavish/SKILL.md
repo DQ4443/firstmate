@@ -34,13 +34,21 @@ A page that copies the source rig's palette, invents a second component system, 
 
 Every Lavish page is a self-contained HTML file under a stable workstream path, normally `.lavish/<workstream>.html`.
 
-Run `lavish-axi <html-file>` to open the local review surface.
+Run `lavish-axi <html-file> --no-open` to create or resume the local review surface without launching David's system browser.
+
+Open the returned localhost session URL in the owning task's Codex in-app browser through the Browser skill.
+
+Do not fall back to David's Chrome profile, a system `open` command, or bare `lavish-axi <html-file>` unless David explicitly asks for that browser.
+
+If the in-app browser is unavailable, return the stable session URL and mark in-app presentation blocked instead of opening an external browser.
 
 Claim session resume only after a real open, update, and reopen returns evidence for the same session identity.
 
 Run `lavish-axi poll <html-file>` when David is actively reviewing it so annotations and layout warnings return to the owning task.
 
-Do not run `lavish-axi share`, do not publish to `ht-ml.app`, and do not send the file externally without David's explicit word.
+For every David-facing page, ALSO publish the deployed URL: `lavish-axi share <html-file> --password kronos` and hand David the ht-ml.app URL (the password for ALL ht-ml documents is the fixed word `kronos`, David 2026-07-20; never generate a random one) (David, 2026-07-20: the ht-ml.app deployed URL is THE deliverable link; localhost session URLs are secondary). Always password-protect; a private password-protected share whose sole audience is David is an internal review surface and needs no delivery gate. Re-share with the stored update_key after edits so the URL stays stable.
+
+Public/unprotected shares, and sending the page or URL to anyone besides David, still require his explicit word per delivery.
 
 The reply bar and its Copy button are the page's response channel.
 
@@ -62,7 +70,7 @@ Create a new page only for a genuinely new direction.
 6. Render the HTML in a real browser and inspect the screenshot for overflow, overlap, clipped controls, unreadable diagrams, and reply composition.
 7. Exercise option selection, typed answers, tab changes, and the full Copy fallback.
 8. Fix every error-severity layout or interaction defect and render again.
-9. Open the page with `lavish-axi <html-file>` and record real session identity before claiming resume.
+9. Start or resume the page with `lavish-axi <html-file> --no-open`, record real session identity, and open the returned URL in the owning task's Codex in-app browser before claiming resume.
 10. Ask only the open questions already rendered on the page.
 11. Update the same page as decisions land and move decided blocks into the Decided log.
 
@@ -75,6 +83,12 @@ All informational content reads linearly.
 Only decisions use tabs, and those tabs come after the evidence they depend on.
 
 A single open decision may render linearly without a tab row, but it still uses the decision-zone structure and reply channel.
+
+### Big-picture opener
+
+Every David-facing report and checkpoint page opens with a four-row big-picture table as its first content element, right after the page title and before the short summary or any diagram (David, 2026-07-20).
+The rows are `Objective` (what this ticket or workstream is trying to accomplish and why), `Success` (what done looks like for the whole ticket, not just this round), `Current status`, and `Suggested next step`.
+Build it from the page's own David-warm table CSS, keep each cell to one or two sentences, and treat it as the most important thing on the page. On a checkpoint page the fuller `Where you are` orientation below carries the same role and satisfies this rule.
 
 ### Checkpoint orientation
 
@@ -106,6 +120,8 @@ Do not replace whole-ticket success with the next implementation move.
 Use at most four short standalone lines or a two-column mini-table.
 
 Each line carries one clause and puts the decision-relevant fact first.
+
+Page short summaries and the chat hand-back that delivers the URL are both terse and inverted-pyramid by default (David, 2026-07-20): load-bearing line first, short points, nothing David does not need to proceed; a prose wall in either is a defect.
 
 ### Definitions
 
@@ -185,6 +201,8 @@ Every side claim earns the same bar as the headline claim or carries its lower l
 ## Report mode
 
 Report mode closes a run while preserving any decision still held for David.
+
+Report mode also opens with the four-row big-picture table from the Big-picture opener above (Objective, Success, Current status, Suggested next step), ahead of the short summary and the pipeline diagram (David, 2026-07-20).
 
 Its short summary states the exact outcome, the PR or artifact state when relevant, and the one next decision.
 
