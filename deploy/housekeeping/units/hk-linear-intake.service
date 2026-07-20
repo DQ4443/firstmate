@@ -1,6 +1,6 @@
 # Housekeeping FM: Linear webhook intake server.
 # Long-running HMAC-gated HTTP listener on 127.0.0.1:4481, fed by the public
-# Tailscale Funnel on port 8443 path /linear (see funnel-setup.sh).
+# Tailscale Funnel on port 10000 path /linear (see funnel-setup.sh).
 # FM_HK_ROOT is baked to the default here; a custom root is applied by
 # install.sh as a generated drop-in that overrides Environment and ReadWritePaths.
 [Unit]

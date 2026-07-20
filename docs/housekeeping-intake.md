@@ -16,7 +16,7 @@ gemini-notes@google.com summaries become digest events of kind "notes"; meetings
 
 Leg 2 is Linear.
 fm-linear-event-server.mjs is an HMAC-gated HTTP listener on 127.0.0.1:4481.
-It is the only leg that needs public ingress, so it sits behind a public Tailscale Funnel on port 8443 (see the port rationale below).
+It is the only leg that needs public ingress, so it sits behind a public Tailscale Funnel on port 10000 (see the port rationale below).
 A Linear workspace webhook posts entity events to it; fm-linear-event-worker.sh is the serial worker that classifies and enqueues them.
 
 Both legs write normalized v1 event JSON into the queue, classification sorts each event into blocker or digest, and delivery pushes genuine blockers through immediately while batching everything else into at most two digests per day.
@@ -52,19 +52,20 @@ The installer creates the directory with the right mode and never overwrites an 
 
 hk-gmail-pull and hk-gmail-watch-renew carry ConditionPathExists on secrets/google-token.json, so they stay dead-quiet until the Gmail bootstrap has run.
 
-## Funnel on port 8443, not 443
+## Funnel on port 10000, not 443 or 8443
 
-The Linear webhook needs a public HTTPS URL, but the box already serves tailnet-only paths on 443.
-Those 443 paths (/ to 127.0.0.1:4387, /out to 127.0.0.1:8790, /login to 127.0.0.1:6080) must stay tailnet-only.
-Tailscale Funnel allows only ports 443, 8443, and 10000, and enabling Funnel on 443 would expose those tailnet paths to the internet.
-So the Linear webhook uses port 8443 instead, which Funnel keys independently of the 443 serve config.
+The Linear webhook needs a public HTTPS URL, but Tailscale Funnel is keyed per-port and allows only ports 443, 8443, and 10000, and both 443 and 8443 already carry tailnet-only serve handlers that must never go public.
+443 carries tailnet-only paths (/ to 127.0.0.1:4387, /out to 127.0.0.1:8790, /login to 127.0.0.1:6080), so funneling 443 would expose them.
+8443 is already occupied too: the box runs a tailnet-only serve on 8443 (/ to 127.0.0.1:6080, a VNC-ish surface) that must never go public, and because Funnel is per-port, funneling 8443 would expose exactly that service (the 8443 collision, discovered 2026-07).
+So the Linear webhook uses port 10000, the one remaining free Funnel port, which Funnel keys independently of the 443 and 8443 serve configs.
 
 The public webhook URL is:
 
-    https://dqubuntu.tailb6dce4.ts.net:8443/linear  ->  127.0.0.1:4481
+    https://dqubuntu.tailb6dce4.ts.net:10000/linear  ->  127.0.0.1:4481
 
-deploy/housekeeping/funnel-setup.sh enables exactly this and then verifies, via tailscale serve status, that 8443 is public (Funnel on) and 443 is still tailnet-only.
-It fails loudly if 443 ever shows Funnel on, or if the 8443 target does not proxy to 127.0.0.1:4481.
+deploy/housekeeping/funnel-setup.sh enables exactly this and then verifies, via tailscale serve status, that 10000 is public (Funnel on) exposing only /linear and that every other port is still tailnet-only.
+Before enabling, a collision guard refuses to funnel port 10000 if any handler other than our /linear proxy is already bound to it.
+It fails loudly if any other port ever shows Funnel on, or if the 10000 target does not proxy to 127.0.0.1:4481.
 
 ## Install
 
@@ -120,14 +121,14 @@ If the grant is missing, funnel-setup.sh errors and prints the exact one-line in
 
     ssh dqubuntu 'bash ~/firstmate/deploy/housekeeping/funnel-setup.sh'
 
-Confirm the post-check reports 8443 public and 443 tailnet-only.
+Confirm the post-check reports 10000 public (exposing only /linear) and every other port tailnet-only.
 
 ### 3. Linear webhook (David, one click, LAST)
 
 Register the workspace webhook only after the intake server and the funnel are both live.
 In Linear go to Settings, then API, then Webhooks, and create a webhook (David is a workspace admin).
 
-    URL:     https://dqubuntu.tailb6dce4.ts.net:8443/linear
+    URL:     https://dqubuntu.tailb6dce4.ts.net:10000/linear
     Scope:   Issues, Comments, Projects to start (workspace / all public teams)
     Secret:  copy the signing secret into secrets/linear-webhook-secret (mode 600) on the box
 
@@ -175,7 +176,7 @@ If firstmate is not waking on housekeeping events, confirm the poller is running
 1. GCP console to create the project, INTERNAL OAuth client, and Pub/Sub topic plus pull subscription: https://console.cloud.google.com
 2. Gmail filters and the gemini-notes label in David's account: https://mail.google.com/mail/u/0/#settings/filters
 3. Tailscale ACL policy to add the Funnel nodeAttrs grant for dqubuntu: https://login.tailscale.com/admin/acls/file
-4. Linear webhook registration, pointing at the port-8443 funnel URL: https://linear.app/settings/api
-   Webhook URL to paste: https://dqubuntu.tailb6dce4.ts.net:8443/linear
+4. Linear webhook registration, pointing at the port-10000 funnel URL: https://linear.app/settings/api
+   Webhook URL to paste: https://dqubuntu.tailb6dce4.ts.net:10000/linear
 
 The two mail senders the daemon watches are gemini-notes@google.com (the meeting summaries) and meetings-noreply@google.com (the "Problem with the notes" failure notices).

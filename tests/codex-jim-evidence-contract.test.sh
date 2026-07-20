@@ -31,7 +31,8 @@ grep -Fq "laptopCap:'E1'" "$INSTALLER"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/jim-evidence.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 cp "$ROOT/.agents/skills/build/SKILL.md" "$tmp/build.md"
-sed -i '' 's/Laptop-only evidence is capped at E1/Laptop-only evidence is capped at E2/' "$tmp/build.md"
+sed -i.bak 's/Laptop-only evidence is capped at E1/Laptop-only evidence is capped at E2/' "$tmp/build.md"
+rm -f "$tmp/build.md.bak"
 if grep -Fq 'Laptop-only evidence is capped at E1' "$tmp/build.md"; then
   printf 'FAIL: laptop-cap mutation survived\n' >&2
   exit 1

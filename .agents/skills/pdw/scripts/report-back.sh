@@ -10,7 +10,7 @@ Commands:
   claim --key REPORT_KEY
   drain
   ack --key REPORT_KEY
-  receive --key REPORT_KEY [--receipt FILE]
+  receive --key REPORT_KEY --receipt FILE
 
 The adapter stores at-least-once delivery state and prints payloads for the
 parent to send with the native send_message_to_thread tool.
@@ -31,7 +31,14 @@ for dependency in jq python3 shasum; do
   command -v "$dependency" >/dev/null || { printf 'missing dependency: %s\n' "$dependency" >&2; exit 2; }
 done
 
+mkdir -p "$state_dir" "$state_dir/tmp"
 config="$state_dir/config.json"
+if [[ ! -e "$config" ]]; then
+  default_config=$(mktemp "$state_dir/tmp/config-default.XXXXXX")
+  printf '{"retry_max_attempts":16,"claim_ttl_seconds":300,"lock_ttl_seconds":60,"drain_batch_size":10}\n' >"$default_config"
+  ln "$default_config" "$config" 2>/dev/null || true
+  rm -f "$default_config"
+fi
 [[ -f "$config" ]] || { printf 'missing report configuration: %s\n' "$config" >&2; exit 2; }
 jq -e '
   (.retry_max_attempts | type == "number" and . >= 1 and floor == .) and
@@ -123,6 +130,52 @@ parse_key() {
   printf '%s' "$value"
 }
 
+find_delivery_state() {
+  local key=$1
+  local candidate
+  for candidate in \
+    "$state_dir/inflight/$key.json" \
+    "$state_dir/retry/$key.json" \
+    "$state_dir/pending/$key.json"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_receipt() {
+  local receipt_file=$1
+  local envelope_file=$2
+  local key=$3
+  local content_sha
+  local thread_id
+  local host_id
+
+  [[ -f "$receipt_file" ]] || { printf 'receipt file not found\n' >&2; return 1; }
+  content_sha=$(jq -r '.content_sha' "$envelope_file")
+  thread_id=$(jq -r '.thread_id' "$envelope_file")
+  host_id=$(jq -r '.host_id' "$envelope_file")
+  jq -e \
+    --arg key "$key" \
+    --arg content_sha "$content_sha" \
+    --arg thread_id "$thread_id" \
+    --arg host_id "$host_id" '
+      (.report_key == $key) and
+      (.content_sha == $content_sha) and
+      (.delivery_status == "succeeded") and
+      (.transport == "send_message_to_thread") and
+      (.return_thread_id == $thread_id) and
+      (.return_host_id == $host_id) and
+      (.receipt_id | type == "string" and length > 1) and
+      (.delivered_at | type == "string" and length > 1)
+    ' "$receipt_file" >/dev/null || {
+      printf 'receipt does not prove successful delivery of the current report revision\n' >&2
+      return 1
+    }
+}
+
 case "$command" in
   prepare)
     report_file=""
@@ -136,31 +189,38 @@ case "$command" in
     done
     [[ -f "$report_file" ]] || { printf 'missing report file\n' >&2; exit 2; }
     jq -e '
-      (.task_id | type == "string" and length > 0) and
-      (.report_id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")) and
-      (.return_thread_id | type == "string" and length > 0) and
-      (.return_host_id | type == "string" and length > 0) and
+      (.task_id | type == "string" and length > 1) and
+      (.report_id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$")) and
+      (.return_thread_id | type == "string" and length > 1) and
+      (.return_host_id | type == "string" and length > 1) and
       (.status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
       (.requested_status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
       (.effective_status | IN("COMPLETE", "BLOCKED", "NEEDS DECISION")) and
-      (.summary | type == "string" and length > 0) and
-      (.commands | type == "array") and
+      (.summary | type == "string" and length > 1) and
+      (.commands | type == "array" and length > 0) and
+      (all(.commands[];
+        type == "object" and
+        (.command | type == "string" and length > 1) and
+        (.output_tail | type == "string" and length > 1)
+      )) and
       (.artifacts | type == "array") and
-      (.branch | type == "string") and
-      (.worktree | type == "string") and
-      (.last_commit_sha | type == "string") and
-      (.requested_model | type == "string" and length > 0) and
-      (.effective_model | type == "string" and length > 0) and
+      (.branch | type == "string" and length > 1) and
+      (.worktree | type == "string" and length > 1) and
+      (.last_commit_sha | type == "string" and length > 1) and
+      (.requested_model | type == "string" and length > 1) and
+      (.effective_model | type == "string" and length > 1) and
       (.requested_effort | IN("light", "medium", "high", "max", "ultra")) and
       (.effective_effort | IN("light", "medium", "high", "max", "ultra", "unavailable_to_pin_in_native_subagent_api", "unverified_from_process_output")) and
-      (.routing_rationale | type == "string" and length > 0) and
-      (.identifiers | type == "object") and
+      (.routing_rationale | type == "string" and length > 1) and
+      (.identifiers | type == "object" and length > 0) and
       (.child_returns | type == "array") and
-      (.NEXT_STEP | type == "string" and length > 0)
+      (all(.child_returns[]; type == "object")) and
+      (.NEXT_STEP | type == "string" and length > 1)
     ' "$report_file" >/dev/null || { printf 'invalid structured return\n' >&2; exit 2; }
     canonical=$(jq -Sc . "$report_file")
     stable_identity=$(jq -Sc '{task_id, report_id, return_thread_id, return_host_id}' "$report_file")
     key=$(printf '%s' "$stable_identity" | shasum -a 256 | awk '{print $1}')
+    content_sha=$(printf '%s' "$canonical" | shasum -a 256 | awk '{print $1}')
     prompt=$(printf '%s\n\nREPORT_KEY: %s' "$canonical" "$key")
     destination=queued
     target_dir=retry
@@ -181,8 +241,44 @@ case "$command" in
     fi
     for existing_state in pending retry inflight; do
       if [[ -f "$state_dir/$existing_state/$key.json" ]]; then
+        existing_file="$state_dir/$existing_state/$key.json"
+        existing_content_sha=$(jq -r '.content_sha // empty' "$existing_file")
+        if [[ "$existing_content_sha" == "$content_sha" ]]; then
+          unlock
+          jq -n --arg key "$key" --arg state "$existing_state" '{status: ("already-" + $state), report_key: $key}'
+          exit 0
+        fi
+        revised=$(mktemp "$state_dir/tmp/revise.XXXXXX")
+        jq \
+          --arg thread_id "$(jq -r '.return_thread_id' "$report_file")" \
+          --arg host_id "$(jq -r '.return_host_id' "$report_file")" \
+          --arg prompt "$prompt" \
+          --arg prepared_at "$(now_iso)" \
+          --arg content_sha "$content_sha" \
+          --argjson report "$canonical" \
+          '.thread_id = $thread_id |
+           .host_id = $host_id |
+           .prompt = $prompt |
+           .prepared_at = $prepared_at |
+           .content_sha = $content_sha |
+           .report = $report |
+           .revision = ((.revision // 0) + 1) |
+           del(.claimed_at_epoch, .claimed_at)' "$existing_file" >"$revised"
+        revised_state=$existing_state
+        if [[ "$existing_state" == inflight ]]; then
+          revised_state=retry
+        fi
+        atomic_write "$state_dir/$revised_state/$key.json" "$revised"
+        rm -f "$revised" "$state_dir/received/$key.json"
+        if [[ "$existing_state" != "$revised_state" ]]; then
+          rm -f "$existing_file"
+        fi
         unlock
-        jq -n --arg key "$key" --arg state "$existing_state" '{status: ("already-" + $state), report_key: $key}'
+        jq -n \
+          --arg key "$key" \
+          --arg state "$revised_state" \
+          --arg path "$state_dir/$revised_state/$key.json" \
+          '{status: ("revised-" + $state), report_key: $key, path: $path}'
         exit 0
       fi
     done
@@ -193,8 +289,9 @@ case "$command" in
       --arg host_id "$(jq -r '.return_host_id' "$report_file")" \
       --arg prompt "$prompt" \
       --arg prepared_at "$(now_iso)" \
+      --arg content_sha "$content_sha" \
       --argjson report "$canonical" \
-      '{report_key: $report_key, thread_id: $thread_id, host_id: $host_id, prompt: $prompt, prepared_at: $prepared_at, attempts: 0, report: $report}' >"$envelope"
+      '{report_key: $report_key, thread_id: $thread_id, host_id: $host_id, prompt: $prompt, prepared_at: $prepared_at, content_sha: $content_sha, revision: 0, attempts: 0, report: $report}' >"$envelope"
     atomic_write "$state_dir/$target_dir/$key.json" "$envelope"
     rm -f "$envelope"
     unlock
@@ -268,15 +365,24 @@ case "$command" in
   ack)
     key=$(parse_key "$@")
     lock
-    source_file=""
-    for candidate in "$state_dir/inflight/$key.json" "$state_dir/pending/$key.json"; do
-      [[ -f "$candidate" ]] && source_file=$candidate
-    done
-    [[ -n "$source_file" ]] || { unlock; printf 'pending or inflight report not found: %s\n' "$key" >&2; exit 1; }
+    source_file=$(find_delivery_state "$key" || true)
+    [[ -n "$source_file" ]] || { unlock; printf 'pending, retry, or inflight report not found: %s\n' "$key" >&2; exit 1; }
+    receipt_record="$state_dir/received/$key.json"
+    [[ -f "$receipt_record" ]] || { unlock; printf 'successful delivery receipt not found: %s\n' "$key" >&2; exit 1; }
+    receipt_file=$(mktemp "$state_dir/tmp/ack-receipt.XXXXXX")
+    jq '.receipt' "$receipt_record" >"$receipt_file"
+    if ! validate_receipt "$receipt_file" "$source_file" "$key"; then
+      rm -f "$receipt_file"
+      unlock
+      exit 1
+    fi
     acknowledged=$(mktemp "$state_dir/tmp/ack.XXXXXX")
-    jq --arg acknowledged_at "$(now_iso)" '. + {acknowledged_at: $acknowledged_at}' "$source_file" >"$acknowledged"
+    jq \
+      --arg acknowledged_at "$(now_iso)" \
+      --slurpfile delivery_receipt "$receipt_file" \
+      '. + {acknowledged_at: $acknowledged_at, delivery_receipt: $delivery_receipt[0]}' "$source_file" >"$acknowledged"
     atomic_write "$state_dir/sent/$key.json" "$acknowledged"
-    rm -f "$acknowledged" "$state_dir/pending/$key.json" "$state_dir/retry/$key.json" "$state_dir/inflight/$key.json"
+    rm -f "$acknowledged" "$receipt_file" "$state_dir/pending/$key.json" "$state_dir/retry/$key.json" "$state_dir/inflight/$key.json"
     unlock
     jq -n --arg key "$key" '{status: "acknowledged", report_key: $key}'
     ;;
@@ -291,11 +397,15 @@ case "$command" in
       esac
     done
     [[ "$key" =~ ^[a-f0-9]{64}$ ]] || { printf 'invalid report key\n' >&2; exit 2; }
-    if [[ -n "$receipt_file" ]]; then
-      [[ -f "$receipt_file" ]] || { printf 'receipt file not found\n' >&2; exit 2; }
-      jq -e . "$receipt_file" >/dev/null || { printf 'receipt file is not JSON\n' >&2; exit 2; }
-    fi
+    [[ -n "$receipt_file" ]] || { printf 'receive requires --receipt FILE\n' >&2; exit 2; }
+    [[ -f "$receipt_file" ]] || { printf 'receipt file not found\n' >&2; exit 2; }
     lock
+    source_file=$(find_delivery_state "$key" || true)
+    [[ -n "$source_file" ]] || { unlock; printf 'pending, retry, or inflight report not found: %s\n' "$key" >&2; exit 1; }
+    if ! validate_receipt "$receipt_file" "$source_file" "$key"; then
+      unlock
+      exit 1
+    fi
     destination="$state_dir/received/$key.json"
     if [[ -f "$destination" ]]; then
       unlock
@@ -303,11 +413,7 @@ case "$command" in
       exit 0
     fi
     received=$(mktemp "$state_dir/tmp/receive.XXXXXX")
-    if [[ -n "$receipt_file" ]]; then
-      jq --arg key "$key" --arg received_at "$(now_iso)" '{report_key: $key, received_at: $received_at, receipt: .}' "$receipt_file" >"$received"
-    else
-      jq -n --arg key "$key" --arg received_at "$(now_iso)" '{report_key: $key, received_at: $received_at}' >"$received"
-    fi
+    jq --arg key "$key" --arg received_at "$(now_iso)" '{report_key: $key, received_at: $received_at, receipt: .}' "$receipt_file" >"$received"
     atomic_write "$destination" "$received"
     rm -f "$received"
     unlock
