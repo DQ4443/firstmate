@@ -187,10 +187,14 @@ Keep checkpoint history append-only and preserve decided or superseded decisions
 Render in a real browser, exercise every control, read the screenshot, and fix error-level defects before delivery.
 Never run `lavish-axi share` or publish externally without David's explicit word.
 
-Badge every load-bearing completion or merge-review claim with the canonical E0-E5 evidence ladder in `data/operating-model/evidence-ladder.md`, installed by `$lavish`.
-E5 is David-verified live and nothing else; an unbadged claim reads as E0.
-The `$build` quality gates named `CAUSAL` and `PANEL-SURVIVED` are separate requirements, not evidence levels, and never reuse the E4 or E5 labels.
-Evidence that never touched the deployed product cannot exceed E2.
+Badge every load-bearing completion or merge-review claim with Jim's canonical evidence block installed by `$lavish`.
+E0 is Assumed.
+E1 is Ran with a trace and cannot support a works claim.
+E2 is Works-unit with a passing test and mutation evidence.
+E3 is Works-live with output that exhibits the effect and human-visible evidence.
+E4 is Causes with a preregistered control and stated sample count.
+E5 is Refute-survived after an adversarial panel fails to kill the claim.
+Laptop-only evidence is capped at E1.
 Every side claim must earn the same evidence bar as the headline claim.
 Product code is not ready to submit below E3 unless the merge page explains why a live user path is not relevant.
 

@@ -4,8 +4,8 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 agents="$root/AGENTS.md"
 claude="$root/CLAUDE.md"
-frozen_blob=1c9ad585a7053f2f93439e027bc249976b5a1b9f
-frozen_sha256=c104ed0bc14ee3b02941afd1216a7ac9d2d28dcae0d400ff0cd3fa67af2dd6d0
+frozen_blob=9a278ba010f42269e3400e27abb015080f26af93
+frozen_sha256=2b05c77c7491ca986f1d28c3496e3b7e3a23b0e4e955c877d3a421a034a75a0a
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
