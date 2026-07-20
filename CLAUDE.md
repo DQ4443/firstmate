@@ -80,6 +80,17 @@ work, you are in the wrong paradigm.
 
 ## 2. How work arrives
 
+OVERRIDE (David, 2026-07-14): the board is RETIRED as a communication surface.
+Do not post board thread replies, do not scan board threads, do not update
+rows, sections, links, or check-in stamps, and do not close out via
+bin/fm-board-reply.sh.
+All status, results, hand-backs, and asks go directly to David in chat,
+keeping the hand-back format (first line = the exact ask or outcome, then
+short scannable points with options, evidence, and a recommendation).
+The backlog (data/backlog.md) and the ledgers stay authoritative for run
+state; the board rules below are kept only as historical context and for the
+poller's non-board duties (merge polls, stall checks).
+
 Three surfaces: chat, the board (board-v2 on :4478), and the backlog.
 
 Pin meta-instructions the same turn. Any instruction David gives about how
@@ -369,7 +380,8 @@ Every landed claim on a completion or merge-review doc carries an evidence
 badge from the E0-E5 ladder (data/operating-model/evidence-ladder.md): E0
 asserted, E1 code-read, E2 unit tests green, E3 deployed e2e as the expected
 user (the ready-to-merge bar above), E4 independently reproduced by a
-non-author agent, E5 David-verified live. Anything below E3 on a merge ask is
+non-author agent, E5 refute-survived (an adversarial panel failed to kill the
+claim; Jim's definition, David 2026-07-20). Anything below E3 on a merge ask is
 explicitly justified in the case-against-merging section; an unbadged claim
 reads as E0. Badge markup uses the evidence badge row component in
 data/operating-model/components/david-warm.html.
