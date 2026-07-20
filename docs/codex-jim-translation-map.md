@@ -173,6 +173,7 @@ Before changing deliberately written code, the worker asks whether the behavior 
 An execute instruction authorizes only the agreed plan, while a question about a better design produces analysis and a recommendation without starting a new design branch.
 The target is the planner and implementer brief contract, and the authorization-fence test presents both prompts and verifies only the first can lead to writes.
 Validation refutes claims, challenges the measuring oracle, measures all real inputs against an invariant, and runs the cheapest decisive experiment before recommending a change.
+The E4 and E5 meanings below reproduce Jim's original source verbatim as a translation record; the live operating ladder is the canonical `data/operating-model/evidence-ladder.md`, where E4 is Independently reproduced and E5 is David-verified live, and Jim's E4 Causes and E5 Refute-survived are carried as the named requirements CAUSAL and PANEL-SURVIVED.
 E0 is ASSUMED and must be labeled or omitted.
 E1 is RAN with traces and never permits the word works, and laptop-only artifacts cap here.
 E2 is WORKS-unit with tests plus mutation.
