@@ -37,8 +37,8 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] Checkpoint mode shows landed evidence, concrete suggested moves, a stop check, Questions, and the standing mode choice with `stay current` preselected.
 - [ ] The round-N page contains exactly one mutable current-round section plus N-1 complete chronological history sections, including each round's frozen seven-row orientation snapshot, evidence, decisions, findings, and outcome; earlier round bodies may fold without deletion or current-state rewriting.
 - [ ] Every landed or evidence claim uses the canonical `JIM EVIDENCE BADGES` block at the level actually reached without rewriting the legacy David-warm row.
-- [ ] The badges mean E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Causes with preregistered control and sample count, and E5 Refute-survived.
-- [ ] Laptop-only evidence is capped at E1, and side claims display the same earned bar as the headline or their own lower level.
+- [ ] The badges mean the canonical E0-E5 ladder in `data/operating-model/evidence-ladder.md`, where E5 is David-verified live, and `CAUSAL` and `PANEL-SURVIVED` are separate named requirements rather than E4 or E5.
+- [ ] Evidence that never touched the deployed product does not exceed E2, and side claims display the same earned bar as the headline or their own lower level.
 - [ ] The sidebar has exactly Main, Rounds, and Decisions and is built dynamically from page sections.
 - [ ] The rail scrolls independently when long and switches to a toggle overlay below the paired breakpoint.
 - [ ] UI claims embed the decisive capture or carry `UNVERIFIED`.

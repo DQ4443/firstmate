@@ -31,7 +31,7 @@ Run isolated grader agents with binary checks and require at least 90 percent ov
 - [ ] Every confirmed issue was fixed before proceeding, and every non-trivial fix triggered another panel.
 - [ ] The pull-request body used Summary, Debug evidence, Validation, and Risk with recorded proof and exact pass counts.
 - [ ] The human saw the drafted title and body and explicitly approved the outward push and pull-request opening in that moment.
-- [ ] Evidence used Jim's E0 through E5 meanings, laptop-only evidence never exceeded E1, and side claims earned the headline bar or displayed their own lower level.
+- [ ] Evidence used the canonical E0-E5 ladder in `data/operating-model/evidence-ladder.md` (E5 David-verified live, with `CAUSAL` and `PANEL-SURVIVED` as separate named requirements), evidence that never touched the deployed product never exceeded E2, and side claims earned the headline bar or displayed their own lower level.
 - [ ] No autonomous exception authorized a push, pull-request opening, or merge.
 - [ ] If a proven installed guard required its documented one-shot sentinel, the sentinel was used immediately before pull-request opening, and no sentinel or bypass was invented otherwise.
 - [ ] The babysit stage ran as one owning monitor or Codex automation, with every payload carrying the current loop, threshold 4, threshold 16, and the closing-report `NEXT_STEP`.

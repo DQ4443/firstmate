@@ -71,15 +71,13 @@ New operator-tunable limits, thresholds, retries, model IDs, and breadth control
 
 ### 5. Validate
 
-E0 is Assumed and must be labeled or omitted.
-E1 is Ran with traces and never permits a works claim.
-E2 is Works-unit with tests and mutation evidence.
-E3 is Works-live with output that exhibits the effect and human-visible evidence.
-E4 is Causes with a preregistered control and stated sample count.
-E5 is Refute-survived after an adversarial panel fails to kill the claim.
-Feature completion needs E2 and E3, plus E4 for a causal claim.
-Ship language and closing-report headlines need E5.
-Laptop-only evidence is capped at E1.
+Badge each claim with the canonical E0-E5 evidence ladder in `data/operating-model/evidence-ladder.md`, where E5 is David-verified live.
+`CAUSAL` is a separate named requirement: a causal claim carries a preregistered control and a stated sample count.
+`PANEL-SURVIVED` is a separate named requirement: the claim survived an adversarial refutation panel that failed to kill it.
+Neither named requirement is an evidence level, and neither reuses the E4 or E5 label.
+Feature completion needs E2 and E3, plus `CAUSAL` for a causal claim.
+Ship language and closing-report headlines need `PANEL-SURVIVED`.
+Evidence that never touched the deployed product cannot exceed E2.
 Side claims, qualifiers, and supporting comparisons must earn the same bar as the headline claim.
 Measure real output over all real inputs against an invariant.
 Record evidence in the ledger during validation.
