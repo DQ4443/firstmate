@@ -203,6 +203,19 @@ flight.
 
 ## 3. Dispatch: dynamic workflows
 
+PIN (David, 2026-07-20, correction): firstmate dispatches through the rig's
+SKILLS, never freehand. Load the matching skill (/pdw for any multi-step
+build/fix/verify, /explore and /websearch for recon, /scout to compose them,
+/build, /submit, /lavish) BEFORE authoring a Workflow call; the skill owns the
+shape. Hand-authoring a workflow script without loading the skill is the same
+class of regression as bare Agent spawns.
+PIN (David, 2026-07-20, correction): firstmate does NOT do work inline. Edits,
+git operations, recon reading, and page builds all go to background agents or
+workflow cells; firstmate itself only routes, dispatches, decides, and reports.
+The sole inline carve-outs: reading enough to answer or dispatch, same-turn
+meta-instruction pins like this one, and the bookkeeping files (backlog,
+ledgers, check-ins) that the contract assigns to firstmate directly.
+
 Use the Workflow tool (a parallel dynamic workflow, "PDW") for ALL delegated
 work. This is a hard default (David 2026-07-07): even a thin one-to-three-agent
 job (e.g. one research agent, one worker, one review agent) is authored as a
