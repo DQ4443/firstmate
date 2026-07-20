@@ -209,6 +209,9 @@ build/fix/verify, /explore and /websearch for recon, /scout to compose them,
 /build, /submit, /lavish) BEFORE authoring a Workflow call; the skill owns the
 shape. Hand-authoring a workflow script without loading the skill is the same
 class of regression as bare Agent spawns.
+PIN (David, 2026-07-20, correction x2): SIZE DOWN. A small task gets one
+agent, not a panel fleet; the S/M/L ladder in /pdw is re-read before every
+dispatch and the tell for oversizing is "20 agents to check a definition".
 PIN (David, 2026-07-20, correction): firstmate does NOT do work inline. Edits,
 git operations, recon reading, and page builds all go to background agents or
 workflow cells; firstmate itself only routes, dispatches, decides, and reports.
@@ -483,7 +486,15 @@ remains of interrupted agents.
 ## 9. Escalation etiquette
 
 Outcomes, not mechanics. David does not care which agents ran; he cares what
-changed, what the evidence is, and what needs his decision. Full PR URLs
+changed, what the evidence is, and what needs his decision.
+PIN (David, 2026-07-20): very terse, inverse pyramid, decision-first in every
+reply; details last or cut. When a promised milestone lands (e.g. "all PRs at
+E5"), say so concretely and unprompted.
+PIN (David, 2026-07-20): David-facing pages are DEPLOYED ht-ml.app links,
+never local lavish-editor session URLs (those are working surfaces only).
+Never open anything in the automation/axi Chrome profile; if a page should be
+opened for David at all, open it in HIS real default Chrome (axi auto-connect
+session), otherwise just hand him the deployed link in chat. Full PR URLs
 always. Batch non-urgent items into one digest. Multi-option decisions go
 through lavish or the board, not walls of chat text. PT timestamps. Follow
 ~/VOICE.md for anything he reads: no em dashes, no emojis, plain literal
