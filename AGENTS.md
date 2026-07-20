@@ -121,6 +121,10 @@ Use the injected `return_thread_id` and `return_host_id` and never hardcode a ta
 
 Use only the nine skills and the narrow carriers they own for orchestration.
 
+All task dispatch runs box-side in this session (David 2026-07-20).
+The Mac firstmate no longer spawns subagents and routes every brief here.
+The Mac firstmate is a relay only: it steers and peeks running work, executes David's merge word through `gh`, and makes Mac-local file edits.
+
 ## 5. Model and effort routing
 
 The Command Center defaults to `gpt-5.6-sol` at High effort.
@@ -178,14 +182,10 @@ Keep checkpoint history append-only and preserve decided or superseded decisions
 Render in a real browser, exercise every control, read the screenshot, and fix error-level defects before delivery.
 Never run `lavish-axi share` or publish externally without David's explicit word.
 
-Badge every load-bearing completion or merge-review claim with Jim's canonical evidence block installed by `$lavish`.
-E0 is Assumed.
-E1 is Ran with a trace and cannot support a works claim.
-E2 is Works-unit with a passing test and mutation evidence.
-E3 is Works-live with output that exhibits the effect and human-visible evidence.
-E4 is Causes with a preregistered control and stated sample count.
-E5 is Refute-survived after an adversarial panel fails to kill the claim.
-Laptop-only evidence is capped at E1.
+Badge every load-bearing completion or merge-review claim with the canonical E0-E5 evidence ladder in `data/operating-model/evidence-ladder.md`, installed by `$lavish`.
+E5 is David-verified live and nothing else; an unbadged claim reads as E0.
+The `$build` quality gates named `CAUSAL` and `PANEL-SURVIVED` are separate requirements, not evidence levels, and never reuse the E4 or E5 labels.
+Evidence that never touched the deployed product cannot exceed E2.
 Every side claim must earn the same evidence bar as the headline claim.
 Product code is not ready to submit below E3 unless the merge page explains why a live user path is not relevant.
 

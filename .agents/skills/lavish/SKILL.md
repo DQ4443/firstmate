@@ -153,8 +153,8 @@ Mockups of an existing product may use that product's design system only inside 
 ## Evidence badges
 
 Use only the installed `JIM EVIDENCE BADGES` block for workflow claims.
-E0 is Assumed, E1 is Ran, E2 is Works-unit with mutation evidence, E3 is Works-live, E4 is Causes with a preregistered control and sample count, and E5 is Refute-survived.
-Laptop-only evidence is capped at E1.
+The badge levels are the canonical E0-E5 ladder in `data/operating-model/evidence-ladder.md`, where E5 is David-verified live; `CAUSAL` and `PANEL-SURVIVED` are separate named requirements, not E4 or E5.
+Evidence that never touched the deployed product cannot exceed E2.
 Every side claim earns the same bar as the headline claim or carries its lower level visibly.
 
 ## Report mode
