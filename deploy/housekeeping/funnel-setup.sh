@@ -12,14 +12,18 @@
 # Funneling 8443 would expose that service, so 8443 is out too (the 8443
 # collision, discovered 2026-07).
 # That leaves 10000 as the one free Funnel port, so the webhook uses it.
+# HK_FUNNEL_PORT is validated against an allowlist of exactly {10000}; 443 and
+# 8443 are rejected outright for the reasons above.
 #
 # Public URL after this runs:
 #   https://dqubuntu.tailb6dce4.ts.net:10000/linear  ->  127.0.0.1:4481
 #
 # A pre-check collision guard refuses to funnel the chosen port if any handler
-# other than our own /linear proxy is already bound to it.
+# other than our own /linear proxy is already bound to it, and fails CLOSED if
+# the serve status cannot be read.
 # The post-check re-verifies that ONLY the chosen port is public, exposing ONLY
-# the /linear path, and that every other port stays tailnet-only.
+# the /linear path, and that every other port stays tailnet-only; on any
+# post-check failure the just-enabled handler is reverted before exiting.
 #
 # Idempotent: re-running re-asserts the same handler and re-verifies.
 set -euo pipefail
@@ -30,6 +34,28 @@ FUNNEL_TARGET="${HK_FUNNEL_TARGET:-127.0.0.1:4481}"
 
 log() { printf '%s\n' "$*"; }
 err() { printf '%s\n' "$*" >&2; }
+
+# Port allowlist: exactly {10000}. 443 and 8443 are structurally forbidden on
+# this box, not merely discouraged, so reject them with the rationale.
+case "$FUNNEL_PORT" in
+  10000) ;;
+  443)
+    err "HK_FUNNEL_PORT=443 is FORBIDDEN: 443 already carries tailnet-only serve paths"
+    err "(/ -> 127.0.0.1:4387, /out -> 127.0.0.1:8790, /login -> 127.0.0.1:6080)."
+    err "Funnel is per-port, so funneling 443 would expose them all publicly."
+    exit 1
+    ;;
+  8443)
+    err "HK_FUNNEL_PORT=8443 is FORBIDDEN: 8443 already carries a tailnet-only serve"
+    err "(/ -> 127.0.0.1:6080, a VNC-ish surface that must NEVER go public)."
+    err "Funnel is per-port, so funneling 8443 would expose that service publicly."
+    exit 1
+    ;;
+  *)
+    err "HK_FUNNEL_PORT=${FUNNEL_PORT} is not on the allowlist; only 10000 is permitted on this box."
+    exit 1
+    ;;
+esac
 
 command -v tailscale >/dev/null 2>&1 || {
   err "tailscale not found on PATH; cannot set up the funnel."
@@ -66,29 +92,63 @@ resolve_hostport || {
 # chosen port we must be certain that port carries nothing but our own /linear
 # proxy. If any other handler is already bound there, funneling the port would
 # expose it, so ABORT loudly and leave the serve config untouched.
+# Fails CLOSED: if the serve status cannot be read or parsed, we refuse to
+# enable the funnel blind rather than assume the port is free.
 precheck_json="$(tailscale serve status --json 2>/dev/null || true)"
-if [ -n "$precheck_json" ]; then
-  # Web handlers on the chosen host:port that are NOT our /linear -> target proxy.
-  foreign_web="$(printf '%s' "$precheck_json" \
-    | jq -r --arg hp "$HOSTPORT" --arg path "$FUNNEL_PATH" --arg tgt "http://${FUNNEL_TARGET}" \
-        '((.Web[$hp].Handlers // {}) | to_entries[]
-           | select((.key != $path) or ((.value.Proxy // "") != $tgt))
-           | "\(.key) -> \(.value.Proxy // (.value | tostring))")' 2>/dev/null || true)"
-  # Any TCP handler on the chosen port at all (we only ever use HTTPS web handlers).
-  foreign_tcp="$(printf '%s' "$precheck_json" \
-    | jq -r --arg p "$FUNNEL_PORT" \
-        '((.TCP // {}) | to_entries[] | select(.key == $p) | "TCP :\(.key)")' 2>/dev/null || true)"
-  if [ -n "$foreign_web" ] || [ -n "$foreign_tcp" ]; then
-    err "COLLISION GUARD: port ${FUNNEL_PORT} already carries a handler that is NOT our ${FUNNEL_PATH} proxy."
-    err "Refusing to enable Funnel on ${FUNNEL_PORT}; funneling it would expose the conflicting handler(s) below:"
-    [ -n "$foreign_web" ] && printf '%s\n' "$foreign_web" | while IFS= read -r line; do err "  web:  $line"; done
-    [ -n "$foreign_tcp" ] && printf '%s\n' "$foreign_tcp" | while IFS= read -r line; do err "  tcp:  $line"; done
-    err ""
-    err "REMEDIATION: pick a different Funnel port via HK_FUNNEL_PORT (allowed: 443, 8443, 10000),"
-    err "or remove the conflicting handler first. The serve config was NOT modified."
-    exit 1
-  fi
+if [ -z "$precheck_json" ] || ! printf '%s' "$precheck_json" | jq -e . >/dev/null 2>&1; then
+  err "COLLISION GUARD: could not read 'tailscale serve status --json' (empty or unparsable output)."
+  err "Refusing to enable Funnel blind; the port could carry a tailnet-only handler we cannot see."
+  err "A healthy node prints valid JSON even with no serve config, so fix tailscale first and re-run."
+  err "The serve config was NOT modified."
+  exit 1
 fi
+# Web handlers on the chosen host:port that are NOT our /linear -> target proxy.
+foreign_web="$(printf '%s' "$precheck_json" \
+  | jq -r --arg hp "$HOSTPORT" --arg path "$FUNNEL_PATH" --arg tgt "http://${FUNNEL_TARGET}" \
+      '((.Web[$hp].Handlers // {}) | to_entries[]
+         | select((.key != $path) or ((.value.Proxy // "") != $tgt))
+         | "\(.key) -> \(.value.Proxy // (.value | tostring))")' 2>/dev/null || true)"
+# Foreign TCP handlers on the chosen port. Our own HTTPS web serve makes
+# tailscale write TCP[port]={"HTTPS":true}, which is the listener for our own
+# handler, not a collision; only raw forwards (TCPForward, TerminateTLS) or a
+# plain-HTTP listener count as foreign.
+foreign_tcp="$(printf '%s' "$precheck_json" \
+  | jq -r --arg p "$FUNNEL_PORT" \
+      '((.TCP // {}) | to_entries[]
+         | select(.key == $p)
+         | select(((.value.TCPForward // "") != "") or ((.value.TerminateTLS // "") != "") or ((.value.HTTP // false) == true))
+         | "TCP :\(.key) \(.value | tostring)")' 2>/dev/null || true)"
+if [ -n "$foreign_web" ] || [ -n "$foreign_tcp" ]; then
+  err "COLLISION GUARD: port ${FUNNEL_PORT} already carries a handler that is NOT our ${FUNNEL_PATH} proxy."
+  err "Refusing to enable Funnel on ${FUNNEL_PORT}; funneling it would expose the conflicting handler(s) below:"
+  [ -n "$foreign_web" ] && printf '%s\n' "$foreign_web" | while IFS= read -r line; do err "  web:  $line"; done
+  [ -n "$foreign_tcp" ] && printf '%s\n' "$foreign_tcp" | while IFS= read -r line; do err "  tcp:  $line"; done
+  err ""
+  err "REMEDIATION: remove or relocate the conflicting handler first, then re-run."
+  err "10000 is the only permitted Funnel port on this box (443 and 8443 carry"
+  err "tailnet-only services), so the conflict must move, not the webhook."
+  err "The serve config was NOT modified."
+  exit 1
+fi
+
+# Revert helper: on any post-check failure, take down the handler this run just
+# enabled so a bad exposure never stays live. Best-effort, with a manual
+# fallback printed if the revert itself fails.
+revert_funnel() {
+  err "Reverting: disabling the funnel handler just enabled on port ${FUNNEL_PORT}${FUNNEL_PATH}."
+  local revert_out revert_rc
+  set +e
+  revert_out="$(tailscale funnel --https="${FUNNEL_PORT}" --set-path="${FUNNEL_PATH}" off 2>&1)"
+  revert_rc=$?
+  set -e
+  if [ "$revert_rc" -ne 0 ]; then
+    err "REVERT FAILED (exit ${revert_rc}): ${revert_out}"
+    err "The funnel may still be LIVE. Manually run on the box:"
+    err "  tailscale funnel --https=${FUNNEL_PORT} --set-path=${FUNNEL_PATH} off"
+  else
+    err "Reverted: the ${FUNNEL_PORT}${FUNNEL_PATH} funnel handler was removed."
+  fi
+}
 
 log "Enabling Funnel: https://${HOSTPORT}${FUNNEL_PATH} -> ${FUNNEL_TARGET}"
 
@@ -119,7 +179,16 @@ fi
 
 # Post-check: the chosen port must be public (Funnel on) exposing ONLY the
 # /linear path, and EVERY other port must remain tailnet-only (Funnel off).
-status_json="$(tailscale serve status --json 2>/dev/null)"
+# Fails CLOSED: an unreadable status means the funnel is live but UNVERIFIED,
+# so revert it rather than trust it.
+status_json="$(tailscale serve status --json 2>/dev/null || true)"
+if [ -z "$status_json" ] || ! printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
+  err "POST-CHECK FAIL: could not read 'tailscale serve status --json' after enabling;"
+  err "the funnel state is UNVERIFIED and cannot be trusted."
+  revert_funnel
+  err "REMEDIATION: fix tailscale status output, then re-run this script."
+  exit 1
+fi
 
 # Funnel state of the chosen host:port (AllowFunnel keys are "<host>:<port>").
 funnel_chosen="$(printf '%s' "$status_json" \
@@ -160,9 +229,11 @@ tailscale serve status 2>&1 || true
 if [ "$ok" -ne 1 ]; then
   err ""
   err "Funnel post-check FAILED. The tailnet-only guarantee for other ports, or the"
-  err "${FUNNEL_PORT} target, did not verify."
-  err "REMEDIATION: inspect 'tailscale serve status' above; run 'tailscale serve reset'"
-  err "to clear stray handlers if needed, then re-run this script."
+  err "${FUNNEL_PORT} target, did not verify. Not leaving a bad exposure standing:"
+  revert_funnel
+  err "REMEDIATION: inspect 'tailscale serve status' above; remove or fix the stray"
+  err "handlers (or run 'tailscale serve reset' to clear everything), then re-run"
+  err "this script."
   exit 1
 fi
 
