@@ -192,8 +192,10 @@ E0 is Assumed.
 E1 is Ran with a trace and cannot support a works claim.
 E2 is Works-unit with a passing test and mutation evidence.
 E3 is Works-live with output that exhibits the effect and human-visible evidence.
-E4 is Causes with a preregistered control and stated sample count.
+E4 is Independently reproduced when a non-author agent reproduces the E3 result from scratch in a clean environment.
 E5 is Refute-survived after an adversarial panel fails to kill the claim.
+CAUSAL is the orthogonal named requirement, a preregistered control with a stated sample count, required for any claim that one thing influences another, and is not an E-level.
+The canonical ladder is `data/operating-model/evidence-ladder.md` and this block never redefines the levels.
 Laptop-only evidence is capped at E1.
 Every side claim must earn the same evidence bar as the headline claim.
 Product code is not ready to submit below E3 unless the merge page explains why a live user path is not relevant.

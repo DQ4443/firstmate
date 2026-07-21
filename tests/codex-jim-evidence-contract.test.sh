@@ -18,7 +18,7 @@ for rule in \
   'E1 is Ran' \
   'E2 is Works-unit' \
   'E3 is Works-live' \
-  'E4 is Causes' \
+  'E4 is Independently reproduced' \
   'E5 is Refute-survived' \
   'Laptop-only evidence is capped at E1'; do
   grep -Fq "$rule" "${FILES[@]}" || { printf 'FAIL: missing evidence rule: %s\n' "$rule" >&2; exit 1; }

@@ -30,7 +30,7 @@ ordered(build, ["## Phase 0: Intent", "## Entry Recon", "### 1. Checkpoint", "##
 assert "An explicit `$pdw` always uses the workflow shape and never degrades" in pdw
 assert "may degrade" not in pdw
 assert "genuinely new direction outside the authorized intent" in build
-for evidence_rule in ["E0 is Assumed", "E1 is Ran", "E2 is Works-unit", "E3 is Works-live", "E4 is Causes", "E5 is Refute-survived", "Laptop-only evidence is capped at E1", "Side claims, qualifiers, and supporting comparisons must earn the same bar"]:
+for evidence_rule in ["E0 is Assumed", "E1 is Ran", "E2 is Works-unit", "E3 is Works-live", "E4 is Independently reproduced", "E5 is Refute-survived", "Laptop-only evidence is capped at E1", "Side claims, qualifiers, and supporting comparisons must earn the same bar"]:
     assert evidence_rule in build, evidence_rule
 assert "Overlapping writers serialize even when their worktrees are isolated." in pdw
 ledger_line = next(line for line in build.splitlines() if line.startswith("Create `state/build-loops/"))

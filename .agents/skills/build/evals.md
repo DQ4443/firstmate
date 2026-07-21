@@ -33,7 +33,7 @@ Run isolated grader agents with binary checks and require at least 90 percent ov
 - [ ] Every round return carried the checkpoint `NEXT_STEP` pin.
 - [ ] The stop rule used intent and separability, never diff-line counts, cost, or wall-clock time.
 - [ ] Validation measured real output against an invariant and recorded each claim's artifact and E-level in the ledger.
-- [ ] Evidence used E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Causes with preregistered control and sample count, and E5 Refute-survived.
+- [ ] Evidence used E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Independently reproduced by a non-author agent, and E5 Refute-survived, with CAUSAL (preregistered control and sample count) kept as the orthogonal named requirement, not an E-level.
 - [ ] Laptop-only evidence never exceeded E1, and every side claim earned the same bar as the headline claim or was downgraded explicitly.
 - [ ] A user-interface change had recorded Playwright proof and the screenshot was read.
 - [ ] Final validation updated the same Lavish page with closing status, full history, evidence, spillover, and the `$submit` decision.

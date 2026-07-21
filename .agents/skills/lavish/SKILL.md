@@ -194,7 +194,7 @@ Mockups of an existing product may use that product's design system only inside 
 ## Evidence badges
 
 Use only the installed `JIM EVIDENCE BADGES` block for workflow claims.
-E0 is Assumed, E1 is Ran, E2 is Works-unit with mutation evidence, E3 is Works-live, E4 is Causes with a preregistered control and sample count, and E5 is Refute-survived.
+E0 is Assumed, E1 is Ran, E2 is Works-unit with mutation evidence, E3 is Works-live, E4 is Independently reproduced when a non-author agent reproduces the result from scratch, and E5 is Refute-survived; CAUSAL, a preregistered control with a stated sample count, is the orthogonal named requirement and not an E-level, and `data/operating-model/evidence-ladder.md` is canonical.
 Laptop-only evidence is capped at E1.
 Every side claim earns the same bar as the headline claim or carries its lower level visibly.
 

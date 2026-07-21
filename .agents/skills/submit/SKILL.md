@@ -19,7 +19,7 @@ Finish validation first when that precondition is not met because `$submit` is t
 Invoking `$submit` requests this pipeline but does not authorize an outward action.
 The human must explicitly approve the push and pull-request opening at step 2 after seeing the drafted title and body.
 Merge requires a separate explicit human decision after this skill finishes.
-The evidence bar is Jim's E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Causes with a preregistered control and sample count, and E5 Refute-survived.
+The evidence bar is Jim's E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Independently reproduced by a non-author agent, and E5 Refute-survived, with CAUSAL (a preregistered control and stated sample count) kept as the orthogonal named requirement, not an E-level, and `data/operating-model/evidence-ladder.md` canonical.
 Laptop-only evidence is capped at E1, and every side claim must earn the same bar as the headline claim.
 
 ## The loop

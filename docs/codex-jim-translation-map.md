@@ -177,7 +177,8 @@ E0 is ASSUMED and must be labeled or omitted.
 E1 is RAN with traces and never permits the word works, and laptop-only artifacts cap here.
 E2 is WORKS-unit with tests plus mutation.
 E3 is WORKS-live with live output that exhibits the effect and human-visible evidence.
-E4 is CAUSES with a preregistered control and stated sample count whenever causality is claimed.
+E4 is INDEPENDENTLY-REPRODUCED when a non-author agent reproduces the E3 result from scratch in a clean environment.
+CAUSAL is the orthogonal named requirement, a preregistered control with a stated sample count, required whenever causality is claimed, and is not an E-level.
 E5 is REFUTE-SURVIVED after an adversarial panel fails to kill the claim, and it is required for ship language, closing-report headlines, and submit boundaries.
 Feature completion requires E2 and E3, side claims inherit the same bar, and an E5 panel attacks the claims ledger as well as the diff.
 The target is `build`, `submit`, `lavish`, and their evals, and the evidence test rejects a claim whose badge lacks the required artifact.

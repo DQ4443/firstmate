@@ -75,9 +75,11 @@ E0 is Assumed and must be labeled or omitted.
 E1 is Ran with traces and never permits a works claim.
 E2 is Works-unit with tests and mutation evidence.
 E3 is Works-live with output that exhibits the effect and human-visible evidence.
-E4 is Causes with a preregistered control and stated sample count.
+E4 is Independently reproduced when a non-author agent reproduces the E3 result from scratch in a clean environment.
 E5 is Refute-survived after an adversarial panel fails to kill the claim.
-Feature completion needs E2 and E3, plus E4 for a causal claim.
+CAUSAL is the orthogonal named requirement, a preregistered control with a stated sample count, required for any claim that one thing influences another, and is not an E-level.
+The canonical ladder is `data/operating-model/evidence-ladder.md` and this mirror never redefines the levels.
+Feature completion needs E2 and E3, plus CAUSAL for a causal claim.
 Ship language and closing-report headlines need E5.
 Laptop-only evidence is capped at E1.
 Side claims, qualifiers, and supporting comparisons must earn the same bar as the headline claim.
