@@ -77,6 +77,15 @@ GIT_COMMON_DIR=$(git -C "$FM_ROOT" rev-parse --git-common-dir 2>/dev/null) || ex
 fm_supervision_status "$STATE" "$GRACE"
 [ "$FM_SUP_IN_FLIGHT" -gt 0 ] || exit 0
 fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME" && exit 0
+# Launchd poller supervision (the standing supervisor since the paradigm
+# cutover; the tmux watcher above is the retired escape hatch). A fresh poller
+# beat means wakes are delivered and the turn does not end blind. Added
+# 2026-07-08 after a false SUPERVISION-OFF block with the poller live at 17s.
+PBEAT="$STATE/.last-poller-beat"
+if [ -e "$PBEAT" ]; then
+  pm=$(fm_sup_stat_mtime "$PBEAT")
+  if [ -n "$pm" ] && [ $(( $(date +%s) - pm )) -lt "$GRACE" ]; then exit 0; fi
+fi
 
 REASON='tasks in flight, no live watcher - run bin/fm-watch-arm.sh as a background task before ending the turn'
 rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'

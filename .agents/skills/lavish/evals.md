@@ -25,8 +25,10 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] The required decision-zone reference was read before building a decision zone.
 - [ ] The required nav-sidebar reference was read before building a checkpoint rail.
 - [ ] Browser QA rendered the page and the worker inspected the screenshot before presentation.
+- [ ] The review session used `lavish-axi <html-file> --no-open` and opened the returned URL in the owning task's Codex in-app browser without launching David's system browser.
 - [ ] QA checked overflow, clipping, overlap, diagrams, selection, typing, tabs, reply composition, and the Copy fallback.
 - [ ] Reading content is linear and only live decisions are tabbed at the end.
+- [ ] The single current-round section and every preserved earlier round began with that round's visible, unfolded `Where you are` table containing Project, Ticket, Bigger picture, System position, Whole-ticket success, Current round, and Scope boundaries before its summary, evidence, or decisions.
 - [ ] Every page ends with the decision zone and Questions.
 - [ ] Short-answer questions have real textareas wired into the reply bar.
 - [ ] A results page starts with a short summary, then a final-pipeline diagram, then definitions of what was tried.
@@ -34,7 +36,7 @@ Run isolated binary graders three times and target at least 90 percent.
 - [ ] Decided and superseded decisions retire from live tabs into the Decided log.
 - [ ] Tab changes never move the reader above the sticky tab bar.
 - [ ] Checkpoint mode shows landed evidence, concrete suggested moves, a stop check, Questions, and the standing mode choice with `stay current` preselected.
-- [ ] The round-N page retains all N rounds, with the current round detailed and earlier rounds compressed without deletion.
+- [ ] The round-N page contains exactly one mutable current-round section plus N-1 complete chronological history sections, including each round's frozen seven-row orientation snapshot, evidence, decisions, findings, and outcome; earlier round bodies may fold without deletion or current-state rewriting.
 - [ ] Every landed or evidence claim uses the canonical `JIM EVIDENCE BADGES` block at the level actually reached without rewriting the legacy David-warm row.
 - [ ] The badges mean E0 Assumed, E1 Ran, E2 Works-unit with mutation, E3 Works-live, E4 Causes with preregistered control and sample count, and E5 Refute-survived.
 - [ ] Laptop-only evidence is capped at E1, and side claims display the same earned bar as the headline or their own lower level.

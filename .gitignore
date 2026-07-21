@@ -4,6 +4,8 @@ data/
 .no-mistakes/
 .lavish/
 .DS_Store
+__pycache__/
+*.pyc
 .env
 config/crew-harness
 config/crew-dispatch.json
@@ -15,3 +17,4 @@ config/cmux-socket-password
 config/pager.env
 config/reconcile-intentional-drift.txt
 config/reconcile-skip-set.txt
+state/eng-331/htmlapp-keys.local.md

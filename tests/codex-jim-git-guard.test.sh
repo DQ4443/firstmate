@@ -68,6 +68,28 @@ run_guard 2 "$TMP/repo" "sh -lc 'git push origin main'"
 run_guard 2 "$TMP/repo" "zsh -c \"gh pr create --title nested\""
 run_guard 2 "$TMP/repo" "eval 'git push origin master'"
 run_guard 2 "$TMP/repo" "eval -- 'git push origin master'"
+# shellcheck disable=SC2016  # literal payload: the guard must inspect expansion inside eval
+run_guard 2 "$TMP/repo" 'cmd="git push origin main"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: the guard must inspect expansion inside sh -c
+run_guard 2 "$TMP/repo" 'cmd="git push origin main"; sh -c "$cmd"'
+# shellcheck disable=SC2016  # literal payload: the guard must inspect an expanded PR action
+run_guard 2 "$TMP/repo" 'cmd="gh pr create --title variable-bypass"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: safe expanded commands must remain allowed
+run_guard 0 "$TMP/repo" 'cmd="git status --short"; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: recursive expansion must fail closed
+run_guard 2 "$TMP/repo" 'cmd='"'"'eval "$cmd"'"'"'; eval "$cmd"'
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
+run_guard 2 "$TMP/repo" 'G=git; "$G" push origin main'
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
+run_guard 0 "$TMP/repo" 'G=git; "$G" status --short'
+
+git -C "$TMP/repo" config alias.publish push
+git -C "$TMP/repo" config alias.shell-publish '!git push'
+run_guard 2 "$TMP/repo" 'git publish origin main'
+run_guard 2 "$TMP/repo" 'git shell-publish origin main'
+run_guard 2 "$TMP/repo" 'git -c alias.inline-publish=push inline-publish origin main'
+run_guard 2 "$TMP/repo" 'git config alias.staged-publish push && git staged-publish origin main'
+run_guard 0 "$TMP/repo" 'git config alias.inspect status && git inspect --short'
 run_guard 2 "$TMP/repo" "bash -lc 'eval -- \"zsh -lc '\"'\"'git push origin main'\"'\"'\"'"
 
 git -C "$TMP/repo" switch -c feature >/dev/null 2>&1
@@ -104,25 +126,25 @@ pass 'push, attribution, and pushed-amend policies resist adversarial command sh
 sentinel=$(git -C "$TMP/repo" rev-parse --git-path codex-submit-pr-go)
 [[ "$sentinel" = /* ]] || sentinel="$TMP/repo/$sentinel"
 run_guard 2 "$TMP/repo" 'gh pr create --title test'
+run_guard 2 "$TMP/repo" 'gh api -X POST repos/example/project/pulls -f title=test'
+run_guard 2 "$TMP/repo" 'gh api graphql -f query="mutation { createPullRequest(input: {}) { pullRequest { id } } }"'
+# shellcheck disable=SC2016  # literal payload: the guard must resolve the assigned command name
+run_guard 2 "$TMP/repo" 'GH=gh; "$GH" api --method POST repos/example/project/pulls'
+run_guard 0 "$TMP/repo" 'gh api repos/example/project/pulls'
+run_guard 0 "$TMP/repo" 'gh api graphql -f query="{ viewer { login } }"'
 touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr create --title test'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed'
+touch "$sentinel"
+run_guard 0 "$TMP/repo" 'gh api --method POST repos/example/project/pulls -f title=approved'
+[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by raw pull-request creation'
 run_guard 2 "$TMP/repo" 'gh pr create --title second'
 run_guard 2 "$TMP/repo" 'gh pr ready 42'
 touch "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr ready 42'
 [[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh pr ready'
-run_guard 2 "$TMP/repo" 'gh-axi pr ready 42'
 touch "$sentinel"
-run_guard 0 "$TMP/repo" 'gh-axi pr ready 42'
-[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by gh-axi pr ready'
-run_guard 2 "$TMP/repo" 'npx -y gh-axi pr create --title house-cli'
-run_guard 2 "$TMP/repo" 'npx -y gh-axi@latest pr create --title versioned-house-cli'
-touch "$sentinel"
-run_guard 0 "$TMP/repo" 'npx -y gh-axi@1.2.3 pr ready 42'
-[[ ! -e "$sentinel" ]] || fail 'submit sentinel was not consumed by versioned npx gh-axi pr ready'
-touch "$sentinel"
-run_guard 2 "$TMP/repo" 'gh pr create --title one && gh-axi pr ready 42'
+run_guard 2 "$TMP/repo" 'gh pr create --title one && gh pr ready 42'
 [[ -e "$sentinel" ]] || fail 'ambiguous multiple-action command consumed the sentinel'
 rm -f "$sentinel"
 run_guard 0 "$TMP/repo" 'gh pr view 42'
@@ -130,7 +152,7 @@ run_guard 0 "$TMP/repo" 'gh pr view 42'
 custom_sentinel="$TMP/custom-submit-go"
 touch "$custom_sentinel"
 export CODEX_SUBMIT_SENTINEL="$custom_sentinel"
-run_guard 0 "$TMP/repo" 'gh-axi pr create --title configured'
+run_guard 0 "$TMP/repo" 'gh pr create --title configured'
 unset CODEX_SUBMIT_SENTINEL
 [[ ! -e "$custom_sentinel" ]] || fail 'configured submit sentinel was not consumed'
 pass 'pull-request sentinel is project-local, one-shot, and cannot authorize two actions'
@@ -154,6 +176,32 @@ canonical_priority_status=$?
 set -e
 [[ "$canonical_priority_status" -eq 0 ]] || fail 'compatibility cmd overrode canonical command input'
 pass 'canonical Codex command payload and secondary unified-exec cmd payload are both handled'
+
+argv_cmd=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","push","origin","main"]}}')
+set +e
+argv_output=$(printf '%s\n' "$argv_cmd" | python3 "$GUARD" 2>&1)
+argv_status=$?
+set -e
+[[ "$argv_status" -eq 2 && "$argv_output" == BLOCKED:* ]] || fail 'argv-form unified-exec cmd bypassed the guard'
+argv_command=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{command:["git","push","origin","main"]}}')
+set +e
+printf '%s\n' "$argv_command" | python3 "$GUARD" >/dev/null 2>&1
+argv_command_status=$?
+set -e
+[[ "$argv_command_status" -eq 2 ]] || fail 'argv-form canonical command bypassed the guard'
+argv_safe=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","status","--short"]}}')
+set +e
+printf '%s\n' "$argv_safe" | python3 "$GUARD" >/dev/null 2>&1
+argv_safe_status=$?
+set -e
+[[ "$argv_safe_status" -eq 0 ]] || fail 'argv-form safe command was blocked'
+argv_bad=$(jq -nc --arg cwd "$TMP/repo" '{cwd:$cwd,tool_input:{cmd:["git","push",42]}}')
+set +e
+argv_bad_output=$(printf '%s\n' "$argv_bad" | python3 "$GUARD" 2>&1)
+argv_bad_status=$?
+set -e
+[[ "$argv_bad_status" -eq 2 && "$argv_bad_output" == BLOCKED:* ]] || fail 'uninspectable argv command did not fail closed'
+pass 'argv-form unified-exec commands are normalized and inspected, not bypassed'
 
 GUARD="$GUARD" REPO="$TMP/repo" python3 - <<'PY'
 import json
@@ -195,21 +243,22 @@ set -e
 [[ "$subdir_status" -eq 0 ]] || fail 'project-root hook command failed from a repository subdirectory'
 pass 'project declaration installs only the load-bearing PreToolUse hook'
 
-CODEX_HOME_PROBE="$TMP/codex-home"
-PROJECT_PROBE="$CODEX_HOME_PROBE/project"
-mkdir -p "$PROJECT_PROBE/.codex"
-cp "$HOOKS" "$PROJECT_PROBE/.codex/hooks.json"
-cat >"$CODEX_HOME_PROBE/hooks.json" <<'JSON'
+if command -v codex >/dev/null 2>&1; then
+  CODEX_HOME_PROBE="$TMP/codex-home"
+  PROJECT_PROBE="$CODEX_HOME_PROBE/project"
+  mkdir -p "$PROJECT_PROBE/.codex"
+  cp "$HOOKS" "$PROJECT_PROBE/.codex/hooks.json"
+  cat >"$CODEX_HOME_PROBE/hooks.json" <<'JSON'
 {"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"global-probe","timeout":10}]}]}}
 JSON
-cat >"$CODEX_HOME_PROBE/config.toml" <<EOF
+  cat >"$CODEX_HOME_PROBE/config.toml" <<EOF
 [projects."$PROJECT_PROBE"]
 trust_level = "trusted"
 [features]
 hooks = true
 EOF
 
-CODEX_HOME="$CODEX_HOME_PROBE" PROJECT_PROBE="$PROJECT_PROBE" python3 - <<'PY'
+  CODEX_HOME="$CODEX_HOME_PROBE" PROJECT_PROBE="$PROJECT_PROBE" python3 - <<'PY'
 import json
 import os
 import selectors
@@ -263,9 +312,12 @@ assert [(hook["source"], hook["command"]) for hook in hooks] == [
 ]
 assert [hook["displayOrder"] for hook in hooks] == [0, 1]
 PY
-pass 'Codex app-server proves project hooks compose after existing global hooks'
+  pass 'Codex app-server proves project hooks compose after existing global hooks'
+else
+  pass 'Codex app-server hook composition probe skipped because codex CLI is absent'
+fi
 
-if rg -n '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
+if grep -En '\.claude|CLAUDE|Claude|SessionStart|UserPromptSubmit|session-title|pre-commit-install' "$GUARD" "$HOOKS"; then
   fail 'forbidden Claude artifact or unproven optional hook landed'
 fi
 for optional in session-title.sh session-rename-nudge.sh pre-commit-install.sh; do

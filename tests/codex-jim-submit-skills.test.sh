@@ -157,41 +157,46 @@ verify_evals "$EVALS" || fail 'submit eval trigger or gate contract is incomplet
 printf 'ok - submit structure, trigger head, thresholds, and eval checks are present\n'
 printf 'ok - all five positive triggers, three negative triggers, and 24 binary eval rules are enumerated\n'
 
-if rg -n '[—–]|[⚡⚙🔁📦]|\.claude|Workflow|ReviewBot|PushNotification|ScheduleWakeup|Skill\(' "$SKILL" "$EVALS"; then
+if grep -En '[—–]|[⚡⚙🔁📦]|\.claude|Workflow|ReviewBot|PushNotification|ScheduleWakeup|Skill\(' "$SKILL" "$EVALS"; then
   fail 'Claude artifact or banned prose survived adaptation'
 fi
 printf 'ok - submit skill has no Claude artifact or banned prose\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' '/Findings block only with a runnable reproduction in step 1\./d' "$TMP/skill.md"
+sed -i.bak '/Findings block only with a runnable reproduction in step 1\./d' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'trigger-head mutation survived'
 fi
 printf 'ok - removing an invariant trigger fails the verifier\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' 's/re-panel threshold 4, pause threshold 16/re-panel threshold 5, pause threshold 17/' "$TMP/skill.md"
+sed -i.bak 's/re-panel threshold 4, pause threshold 16/re-panel threshold 5, pause threshold 17/' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'threshold mutation survived'
 fi
 printf 'ok - changing re-panel and HOLD thresholds fails the verifier\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' 's/### 4\. Re-panel every 4 stuck loops/### 7. Re-panel every 4 stuck loops/' "$TMP/skill.md"
+sed -i.bak 's/### 4\. Re-panel every 4 stuck loops/### 7. Re-panel every 4 stuck loops/' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'module-order mutation survived'
 fi
 printf 'ok - changing the source node sequence fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' '/run the commit-push-pr flow on this/d' "$TMP/evals.md"
+sed -i.bak '/run the commit-push-pr flow on this/d' "$TMP/evals.md"
+rm -f "$TMP/evals.md.bak"
 if verify_evals "$TMP/evals.md"; then
   fail 'positive-trigger mutation survived'
 fi
 printf 'ok - removing a positive trigger fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' 's/panel, push, PR/panel, approved push, PR/' "$TMP/evals.md"
+sed -i.bak 's/panel, push, PR/panel, approved push, PR/' "$TMP/evals.md"
+rm -f "$TMP/evals.md.bak"
 if verify_evals "$TMP/evals.md"; then
   fail 'second positive-trigger wording mutation survived'
 fi
@@ -215,42 +220,48 @@ fi
 printf 'ok - moving a negative prompt into the positive section fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' 's/## Should NOT trigger (negative)/## Should trigger (negative)/' "$TMP/evals.md"
+sed -i.bak 's/## Should NOT trigger (negative)/## Should trigger (negative)/' "$TMP/evals.md"
+rm -f "$TMP/evals.md.bak"
 if verify_evals "$TMP/evals.md"; then
   fail 'NOT-negation mutation survived'
 fi
 printf 'ok - removing NOT from the negative heading fails the verifier\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' 's/, and `matrix_recall`//' "$TMP/skill.md"
+sed -i.bak 's/, and `matrix_recall`//' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'canary-field mutation survived'
 fi
 printf 'ok - changing the exact canary fields fails the verifier\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' 's/at least two real findings/at least three real findings/' "$TMP/skill.md"
+sed -i.bak 's/at least two real findings/at least three real findings/' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'panel-miss fallback mutation survived'
 fi
 printf 'ok - changing the panel-miss fallback predicate fails the verifier\n'
 
 cp "$SKILL" "$TMP/skill.md"
-sed -i '' 's/at least three drip rounds on two consecutive pull requests/at least four drip rounds on three consecutive pull requests/' "$TMP/skill.md"
+sed -i.bak 's/at least three drip rounds on two consecutive pull requests/at least four drip rounds on three consecutive pull requests/' "$TMP/skill.md"
+rm -f "$TMP/skill.md.bak"
 if verify_skill "$TMP/skill.md"; then
   fail 'drip-round fallback mutation survived'
 fi
 printf 'ok - changing the drip-round fallback predicate fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' 's/The human saw the drafted title/The human reviewed the drafted title/' "$TMP/evals.md"
+sed -i.bak 's/The human saw the drafted title/The human reviewed the drafted title/' "$TMP/evals.md"
+rm -f "$TMP/evals.md.bak"
 if verify_evals "$TMP/evals.md"; then
   fail 'exact pull-request approval eval mutation survived'
 fi
 printf 'ok - changing the exact pull-request approval eval fails the verifier\n'
 
 cp "$EVALS" "$TMP/evals.md"
-sed -i '' 's/`\$submit` did not merge/`$submit` may merge/' "$TMP/evals.md"
+sed -i.bak 's/`\$submit` did not merge/`$submit` may merge/' "$TMP/evals.md"
+rm -f "$TMP/evals.md.bak"
 if verify_evals "$TMP/evals.md"; then
   fail 'merge-gate mutation survived'
 fi
@@ -258,7 +269,8 @@ printf 'ok - changing the merge gate fails the verifier\n'
 
 for carrier in pdw build lavish; do
   cp "$SKILL" "$TMP/skill.md"
-  sed -i '' "s/\\\$$carrier/\/$carrier/g" "$TMP/skill.md"
+  sed -i.bak "s/\\\$$carrier/\/$carrier/g" "$TMP/skill.md"
+  rm -f "$TMP/skill.md.bak"
   if verify_skill "$TMP/skill.md"; then
     fail "slash-$carrier carrier mutation survived"
   fi

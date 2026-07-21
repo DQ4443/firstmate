@@ -2,7 +2,8 @@
 """Guard Codex shell calls against the repository's gated git operations.
 
 Codex PreToolUse sends Bash commands in ``tool_input.command``.
-The desktop unified-exec ``tool_input.cmd`` field is accepted secondarily.
+The desktop unified-exec ``tool_input.cmd`` field is accepted secondarily,
+including its argv-array form, which is normalized to a shell string before inspection.
 Malformed input and local inspection failures are fail-open, matching Jim's guard.
 An intentional policy rejection exits 2 and writes its reason to stderr.
 
@@ -34,6 +35,11 @@ GENERATED_ATTRIBUTION = re.compile(
 SHELL_SEPARATORS = {";", "&", "&&", "|", "||"}
 SHELL_NAMES = {"bash", "sh", "zsh"}
 SHELL_OPTIONS_WITH_VALUES = {"-O", "+O", "-o", "+o", "--init-file", "--rcfile"}
+SHELL_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+SHELL_VARIABLE = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
+POLICY_GIT_BUILTINS = {"commit", "config", "push"}
+REST_PULLS_ENDPOINT = re.compile(r"^(?:https?://[^/]+/)?repos/[^/]+/[^/]+/pulls/?(?:\?.*)?$")
+GRAPHQL_CREATE_PULL_REQUEST = re.compile(r"\bcreatePullRequest\b", re.IGNORECASE)
 MAX_SHELL_DEPTH = 32
 MAX_INSPECTION_BYTES = 1_000_000
 INSPECTION_BUDGET_FACTOR = 40
@@ -160,12 +166,49 @@ def segment_cwd(tokens: list[str], current: Path) -> Path:
     return current
 
 
-def git_actions(tokens: list[str], current: Path) -> Iterable[tuple[str, list[str], Path]]:
+def expand_recorded_variables(
+    tokens: list[str], variables: dict[str, str]
+) -> tuple[list[str], dict[str, str]]:
+    """Expand exact shell-variable tokens from assignments visible in this command."""
+    local = variables.copy()
+    cursor = 0
+    while cursor < len(tokens):
+        match = SHELL_ASSIGNMENT.fullmatch(tokens[cursor])
+        if not match:
+            break
+        local[match.group(1)] = match.group(2)
+        cursor += 1
+
+    expanded: list[str] = []
+    for token in tokens[cursor:]:
+        match = SHELL_VARIABLE.fullmatch(token)
+        if match:
+            name = match.group(1) or match.group(2)
+            token = local.get(name, token)
+        expanded.append(token)
+
+    if cursor == len(tokens):
+        variables.update(local)
+    return expanded, local
+
+
+def parse_command_alias(config: str) -> tuple[str, str] | None:
+    if not config.lower().startswith("alias.") or "=" not in config:
+        return None
+    key, value = config.split("=", 1)
+    name = key.removeprefix("alias.").strip().lower()
+    return (name, value) if name else None
+
+
+def git_invocations(
+    tokens: list[str], current: Path
+) -> Iterable[tuple[str, list[str], Path, dict[str, str]]]:
     for index, token in enumerate(tokens):
         if Path(token).name != "git":
             continue
         cursor = index + 1
         repo = current
+        command_aliases: dict[str, str] = {}
         while cursor < len(tokens):
             option = tokens[cursor]
             if option == "-C" and cursor + 1 < len(tokens):
@@ -176,7 +219,19 @@ def git_actions(tokens: list[str], current: Path) -> Iterable[tuple[str, list[st
                 repo = resolved_path(current, option[2:])
                 cursor += 1
                 continue
-            if option in {"--git-dir", "--work-tree", "-c"} and cursor + 1 < len(tokens):
+            if option == "-c" and cursor + 1 < len(tokens):
+                parsed = parse_command_alias(tokens[cursor + 1])
+                if parsed:
+                    command_aliases[parsed[0]] = parsed[1]
+                cursor += 2
+                continue
+            if option.startswith("-c") and len(option) > 2:
+                parsed = parse_command_alias(option[2:])
+                if parsed:
+                    command_aliases[parsed[0]] = parsed[1]
+                cursor += 1
+                continue
+            if option in {"--git-dir", "--work-tree"} and cursor + 1 < len(tokens):
                 cursor += 2
                 continue
             if option.startswith("--git-dir=") or option.startswith("--work-tree="):
@@ -187,7 +242,73 @@ def git_actions(tokens: list[str], current: Path) -> Iterable[tuple[str, list[st
                 continue
             break
         if cursor < len(tokens):
-            yield tokens[cursor], tokens[cursor + 1 :], repo
+            yield tokens[cursor], tokens[cursor + 1 :], repo, command_aliases
+
+
+def configured_alias(
+    repo: Path,
+    name: str,
+    command_aliases: dict[str, str],
+    runtime_aliases: dict[tuple[str | None, str], str],
+) -> str:
+    name = name.lower()
+    if name in command_aliases:
+        return command_aliases[name]
+    repo_key = str(repo.resolve(strict=False))
+    if (repo_key, name) in runtime_aliases:
+        return runtime_aliases[(repo_key, name)]
+    if (None, name) in runtime_aliases:
+        return runtime_aliases[(None, name)]
+    status, value = git(repo, "config", "--get", f"alias.{name}")
+    return value if status == 0 else ""
+
+
+def resolve_git_alias(
+    verb: str,
+    arguments: list[str],
+    repo: Path,
+    command_aliases: dict[str, str],
+    runtime_aliases: dict[tuple[str | None, str], str],
+) -> tuple[str, list[str], str | None]:
+    """Resolve normal aliases to a git verb and return shell aliases for inspection."""
+    seen: set[str] = set()
+    for _ in range(MAX_SHELL_DEPTH):
+        name = verb.lower()
+        if name in POLICY_GIT_BUILTINS:
+            return verb, arguments, None
+        if name in seen:
+            raise ShellInspectionLimit
+        seen.add(name)
+        expansion = configured_alias(repo, name, command_aliases, runtime_aliases)
+        if not expansion:
+            return verb, arguments, None
+        if expansion.startswith("!"):
+            shell = expansion[1:].strip()
+            if arguments:
+                shell = f"{shell} {shlex.join(arguments)}"
+            return verb, arguments, shell
+        parts = shlex.split(expansion)
+        if not parts:
+            return verb, arguments, None
+        verb, arguments = parts[0], parts[1:] + arguments
+    raise ShellInspectionLimit
+
+
+def alias_config_write(arguments: list[str]) -> tuple[bool, str, str] | None:
+    """Return scope, alias name, and value for a simple alias-setting config action."""
+    if any(
+        token in {"--get", "--get-all", "--unset", "--unset-all", "--remove-section"}
+        for token in arguments
+    ):
+        return None
+    global_scope = "--global" in arguments or "--system" in arguments
+    positionals = [token for token in arguments if not token.startswith("-")]
+    if positionals and positionals[0] in {"set", "add"}:
+        positionals = positionals[1:]
+    if len(positionals) < 2 or not positionals[0].lower().startswith("alias."):
+        return None
+    name = positionals[0].split(".", 1)[1].lower()
+    return global_scope, name, positionals[1]
 
 
 def current_branch(repo: Path) -> str:
@@ -319,19 +440,73 @@ def is_pushed_head(repo: Path) -> bool:
 
 
 def normalized_executable(token: str) -> str:
-    name = Path(token).name
-    if name.startswith("gh-axi@"):
-        return "gh-axi"
-    return name
+    return Path(token).name
+
+
+def api_creates_pull_request(arguments: list[str]) -> bool:
+    endpoint = ""
+    method = ""
+    has_body = False
+    cursor = 0
+    options_with_values = {
+        "-H",
+        "--header",
+        "--hostname",
+        "--preview",
+        "--cache",
+    }
+    while cursor < len(arguments):
+        token = arguments[cursor]
+        if token in {"-X", "--method"} and cursor + 1 < len(arguments):
+            method = arguments[cursor + 1].upper()
+            cursor += 2
+            continue
+        if token.startswith("--method="):
+            method = token.split("=", 1)[1].upper()
+            cursor += 1
+            continue
+        if token in {"-f", "-F", "--field", "--raw-field", "--input"}:
+            has_body = True
+            cursor += 2
+            continue
+        if token.startswith(("-f", "-F")) and len(token) > 2:
+            has_body = True
+            cursor += 1
+            continue
+        if token.startswith(("--field=", "--raw-field=", "--input=")):
+            has_body = True
+            cursor += 1
+            continue
+        if token in options_with_values:
+            cursor += 2
+            continue
+        if any(token.startswith(f"{option}=") for option in options_with_values):
+            cursor += 1
+            continue
+        if not token.startswith("-") and not endpoint:
+            endpoint = token.lstrip("/")
+        cursor += 1
+
+    if endpoint == "graphql":
+        return any(GRAPHQL_CREATE_PULL_REQUEST.search(token) for token in arguments)
+    effective_method = method or ("POST" if has_body else "GET")
+    return effective_method == "POST" and bool(REST_PULLS_ENDPOINT.fullmatch(endpoint))
 
 
 def pr_action_count(tokens: list[str]) -> int:
     count = 0
     for index, token in enumerate(tokens):
-        if normalized_executable(token) not in {"gh", "gh-axi"}:
+        if normalized_executable(token) != "gh":
             continue
-        for cursor in range(index + 1, len(tokens) - 1):
-            if tokens[cursor] == "pr" and tokens[cursor + 1] in {"create", "ready"}:
+        for cursor in range(index + 1, len(tokens)):
+            if (
+                tokens[cursor] == "pr"
+                and cursor + 1 < len(tokens)
+                and tokens[cursor + 1] in {"create", "ready"}
+            ):
+                count += 1
+                break
+            if tokens[cursor] == "api" and api_creates_pull_request(tokens[cursor + 1 :]):
                 count += 1
                 break
     return count
@@ -350,11 +525,36 @@ def default_sentinel(repo: Path) -> Path:
 
 
 def check(command: str, cwd: Path) -> int:
-    segments = shell_segments(command)
+    segments = deque(shell_segments(command))
     active_cwd = cwd
     pr_actions: list[Path] = []
+    variables: dict[str, str] = {}
+    runtime_aliases: dict[tuple[str | None, str], str] = {}
+    inspected_dynamic_shells = 0
+    inspected_dynamic_bytes = len(command)
+    inspection_budget = min(
+        MAX_INSPECTION_BYTES,
+        max(4096, len(command) * INSPECTION_BUDGET_FACTOR),
+    )
 
-    for tokens in segments:
+    while segments:
+        recorded_tokens = segments.popleft()
+        tokens, _ = expand_recorded_variables(recorded_tokens, variables)
+        if not tokens:
+            continue
+        if tokens != recorded_tokens:
+            expanded_shell = nested_shell_command(tokens)
+            if expanded_shell is not None:
+                inspected_dynamic_shells += 1
+                inspected_dynamic_bytes += len(expanded_shell)
+                if (
+                    inspected_dynamic_shells > MAX_SHELL_DEPTH
+                    or inspected_dynamic_bytes > inspection_budget
+                ):
+                    raise ShellInspectionLimit
+                expanded_segments = shell_segments(expanded_shell)
+                for expanded_segment in reversed(expanded_segments):
+                    segments.appendleft(expanded_segment)
         if len(tokens) >= 2 and tokens[0] == "cd":
             active_cwd = segment_cwd(tokens, active_cwd)
             if len(tokens) == 2:
@@ -362,9 +562,37 @@ def check(command: str, cwd: Path) -> int:
 
         pr_actions.extend([active_cwd] * pr_action_count(tokens))
 
-        for verb, arguments, repo in git_actions(tokens, active_cwd):
+        for verb, arguments, repo, command_aliases in git_invocations(tokens, active_cwd):
+            verb, arguments, alias_shell = resolve_git_alias(
+                verb,
+                arguments,
+                repo,
+                command_aliases,
+                runtime_aliases,
+            )
+            if alias_shell is not None:
+                inspected_dynamic_shells += 1
+                inspected_dynamic_bytes += len(alias_shell)
+                if (
+                    inspected_dynamic_shells > MAX_SHELL_DEPTH
+                    or inspected_dynamic_bytes > inspection_budget
+                ):
+                    raise ShellInspectionLimit
+                alias_segments = shell_segments(alias_shell)
+                for alias_segment in reversed(alias_segments):
+                    segments.appendleft(alias_segment)
+                continue
+
             if verb == "push" and push_updates_protected(arguments, repo):
                 return block("this push can update main or master; push a work branch instead")
+
+            if verb == "config":
+                alias_write = alias_config_write(arguments)
+                if alias_write:
+                    global_scope, name, value = alias_write
+                    key = None if global_scope else str(repo.resolve(strict=False))
+                    runtime_aliases[(key, name)] = value
+                continue
 
             if verb != "commit":
                 continue
@@ -396,6 +624,16 @@ def check(command: str, cwd: Path) -> int:
     return 0
 
 
+def normalize_command(raw: object) -> str | None:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (list, tuple)):
+        if not all(isinstance(part, str) for part in raw):
+            return None
+        return shlex.join(raw)
+    return ""
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -404,9 +642,14 @@ def main() -> int:
 
     try:
         tool_input = payload.get("tool_input") or {}
-        command = tool_input.get("command") or tool_input.get("cmd") or ""
+        raw_command = tool_input.get("command")
+        if raw_command is None or raw_command == "":
+            raw_command = tool_input.get("cmd")
+        command = normalize_command(raw_command)
+        if command is None:
+            return block("argv-form command contained members that cannot be inspected safely")
         cwd = Path(payload.get("cwd") or os.getcwd())
-        if not isinstance(command, str) or not command:
+        if not command:
             return 0
         return check(command, cwd)
     except ShellInspectionLimit:

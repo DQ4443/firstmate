@@ -38,17 +38,25 @@ fm_supervision_status() {
     FM_SUP_IN_FLIGHT=$((FM_SUP_IN_FLIGHT + 1))
   done
 
-  beat="$state/.last-watcher-beat"
-  if [ -e "$beat" ]; then
+  # Supervision beacon: freshest of the escape-hatch watcher's beat and the
+  # launchd poller's beat (bin/fm-poll.sh, state/.last-poller-beat). The poller
+  # replaced the watcher as the standing supervisor at the paradigm cutover;
+  # recognizing only the watcher beat produced false SUPERVISION-OFF alarms
+  # (found live 2026-07-08 when PR-merge meta files raised in-flight above 0).
+  local freshest=
+  for beat in "$state/.last-watcher-beat" "$state/.last-poller-beat"; do
+    [ -e "$beat" ] || continue
     m=$(fm_sup_stat_mtime "$beat")
-    if [ -n "$m" ]; then
-      age=$(( $(date +%s) - m ))
-      FM_SUP_BEACON_DESC="${age}s ago"
-      [ "$age" -lt "$grace" ] && FM_SUP_WATCHER_FRESH=true
-    else
-      # shellcheck disable=SC2034 # Read by callers (fm-guard.sh) after sourcing.
-      FM_SUP_BEACON_DESC=unknown
-    fi
+    [ -n "$m" ] || continue
+    if [ -z "$freshest" ] || [ "$m" -gt "$freshest" ]; then freshest=$m; fi
+  done
+  if [ -n "$freshest" ]; then
+    age=$(( $(date +%s) - freshest ))
+    FM_SUP_BEACON_DESC="${age}s ago"
+    [ "$age" -lt "$grace" ] && FM_SUP_WATCHER_FRESH=true
+  elif [ -e "$state/.last-watcher-beat" ] || [ -e "$state/.last-poller-beat" ]; then
+    # shellcheck disable=SC2034 # Read by callers (fm-guard.sh) after sourcing.
+    FM_SUP_BEACON_DESC=unknown
   fi
 
   # shellcheck disable=SC2034 # Read by callers (fm-guard.sh) after sourcing.

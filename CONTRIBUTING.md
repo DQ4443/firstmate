@@ -1,42 +1,31 @@
 # Contributing
 
 Thanks for wanting to contribute.
-One rule up front:
-
-**Human-authored pull requests targeting `main` must be raised through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes).**
-We require this to reduce the maintainer's burden of reviewing and merging contributions.
-
-`no-mistakes` puts a local git proxy in front of your real remote.
-Pushing through it runs an AI-driven review/test/lint pipeline in an isolated worktree, forwards the push upstream only after every check passes, and opens a clean PR automatically.
-
-A GitHub Actions check (`Require no-mistakes`) runs on PRs targeting `main` and fails if the body is missing the deterministic signature that no-mistakes writes.
-Dependency bots are exempt so their automation keeps working, but regular contributor PRs without the signature will not be reviewed or merged.
+Firstmate accepts ordinary GitHub pull requests targeting `main`.
 
 ## Workflow
 
-1. Fork the repo, then clone the parent repo or set your local `origin` back to the parent (`git@github.com:kunchenguid/firstmate.git`).
-2. Create a branch and make your changes.
-3. Initialize the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/firstmate.git` (firstmate expects **no-mistakes v1.31.2+**; without a fork, plain `no-mistakes init` still works for maintainers with push access).
-4. Commit your changes.
-5. Push through the gate instead of pushing to `origin`:
+1. Fork the repository and clone your fork.
+2. Create a feature branch from the latest `main`.
+3. Make the change and run the relevant checks from the Development section below.
+4. Commit the validated change.
+5. Push the branch to your fork with native Git:
 
    ```sh
-   git push no-mistakes
+   git push -u origin <branch>
    ```
 
-6. Run `no-mistakes` to attach to the pipeline, watch findings, authorize auto-fixes, and review ask-user findings as needed.
-   Follow the installed no-mistakes version's SKILL.md and live `axi` help for gate mechanics.
-7. Once the pipeline passes, it pushes the branch to your fork and opens the PR against the parent repo for you.
-
-See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/start-here/quick-start/) for the full first-run walkthrough.
+6. Open a GitHub pull request from that branch to `kunchenguid/firstmate:main`.
+7. Keep the branch current while the shell lint, behavior tests, repository invariants, and review checks run.
 
 ## Repo conventions
 
 - This repo is a template for running a firstmate orchestrator agent.
-  `AGENTS.md` is the agent's main job description and names when to load bundled firstmate skills; `CLAUDE.md` is a symlink to it, and `.claude/skills` is a symlink to `.agents/skills`.
-- Only shared material is tracked: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, and `skills/`.
+  `AGENTS.md` is the Codex harness contract and `CLAUDE.md` is the frozen Claude harness contract; each is that harness's main job description and names when to load bundled firstmate skills.
+  `CLAUDE.md` used to be a symlink to `AGENTS.md`, but the two contracts have diverged and it is now a tracked regular file; `.claude/skills` is still a symlink to `.agents/skills`.
+- Only shared material is tracked: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, `skills/`, `.codex/` (Codex harness config, roles, and hooks), and the single canonical component library `data/operating-model/components/david-warm.html`.
   `.agents/skills/` holds agent-loaded skills that assume a live firstmate home and carry `metadata.internal: true` so installers such as [skills.sh](https://skills.sh) hide them from discovery; `skills/` holds standalone, installer-facing public skills with no firstmate dependency (see the README's "Two-tier skill layout").
-  Everything personal to one captain's fleet (`.env`, `data/`, `state/`, `config/`, `projects/`, `.no-mistakes/`) is gitignored; never commit it.
+  Everything personal to one captain's fleet (`.env`, `data/`, `state/`, `config/`, `projects/`, `.no-mistakes/`) is gitignored; never commit it, with the one carved-out exception of the tracked `data/operating-model/components/david-warm.html` component library.
   The root `.tasks.toml` is tracked `tasks-axi` config for `data/backlog.md`; compatible `tasks-axi` is the default backend for routine backlog mutations.
   A local `config/backlog-backend=manual` opt-out forces hand-editing and stays gitignored.
   A local `config/backend` file explicitly overrides runtime auto-detection for new task endpoints and stays gitignored; spawn-supported values are `tmux` plus experimental `herdr`, `zellij`, `orca`, and `cmux`.
@@ -53,23 +42,22 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 
 ## Development
 
-Tracked changes to firstmate itself - `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, and `skills/` - ship through the `no-mistakes` pipeline on a feature branch and require an explicit merge approval.
+Tracked changes to firstmate itself - `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, `skills/`, `.codex/`, and `data/operating-model/components/david-warm.html` - use an isolated feature branch, the build and submit workflows, and a native GitHub pull request with explicit push, pull-request, and merge approval.
 Before making any such change, load the agent-only `firstmate-coding-guidelines` skill (`.agents/skills/firstmate-coding-guidelines/SKILL.md`).
 It has the knowledge-placement rules that keep `AGENTS.md` from regrowing after each diet pass.
 There is no reliable way for `bin/fm-brief.sh`'s scaffold to detect that a task's repo is firstmate itself, so firstmate adds this skill's load line to firstmate-repo briefs by hand.
 A crewmate picking up such a brief should load the skill even if the brief predates this instruction.
 When supervising live crewmates, keep firstmate's own long validation or build commands in the background so watcher wakes can still be handled.
-Crewmate validation follows the installed no-mistakes version's SKILL.md and live `axi` help instead of duplicating gate mechanics in firstmate docs.
-Firstmate's wrapper still matters: `ask-user` findings route to the captain through firstmate, and crewmates avoid `--yes` because it silently resolves captain-owned decisions without escalation.
-Local `.no-mistakes/` state and test evidence stay out of this repo; `.no-mistakes.yaml` keeps evidence in a temp directory and pins the gate's test command to the same bash behavior suite as CI.
-That is firstmate-specific; do not commit `.no-mistakes/evidence/` here even when another no-mistakes-managed target project keeps committed PR evidence.
+Crewmate validation follows the build workflow and the repository checks below before the submit workflow reviews the native GitHub pull-request diff.
+Captain-owned findings and outward actions still require escalation and explicit approval.
+Local `.no-mistakes/` state remains gitignored for downstream project-mode compatibility, so do not commit `.no-mistakes/evidence/` here.
 
 Check and test the toolbelt before pushing:
 
 ```sh
 for script in bin/*.sh bin/backends/*.sh; do bash -n "$script"; done   # syntax-check the toolbelt
 shellcheck bin/*.sh bin/backends/*.sh tests/*.sh   # lint the toolbelt and behavior tests; CI enforces this
-for test_script in tests/*.test.sh; do bash "$test_script"; done   # behavior tests, matching CI and no-mistakes commands.test
+for test_script in tests/*.test.sh; do bash "$test_script"; done   # behavior tests, matching CI
 tests/fm-wake-queue.test.sh               # durable wake queue losslessness, catch-up, double-drain, duplicate-collapse, and drain liveness guard tests
 tests/fm-watcher-lock.test.sh             # watcher singleton, lock-race, watch-arm liveness, and guard-warning tests
 tests/fm-turnend-guard.test.sh            # shared supervision predicate plus Claude Stop-hook scoping, loop guard, fail-open, and live watcher health tests
@@ -100,7 +88,8 @@ tests/fm-secondmate-lifecycle-e2e.test.sh # persistent secondmate routing, seedi
 tests/fm-secondmate-safety.test.sh        # secondmate home safety, idle charter, handoff validation, and teardown boundary tests
 tests/fm-teardown.test.sh                 # fm-teardown.sh landed-work safety and reminder checks: fork-remote allow, squash/content landings, dirty and unlanded refusals, PR-head metadata, no-pr= branch discovery, tasks-axi/manual backlog reminder, --force override
 tests/fm-review-diff.test.sh              # fm-review-diff.sh authoritative review diff coverage: recorded pr_head=, fetched refs/pull/<n>/head, no-pr local branch behavior, and warning fallback
-tests/fm-pr-merge.test.sh                 # fm-pr-merge.sh records pr= and available pr_head= before merging, parses PR URLs into gh-axi number/--repo calls, defaults to squash, preserves explicit merge methods, rejects malformed URLs and repo overrides, and propagates real merge failures
+tests/fm-pr-merge.test.sh                 # fm-pr-merge.sh records pr= and available pr_head= before merging, parses PR URLs into native gh pr merge number/--repo calls, defaults to squash, preserves explicit merge methods, rejects malformed URLs and repo overrides, and propagates real merge failures
+tests/native-gh-policy.test.sh            # active policy and docs use native gh, per-PR bucket parsing, exact-head rollups, and non-vacuous CodeRabbit PASS semantics
 tests/fm-crew-state.test.sh               # fm-crew-state.sh current-state reconciliation: run-step authority including closed panes, stale needs-decision/blocked superseded by a resumed run, genuine-parked, cross-branch runs-list attribution, bounded run-lookup retry/backoff recovering a raced `axi status` or coarse runs-list lookup, pane/status-log fallback, scout skip, torn-down/missing-meta graceful
 tests/fm-backend.test.sh                  # runtime-backend abstraction: fm-backend.sh selection/meta/dispatch helpers, shell-portable sourced backend matching, and old-vs-new fake-tool command-log conformance for fm-send/fm-peek/fm-spawn/fm-teardown
 tests/fm-backend-tmux-smoke.test.sh       # real (private-socket) tmux smoke test for the tmux adapter: create/duplicate-refuse, new-window trailing-colon session target (renumber-windows index-in-use guard), send text + Enter, send literal + key, bounded capture, live-window resolve, kill
@@ -116,7 +105,19 @@ tests/fm-backend-orca.test.sh             # fake Orca CLI unit tests for primiti
 tests/cmux-test-safety.sh                 # guarded cleanup helper for real-cmux tests, refusing to close anything except a matching fm-test- workspace
 tests/fm-backend-cmux.test.sh             # fake cmux CLI unit tests for the experimental cmux adapter, including socket auth, title scoping, target recovery, fresh-surface liveness, current-path probing, structural composer verification, and secondmate refusal
 tests/fm-backend-cmux-smoke.test.sh       # real cmux adapter smoke test, skipped when cmux or jq is unavailable or the socket is not password-mode authenticated, using fm-test- workspaces and guarded cleanup
-[ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
+tests/codex-harness-contract-split.test.sh # Codex and frozen Claude harness contracts (AGENTS.md vs CLAUDE.md) are mechanically split and do not cross-reference
+tests/codex-jim-source-structure.test.sh  # Jim source-fidelity structure gate: required modules, canonical ledger fields, and source-hash/adaptation-carrier match
+tests/codex-jim-evidence-contract.test.sh # Jim evidence semantics, laptop cap, side-claim parity, and the canonical E0-E5 badge carrier
+tests/codex-jim-execution-config.test.sh  # installed Codex config loader resolves the root AGENTS contract, all nine pipeline skills, and every role config target (skipped when the codex CLI is absent)
+tests/codex-jim-git-guard.test.sh         # .codex git-guard hook: worktree write fence, nested-eval fail-closed inspection, and its timing bound
+tests/codex-jim-lavish.test.sh            # deterministic Lavish component/contract suite: decision-zone checkbox behavior, oat mermaid verification, and warm-component carriers
+tests/codex-jim-recon-skills.test.sh      # adversarial recon (explore/scout/websearch) structure, sectioned triggers, MEASURED experiment rules, and effort contracts
+tests/codex-jim-rig-atlas.test.sh         # rig-atlas: complete atlas, source re-derivation, live-file gates, adapted memories, leak scan, tamper verification, and module mutations
+tests/codex-jim-submit-skills.test.sh     # submit/build skill triggers (five positive, three negative) and the 24 binary eval rules are enumerated
+tests/pdw-effort-router.test.sh           # pdw effort router: Ultra gate, unsupported-fallback protection, and unknown-effort rejection
+tests/pdw-external-launcher.test.sh       # pdw external codex exec launcher: HEAD/clean-descendant-commit requirement, nested-repo rejection, and sandbox-mode match to the role TOML
+tests/pdw-report-back.test.sh             # pdw report-back transport and report-lock: dead-holder reclaim, live-holder protection, and the owning-task durable-retry wake contract
+[ -f CLAUDE.md ] && [ ! -L CLAUDE.md ]   # CLAUDE.md is a frozen regular file, no longer a symlink to AGENTS.md
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 tmp=$(mktemp -d) && printf 'done: smoke\n' > "$tmp/smoke.status" && FM_STATE_OVERRIDE="$tmp" FM_SIGNAL_GRACE=1 FM_POLL=1 FM_HEARTBEAT=999999 bin/fm-watch-arm.sh  # watcher re-arm smoke test (prints arm status, then an actionable signal)
 ```

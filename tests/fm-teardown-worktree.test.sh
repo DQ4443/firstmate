@@ -20,13 +20,13 @@ TMP=$(fm_test_tmproot fm-teardown-wt)
 mkdir -p "$TMP"
 TMP=$(cd "$TMP" && pwd -P)
 
-# Isolate all firstmate state and shadow gh/gh-axi so the landed check never
+# Isolate all firstmate state and shadow gh so the landed check never
 # reaches the network (no origin remote -> the PR path returns "no PR" and the
 # content check decides).
 export FM_HOME="$TMP/home"
 mkdir -p "$FM_HOME/state" "$FM_HOME/data" "$FM_HOME/config"
 FAKEBIN=$(fm_fakebin "$TMP")
-fm_fake_exit0 "$FAKEBIN" gh gh-axi
+fm_fake_exit0 "$FAKEBIN" gh
 export PATH="$FAKEBIN:$PATH"
 
 # run_teardown_wt <path> [--force]; returns exit code, output on $OUT.
